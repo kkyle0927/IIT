@@ -1,0 +1,6 @@
+[submodule "Framework/lib/serial_dop_comm"]
+	path = Framework/lib/serial_dop_comm
+	url = https://github.com/AGR-SW/serial_dop_comm
+[submodule "Framework/lib/multi_device_driver"]
+	path = Framework/lib/multi_device_driver
+	url = https://github.com/AGR-SW/multi_device_driver

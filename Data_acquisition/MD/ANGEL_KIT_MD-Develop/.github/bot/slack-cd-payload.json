@@ -1,0 +1,75 @@
+{
+  "text": "[angel'a] API 서비스 배포 결과: ${{ env.STATUS_TEXT }} ﹣ 클릭하셔서 자세한 내용을 확인해주세요👩‍⚕️",
+	"blocks": [
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": ":rocket: API 서비스 배포 결과: ${{ env.STATUS_TEXT }} :rocket:",
+				"emoji": true
+			}
+		},
+		{
+			"type": "section",
+			"fields": [
+				{
+					"type": "mrkdwn",
+					"text": "*Project:*\n<${{ env.REPOSITORY_PATH }}|${{ env.REPOSITORY_NAME }}>"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"fields": [
+				{
+					"type": "mrkdwn",
+					"text": "*Container:*\n`${{ env.CONTAINER_IMAGE }}`"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"fields": [
+				{
+					"type": "mrkdwn",
+					"text": "*Digest:*\n`${{ env.CONTAINER_DIGEST }}`"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"fields": [
+				{
+					"type": "mrkdwn",
+					"text": "*Target Branch:*\n`${{ env.MERGED_BRANCH }}`"
+				}
+			]
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "actions",
+			"elements": [
+				{
+					"type": "button",
+					"text": {
+						"type": "plain_text",
+						"text": "워크플로우 로그 보기 🔍",
+						"emoji": true
+					},
+					"url": "${{ env.CD_WORKFLOW_LOGS_URL }}"
+				},
+				{
+					"type": "button",
+					"text": {
+						"type": "plain_text",
+						"text": "머지된 PR 보기 💾",
+						"emoji": true
+					},
+					"url": "${{ env.MERGED_FILES_CHANGED }}"
+				}
+			]
+		}
+	]
+}

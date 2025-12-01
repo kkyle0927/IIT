@@ -1,0 +1,65 @@
+{
+  "text": "[angel'a] API 서비스 테스트 결과: ${{ env.STATUS_TEXT }} ﹣ 클릭하셔서 자세한 내용을 확인해주세요👩‍⚕️",
+	"blocks": [
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "API 서비스 테스트 결과: ${{ env.STATUS_TEXT }}",
+				"emoji": true
+			}
+		},
+		{
+			"type": "section",
+			"fields": [
+				{
+					"type": "mrkdwn",
+					"text": "*PR 링크:*\n<${{ env.PULL_REQUEST_URL }}|${{ env.PULL_REQUEST_TITLE }}>"
+				},
+				{
+					"type": "mrkdwn",
+					"text": "*테스트 상태:*\n`${{ env.PULL_REQUEST_JOB_STATUS }}`"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"fields": [
+				{
+					"type": "mrkdwn",
+					"text": "*작성자:*\n<${{ env.PULL_REQUEST_AUTHOR_URL }}|${{ env.PULL_REQUEST_AUTHOR }}>"
+				},
+				{
+					"type": "mrkdwn",
+					"text": "*이벤트:*\n`${{ env.PULL_REQUEST_EVENT_NAME }}`"
+				}
+			]
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "actions",
+			"elements": [
+				{
+					"type": "button",
+					"text": {
+						"type": "plain_text",
+						"text": "워크플로우 로그 보기 🔍",
+						"emoji": true
+					},
+					"url": "${{ env.PULL_REQUEST_LOGS_URL }}"
+				},
+        {
+          "type": "button",
+					"text": {
+						"type": "plain_text",
+						"text": "파일 변경사항 보기 💾",
+						"emoji": true
+					},
+					"url": "${{ env.PULL_REQUEST_FILES_CHANGED }}"
+        }
+			]
+		}
+	]
+}
