@@ -1,0 +1,4 @@
+../XM_FW/Devices/Marveldex/MDAF-25-6850.c:96:13:initialize	1
+../XM_FW/Devices/Marveldex/MDAF-25-6850.c:114:16:get_sensor_index	3
+../XM_FW/Devices/Marveldex/MDAF-25-6850.c:124:13:callback	12
+../XM_FW/Devices/Marveldex/MDAF-25-6850.c:202:13:parsing	2

@@ -1,0 +1,3 @@
+../Compatible/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_compatible.c:19:6:OTG_FS_EP1_OUT_IRQHandler	4
+../Compatible/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_compatible.c:54:6:OTG_FS_EP1_IN_IRQHandler	4
+../Compatible/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_compatible.c:89:6:OTG_FS_IRQHandler	4

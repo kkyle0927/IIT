@@ -1,0 +1,7 @@
+../XM_FW/System/Board/LED/led_manager.c:85:6:LedManager_InitLinkStatusLeds	1
+../XM_FW/System/Board/LED/led_manager.c:99:6:LedManager_SetLinkState	7
+../XM_FW/System/Board/LED/led_manager.c:148:6:LedManager_InitUserLeds	2
+../XM_FW/System/Board/LED/led_manager.c:160:6:LedManager_SetUserLedMode	5
+../XM_FW/System/Board/LED/led_manager.c:180:6:LedManager_Update	5
+../XM_FW/System/Board/LED/led_manager.c:213:13:_ApplyRgbColor	4
+../XM_FW/System/Board/LED/led_manager.c:221:13:_UpdateSingleLed	16

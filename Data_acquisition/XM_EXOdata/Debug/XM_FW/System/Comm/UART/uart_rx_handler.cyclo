@@ -1,0 +1,5 @@
+../XM_FW/System/Comm/UART/uart_rx_handler.c:87:6:UartRxHandler_Init	2
+../XM_FW/System/Comm/UART/uart_rx_handler.c:114:6:Uart4Rx_XsensIMU_Init	1
+../XM_FW/System/Comm/UART/uart_rx_handler.c:140:13:StartUartRxTask	5
+../XM_FW/System/Comm/UART/uart_rx_handler.c:174:13:_OnFsrPacketReceived	2
+../XM_FW/System/Comm/UART/uart_rx_handler.c:187:13:_OnImuPacketReceived	2

@@ -1,0 +1,12 @@
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:165:15:ioif_adc_assign_instance	10
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:212:15:ioif_adc_release_instance	8
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:238:15:ioif_adc_get_value	15
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:291:22:_ioif_adc_get_value_dma_oneshot	14
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:344:22:_ioif_adc_get_value_polling	5
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:374:24:_ioif_adc_convert_resolution	6
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:391:38:_ioif_adc_convert_method	3
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:403:36:_ioif_adc_find_handler	5
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:424:6:HAL_ADC_ConvCpltCallback	4
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:433:6:HAL_ADC_ConvHalfCpltCallback	1
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:441:6:HAL_ADC_LevelOutOfWindowCallback	1
+../XM_FW/IOIF/Src/ioif_agrb_adc.c:449:6:HAL_ADC_ErrorCallback	4

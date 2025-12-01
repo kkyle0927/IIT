@@ -1,0 +1,12 @@
+../XM_FW/XM_API/xm_api_usb.c:78:6:XM_SetUsbLogSource	3
+../XM_FW/XM_API/xm_api_usb.c:86:6:XM_SetUsbStreamSource	3
+../XM_FW/XM_API/xm_api_usb.c:101:6:XM_IsUsbLogReady	1
+../XM_FW/XM_API/xm_api_usb.c:110:6:XM_StartUsbDataLog	2
+../XM_FW/XM_API/xm_api_usb.c:121:6:XM_StopUsbDataLog	2
+../XM_FW/XM_API/xm_api_usb.c:140:15:XM_GetUsbLogStatus	2
+../XM_FW/XM_API/xm_api_usb.c:152:6:XM_IsUsbStreamConnected	1
+../XM_FW/XM_API/xm_api_usb.c:157:6:XM_IsUsbStreamingActive	1
+../XM_FW/XM_API/xm_api_usb.c:164:6:XM_SendUsbData	2
+../XM_FW/XM_API/xm_api_usb.c:172:6:XM_SendUsbDebugMessage	2
+../XM_FW/XM_API/xm_api_usb.c:179:10:XM_GetUsbData	2
+../XM_FW/XM_API/xm_api_usb.c:189:6:XM_USB_ProcessPeriodic	9

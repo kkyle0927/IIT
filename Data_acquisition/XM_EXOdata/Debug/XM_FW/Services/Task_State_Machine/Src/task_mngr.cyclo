@@ -1,0 +1,4 @@
+../XM_FW/Services/Task_State_Machine/Src/task_mngr.c:60:14:TaskMngr_Create	2
+../XM_FW/Services/Task_State_Machine/Src/task_mngr.c:81:6:TaskMngr_AddState	2
+../XM_FW/Services/Task_State_Machine/Src/task_mngr.c:91:6:TaskMngr_Run	4
+../XM_FW/Services/Task_State_Machine/Src/task_mngr.c:113:6:TaskMngr_Transition	2

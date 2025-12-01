@@ -1,0 +1,5 @@
+../XM_FW/XM_API/xm_api_external_io.c:64:6:XM_SetPinMode	1
+../XM_FW/XM_API/xm_api_external_io.c:70:6:XM_DigitalWrite	1
+../XM_FW/XM_API/xm_api_external_io.c:75:16:XM_DigitalRead	1
+../XM_FW/XM_API/xm_api_external_io.c:80:10:XM_AnalogRead	1
+../XM_FW/XM_API/xm_api_external_io.c:91:6:XM_EnableExternalImu	1
