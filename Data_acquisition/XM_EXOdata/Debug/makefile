@@ -73,40 +73,40 @@ $(wildcard ../makefile.init) \
 $(wildcard ../makefile.targets) \
 
 
-BUILD_ARTIFACT_NAME := XM_EXOdata
+BUILD_ARTIFACT_NAME := Extension_Module
 BUILD_ARTIFACT_EXTENSION := elf
 BUILD_ARTIFACT_PREFIX :=
 BUILD_ARTIFACT := $(BUILD_ARTIFACT_PREFIX)$(BUILD_ARTIFACT_NAME)$(if $(BUILD_ARTIFACT_EXTENSION),.$(BUILD_ARTIFACT_EXTENSION),)
 
 # Add inputs and outputs from these tool invocations to the build variables 
 EXECUTABLES += \
-XM_EXOdata.elf \
+Extension_Module.elf \
 
 MAP_FILES += \
-XM_EXOdata.map \
+Extension_Module.map \
 
 SIZE_OUTPUT += \
 default.size.stdout \
 
 OBJDUMP_LIST += \
-XM_EXOdata.list \
+Extension_Module.list \
 
 OBJCOPY_HEX += \
-XM_EXOdata.hex \
+Extension_Module.hex \
 
 OBJCOPY_BIN += \
-XM_EXOdata.bin \
+Extension_Module.bin \
 
 
 # All Target
 all: main-build
 
 # Main-build Target
-main-build: XM_EXOdata.elf secondary-outputs
+main-build: Extension_Module.elf secondary-outputs
 
 # Tool invocations
-XM_EXOdata.elf XM_EXOdata.map: $(OBJS) $(USER_OBJS) C:\Users\ChanyoungKo\STM32CubeIDE\workspace_1.14.1\XM_EXOdata\STM32H743XIHX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "XM_EXOdata.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Users\ChanyoungKo\STM32CubeIDE\workspace_1.14.1\XM_EXOdata\STM32H743XIHX_FLASH.ld" --specs=nosys.specs -Wl,-Map="XM_EXOdata.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
+Extension_Module.elf Extension_Module.map: $(OBJS) $(USER_OBJS) C:\Github\IIT\Data_acquisition\XM_EXOdata\STM32H743XIHX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Extension_Module.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m7 -T"C:\Github\IIT\Data_acquisition\XM_EXOdata\STM32H743XIHX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Extension_Module.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
@@ -115,24 +115,24 @@ default.size.stdout: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
 	@echo 'Finished building: $@'
 	@echo ' '
 
-XM_EXOdata.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "XM_EXOdata.list"
+Extension_Module.list: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objdump -h -S $(EXECUTABLES) > "Extension_Module.list"
 	@echo 'Finished building: $@'
 	@echo ' '
 
-XM_EXOdata.hex: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objcopy  -O ihex $(EXECUTABLES) "XM_EXOdata.hex"
+Extension_Module.hex: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objcopy  -O ihex $(EXECUTABLES) "Extension_Module.hex"
 	@echo 'Finished building: $@'
 	@echo ' '
 
-XM_EXOdata.bin: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "XM_EXOdata.bin"
+Extension_Module.bin: $(EXECUTABLES) makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-objcopy  -O binary $(EXECUTABLES) "Extension_Module.bin"
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
-	-$(RM) XM_EXOdata.bin XM_EXOdata.elf XM_EXOdata.hex XM_EXOdata.list XM_EXOdata.map default.size.stdout
+	-$(RM) Extension_Module.bin Extension_Module.elf Extension_Module.hex Extension_Module.list Extension_Module.map default.size.stdout
 	-@echo ' '
 
 secondary-outputs: $(SIZE_OUTPUT) $(OBJDUMP_LIST) $(OBJCOPY_HEX) $(OBJCOPY_BIN)

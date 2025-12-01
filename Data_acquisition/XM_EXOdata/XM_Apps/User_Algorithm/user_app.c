@@ -452,6 +452,10 @@ static void Standby_Loop(void)
 
 	if (Recording == Record_ON){
 		FillAndSendSavingData();
+		XM_SetLedEffect(3, XM_LED_HEARTBEAT, 1000);
+	}
+	else if (Recording == Record_OFF){
+		XM_SetLedEffect(3, XM_LED_OFF, 1000);
 	}
 
 
@@ -590,9 +594,12 @@ static void Active_Loop(void)
     s_prevEnable = currEnable;
 
     if (Recording == Record_ON){
+    	XM_SetLedEffect(3, XM_LED_HEARTBEAT, 1000);
         FillAndSendSavingData();
     }
-
+	else if (Recording == Record_OFF){
+		XM_SetLedEffect(3, XM_LED_OFF, 1000);
+	}
 }
 
 static void Active_Exit(void)
