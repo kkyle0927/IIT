@@ -5,3 +5,7 @@
 1764657738231	Rename resource 'XM_EXOdata'
 1764657757216	Rename resource '251202_Basic_XM'
 1764659685852	Delete resource 'XM_EXOdata_past'
+1764661713457	Delete resource 'XM_EXOdata/Debug'
+1764661717838	Delete 2 resources
+1764664275539	Rename resource 'Extension_Module'
+1764665064039	Delete resource 'XM_EXOdata_past'

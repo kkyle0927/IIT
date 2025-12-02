@@ -210,13 +210,13 @@ bool System_Switch_To_IMU_Mode(void)
     huart4_manual.Init.Mode = UART_MODE_TX_RX;
     huart4_manual.Init.HwFlowCtl = UART_HWCONTROL_NONE;
     huart4_manual.Init.OverSampling = UART_OVERSAMPLING_16;
-    
+
     // 4. MspInit 함수 바꿔치기 (이게 핵심!)
-    // HAL_UART_Init은 내부적으로 HAL_UART_MspInit을 호출하는데, 
+    // HAL_UART_Init은 내부적으로 HAL_UART_MspInit을 호출하는데,
     // 이를 우리가 만든 _Manual_UART4_MspInit으로 대체해야 함.
     // 하지만 weak 함수라 덮어쓰기가 애매하므로, 직접 호출하거나
     // HAL_UART_Init 호출 전에 MspInit을 먼저 수행하는 트릭을 씁니다.
-    
+
     _Manual_UART4_MspInit(&huart4_manual); // GPIO/DMA/Clock 설정
 
     if (HAL_UART_Init(&huart4_manual) != HAL_OK) {
@@ -229,12 +229,12 @@ bool System_Switch_To_IMU_Mode(void)
 		  .baudrate = IOIF_UART_Baudrate_921600,
           .rxMode = IOIF_UART_MODE_IDLE_EVENT,
 		  .bounce_buffer_size = 0, // (Idle 모드는 불필요)
-		  .rx_event_callback = NULL, 
+		  .rx_event_callback = NULL,
     };
 
     // s_uart4_id에 할당 (s_uart4_id는 static 변수이므로 접근 가능한 함수 필요하거나 여기서 처리)
     ioif_uart_assign_instance(&s_uart4_id, &huart4_manual, &imu_config);
-    
+
     // UartRxHandler에 알림 (재초기화)
     Uart4Rx_XsensIMU_Init(s_uart4_id);
 
@@ -462,7 +462,8 @@ static void _Manual_UART4_MspInit(UART_HandleTypeDef* huart)
         // PA0 -> UART4_TX, PA1 -> UART4_RX
         GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_1;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_PP; // 디지털 통신 모드
-        GPIO_InitStruct.Pull = GPIO_NOPULL;
+//        GPIO_InitStruct.Pull = GPIO_NOPULL;
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
         GPIO_InitStruct.Alternate = GPIO_AF8_UART4; // AF8이 UART4임 (Datasheet 확인)
         HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);

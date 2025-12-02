@@ -11,6 +11,7 @@
  */
 
 #include "xm_api.h"      // 통합 API 헤더
+#include "mti-630.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -336,23 +337,30 @@ void User_Setup(void)
     };
     XM_TSM_AddState(s_userHandle, &act_conf);
 
-    // 외부 XSENS IMU 사용 설정
-    if (XM_EnableExternalImu()) {
-        // IMU 활성화 성공! (이제 UART4로 데이터가 들어옴)
-        xsensIMUenableRes = true;
-    } else {
-        // 실패 처리 (이미 켜져있거나 하드웨어 오류)
-    }
+//    // 외부 XSENS IMU 사용 설정
+//    if (XM_EnableExternalImu()) {
+//        // IMU 활성화 성공! (이제 UART4로 데이터가 들어옴)
+//        xsensIMUenableRes = true;
+//    } else {
+//        // 실패 처리 (이미 켜져있거나 하드웨어 오류)
+//    }
 
     XM_SetPinMode(XM_EXT_DIO_3, XM_EXT_DIO_MODE_INPUT_PULLDOWN);
 
-    XM_SetControlMode(XM_CTRL_MONITOR);
 
     sync_signal = XM_LOW;
 	sync_signal_pre = XM_LOW;
 
 	FVecDecoder_Init();   // F-vector 버퍼 초기화
 	traj_id = FVECPROF_LF;
+
+    // 외부 XSENS IMU 사용 설정
+//    if (XM_EnableExternalImu()) {
+//        // IMU 활성화 성공! (이제 UART4로 데이터가 들어옴)
+//        xsensIMUenableRes = true;
+//    } else {
+//        // 실패 처리 (이미 켜져있거나 하드웨어 오류)
+//    }
 
 }
 
@@ -401,7 +409,27 @@ static void Disconnected_Loop(void)
 static void Standby_Entry(void)
 {
 
+    // XSENS IMU 부팅 시간 확보 (전원 인가 후 최소 150ms 필요)
+    HAL_Delay(150);
+
+    XM_SetControlMode(XM_CTRL_MONITOR);
+
+    // 아직 XSENS 초기화 안 된 경우에만 1회 수행
+    if (xsensIMUenableRes == false) {
+        if (XM_EnableExternalImu()) {
+
+            // Enable 성공 시 안정화 시간
+        	HAL_Delay(50);
+
+            // XSENS output 설정
+            xsensMTi630.ConfigureOutput();
+
+            xsensIMUenableRes = true;   // 초기화 완료
+        }
+    }
+
 }
+
 
 static void Standby_Loop(void)
 {
@@ -458,8 +486,17 @@ static void Standby_Loop(void)
 		XM_SetLedEffect(3, XM_LED_OFF, 1000);
 	}
 
-
 //    SetLedEffect(1, XM_LED_HEARTBEAT, 1000); // LED 심장박동
+
+
+
+	if (xsensIMUenableRes == false) {
+	    if (XM_EnableExternalImu()) {
+	    	HAL_Delay(50);
+	        xsensMTi630.ConfigureOutput();
+	        xsensIMUenableRes = true;
+	    }
+	}
 }
 
 static void Active_Entry(void)
