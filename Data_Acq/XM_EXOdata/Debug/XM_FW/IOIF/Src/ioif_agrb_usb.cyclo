@@ -1,0 +1,8 @@
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:110:15:ioif_usb_host_init	6
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:152:15:ioif_usb_host_deinit	2
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:184:6:ioif_usb_host_is_port_enabled	2
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:196:15:ioif_usb_device_init	7
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:246:15:ioif_usb_device_deinit	2
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:285:13:_internal_host_callback	2
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:296:13:_internal_cdc_tx_complete_callback	2
+../XM_FW/IOIF/Src/ioif_agrb_usb.c:307:13:_internal_cdc_rx_complete_callback	2

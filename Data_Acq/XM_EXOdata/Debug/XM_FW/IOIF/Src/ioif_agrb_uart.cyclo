@@ -1,0 +1,10 @@
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:108:15:ioif_uart_assign_instance	14
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:189:15:ioif_uart_start	5
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:224:15:ioif_uart_write	8
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:257:15:ioif_uart_update_rx_callback	5
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:286:15:ioif_uart_flush	18
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:308:13:_uart_rx_task	28
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:373:37:_get_instance	3
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:392:6:HAL_UART_TxCpltCallback	4
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:407:6:HAL_UARTEx_RxEventCallback	8
+../XM_FW/IOIF/Src/ioif_agrb_uart.c:434:6:HAL_UART_ErrorCallback	5
