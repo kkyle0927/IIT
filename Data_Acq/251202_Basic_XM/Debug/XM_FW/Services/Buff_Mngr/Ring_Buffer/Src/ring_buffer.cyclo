@@ -1,0 +1,7 @@
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:11:6:RingBufferCreate	1
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:21:6:RingBufferPush	4
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:49:6:RingBufferPop	5
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:75:6:RingBufferFlush	1
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:84:6:RingBufferIsFull	3
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:93:6:RingBufferIsEmpty	2
+../XM_FW/Services/Buff_Mngr/Ring_Buffer/Src/ring_buffer.c:102:6:RingBufferIsAvailable	3

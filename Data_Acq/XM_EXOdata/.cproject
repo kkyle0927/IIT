@@ -149,6 +149,9 @@
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.objcopy.symbolsrec.1758009702" name="MCU Output Converter Motorola S-rec with symbols" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.objcopy.symbolsrec"/>
 						</toolChain>
 					</folderInfo>
+					<fileInfo id="com.st.stm32cube.ide.mcu.gnu.managedbuild.config.exe.debug.1525319813.1513140892" name="user_app.c" rcbsApplicability="disable" resourcePath="XM_Apps/User_Algorithm/user_app.c" toolsToInvoke="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.889675186.1342637297">
+						<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.889675186.1342637297" name="MCU GCC Compiler" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.889675186"/>
+					</fileInfo>
 					<sourceEntries>
 						<entry excluding="Target/Driver_USBD.c|Target/Driver_USBH.c" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="CMSIS"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Compatible"/>
@@ -156,7 +159,7 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="FATFS"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Middlewares"/>
-						<entry excluding="User_Algorithm/f-vector_selection_and_trigger.c|User_Algorithm/button_led_fsm.c|Examples|Examples/03_Button_LED_FSM|Examples/02_Button_LED_Event|Examples/01_Button_LED_Basic|Examples/13_Resistive_Mode|Examples/10_MSC_Manual_log|Examples/09_CDC_Stream|Examples/08_CDC_Sensor_Print|Examples/07_CDC_Basic_Print|Examples/11_Passive_Mode|Examples/12_Active_Assist_Mode|Examples/15_XSENS_IMU|Examples/14_GRF_Module|Examples/06_Ext_IO_Safety_Switch|Examples/05_Ext_IO_analog|Examples/02_GPIO_ADC|Examples/05_Passive_Mode|Algorithm|Examples/04_USB_MSC_Logging|Examples/06_Active_Assist_Mode|Examples/08_Total_Mode_Application|Examples/07_Resistive_Mode|Examples/03_USB_CDC_Streaming" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="XM_Apps"/>
+						<entry excluding="User_Algorithm/button_led_fsm.c|Examples|Examples/03_Button_LED_FSM|Examples/02_Button_LED_Event|Examples/01_Button_LED_Basic|Examples/13_Resistive_Mode|Examples/10_MSC_Manual_log|Examples/09_CDC_Stream|Examples/08_CDC_Sensor_Print|Examples/07_CDC_Basic_Print|Examples/11_Passive_Mode|Examples/12_Active_Assist_Mode|Examples/15_XSENS_IMU|Examples/14_GRF_Module|Examples/06_Ext_IO_Safety_Switch|Examples/05_Ext_IO_analog|Examples/02_GPIO_ADC|Examples/05_Passive_Mode|Algorithm|Examples/04_USB_MSC_Logging|Examples/06_Active_Assist_Mode|Examples/08_Total_Mode_Application|Examples/07_Resistive_Mode|Examples/03_USB_CDC_Streaming" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="XM_Apps"/>
 						<entry excluding="BSP|Apps/Algorithm|Devices/Marveldex/legacy|IOIF/Legacy|Apps/Comm_Hdlr" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="XM_FW"/>
 					</sourceEntries>
 				</configuration>
@@ -258,7 +261,7 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="FATFS"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Middlewares"/>
-						<entry excluding="User_Algorithm/f-vector_selection_and_trigger.c|User_Algorithm/button_led_fsm.c|Examples|Examples/03_Button_LED_FSM|Examples/02_Button_LED_Event|Examples/01_Button_LED_Basic|Examples/13_Resistive_Mode|Examples/10_MSC_Manual_log|Examples/09_CDC_Stream|Examples/08_CDC_Sensor_Print|Examples/07_CDC_Basic_Print|Examples/11_Passive_Mode|Examples/12_Active_Assist_Mode|Examples/15_XSENS_IMU|Examples/14_GRF_Module|Examples/06_Ext_IO_Safety_Switch|Examples/05_Ext_IO_analog|Examples/02_GPIO_ADC|Examples/05_Passive_Mode|Algorithm|Examples/04_USB_MSC_Logging|Examples/06_Active_Assist_Mode|Examples/08_Total_Mode_Application|Examples/07_Resistive_Mode|Examples/03_USB_CDC_Streaming" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="XM_Apps"/>
+						<entry excluding="User_Algorithm/button_led_fsm.c|User_Algorithm/user_app.c|Examples|Examples/03_Button_LED_FSM|Examples/02_Button_LED_Event|Examples/01_Button_LED_Basic|Examples/13_Resistive_Mode|Examples/10_MSC_Manual_log|Examples/09_CDC_Stream|Examples/08_CDC_Sensor_Print|Examples/07_CDC_Basic_Print|Examples/11_Passive_Mode|Examples/12_Active_Assist_Mode|Examples/15_XSENS_IMU|Examples/14_GRF_Module|Examples/06_Ext_IO_Safety_Switch|Examples/05_Ext_IO_analog|Examples/02_GPIO_ADC|Examples/05_Passive_Mode|Algorithm|Examples/04_USB_MSC_Logging|Examples/06_Active_Assist_Mode|Examples/08_Total_Mode_Application|Examples/07_Resistive_Mode|Examples/03_USB_CDC_Streaming" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="XM_Apps"/>
 						<entry excluding="BSP|Apps/Algorithm|Devices/Marveldex/legacy|IOIF/Legacy|Apps/Comm_Hdlr" flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="XM_FW"/>
 					</sourceEntries>
 				</configuration>

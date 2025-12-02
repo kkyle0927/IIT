@@ -346,7 +346,7 @@ void User_Setup(void)
 
     XM_SetPinMode(XM_EXT_DIO_3, XM_EXT_DIO_MODE_INPUT_PULLDOWN);
 
-    XM_SetControlMode(XM_CTRL_TORQUE);
+    XM_SetControlMode(XM_CTRL_MONITOR);
 
     sync_signal = XM_LOW;
 	sync_signal_pre = XM_LOW;
@@ -464,7 +464,7 @@ static void Standby_Loop(void)
 
 static void Active_Entry(void)
 {
-
+	XM_SetControlMode(XM_CTRL_TORQUE);
 	if (SmartAssist == SmartAssist_ON){
 		XM_SetH10AssistExistingMode(true);
 	}

@@ -1,0 +1,2 @@
+../Compatible/USB_HOST/App/usb_host.c:70:6:MX_USB_HOST_Init	4
+../Compatible/USB_HOST/App/usb_host.c:97:13:USBH_UserProcess	4

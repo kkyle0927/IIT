@@ -1,0 +1,3 @@
+../XM_FW/System/Core/core_process.c:91:6:StartUserTask	2
+../XM_FW/System/Core/core_process.c:164:13:_FetchAllInputs	5
+../XM_FW/System/Core/core_process.c:312:13:_FlushAllOutputs	4

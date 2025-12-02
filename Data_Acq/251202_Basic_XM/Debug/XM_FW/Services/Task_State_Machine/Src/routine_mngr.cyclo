@@ -1,0 +1,4 @@
+../XM_FW/Services/Task_State_Machine/Src/routine_mngr.c:45:6:RoutineMngr_Init	2
+../XM_FW/Services/Task_State_Machine/Src/routine_mngr.c:52:6:RoutineMngr_Add	3
+../XM_FW/Services/Task_State_Machine/Src/routine_mngr.c:69:6:RoutineMngr_SetEnable	8
+../XM_FW/Services/Task_State_Machine/Src/routine_mngr.c:95:6:RoutineMngr_RunAll	5

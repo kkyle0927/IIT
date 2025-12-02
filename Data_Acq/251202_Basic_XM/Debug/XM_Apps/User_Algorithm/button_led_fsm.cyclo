@@ -1,0 +1,6 @@
+../XM_Apps/User_Algorithm/button_led_fsm.c:62:6:User_Setup	1
+../XM_Apps/User_Algorithm/button_led_fsm.c:84:6:User_Loop	1
+../XM_Apps/User_Algorithm/button_led_fsm.c:100:13:Standby_Entry	1
+../XM_Apps/User_Algorithm/button_led_fsm.c:106:13:Standby_Loop	2
+../XM_Apps/User_Algorithm/button_led_fsm.c:121:13:Active_Entry	1
+../XM_Apps/User_Algorithm/button_led_fsm.c:128:13:Active_Loop	2

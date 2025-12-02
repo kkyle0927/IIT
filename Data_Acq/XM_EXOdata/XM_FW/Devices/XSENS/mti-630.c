@@ -169,6 +169,7 @@ static void uart_callback(uint8_t* rx_buf, uint32_t size, uint32_t id)
     for (uint32_t i = 0; i < size; i++) {
         if (parse_byte(rx_buf[i])) {
             // true: 패킷 수신/검증 완료
+
             if (process_packet(&parsed_packet)) {
                 /* [수정] 큐에 넣는 대신, 등록된 콜백을 호출합니다. */
                 if (s_packet_callback != NULL) {

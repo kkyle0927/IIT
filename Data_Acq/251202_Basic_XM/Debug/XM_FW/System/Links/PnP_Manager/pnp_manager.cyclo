@@ -1,0 +1,4 @@
+../XM_FW/System/Links/PnP_Manager/pnp_manager.c:71:6:PnPManager_Init	2
+../XM_FW/System/Links/PnP_Manager/pnp_manager.c:91:6:PnPManager_RouteMessage	4
+../XM_FW/System/Links/PnP_Manager/pnp_manager.c:120:13:PnPManager_Task	3
+../XM_FW/System/Links/PnP_Manager/pnp_manager.c:144:13:PnPManager_RegisterModule	2
