@@ -1,9 +1,0 @@
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:113:15:ioif_gpio_assign_instance	7
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:146:15:ioif_gpio_reinitialize	23
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:233:15:ioif_gpio_set	3
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:251:15:ioif_gpio_reset	3
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:269:15:ioif_gpio_toggle	3
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:287:15:ioif_gpio_get_state	3
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:303:15:ioif_gpio_read_pin	2
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:324:24:_bit_to_index32	1
-../XM_FW/IOIF/Src/ioif_agrb_gpio.c:347:6:HAL_GPIO_EXTI_Callback	4
