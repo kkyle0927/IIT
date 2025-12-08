@@ -7,4 +7,6 @@ org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:251202_Basic_XM/activeLaunchMod
 org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:251202_Basic_XM/activeLaunchTarget=null\:---
 org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:Extension_Module/activeLaunchMode=debug
 org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:Extension_Module/activeLaunchTarget=null\:---
+org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:XM_EXOdata\ Debug/activeLaunchMode=debug
+org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:XM_EXOdata\ Debug/activeLaunchTarget=null\:---
 org.eclipse.cdt.dsf.gdb.gdbRemotedescriptorType\:XM_EXOdata/activeLaunchMode=run
