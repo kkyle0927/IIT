@@ -1,3 +1,6 @@
+# -----------------------------------------
+# Your existing rules
+# -----------------------------------------
 # Prerequisites
 *.d
 
@@ -22,7 +25,7 @@
 *.la
 *.lo
 
-# Shared objects (inc. Windows DLLs)
+# Shared objects
 *.dll
 *.so
 *.so.*
@@ -51,5 +54,51 @@ Module.symvers
 Mkfile.old
 dkms.conf
 
-# debug information files
+# Debug info
 *.dwo
+
+# -----------------------------------------
+# STM32CubeIDE / Eclipse-specific ignores
+# -----------------------------------------
+
+# Build directories (auto-generated)
+Debug/
+Release/
+
+# IDE metadata
+.metadata/
+.settings/*prefs
+.settings/org.eclipse.cdt.core/*.*
+.settings/org.eclipse.cdt.make.core/*.*
+.settings/org.eclipse.core.resources.prefs
+
+# STM32Cube auto-generated files
+*.launch
+*.uvprojx
+*.uvoptx
+*.uvguix
+*.mxproject
+
+# CubeMX build artifacts
+*.ioc-backup
+*.ioc.save
+
+# Temporary/Cache
+*.i
+*.s
+*.lst
+
+# Log files
+*.log
+
+# Exclude build analyzer caches
+*.bak
+*.tmp
+
+# -----------------------------------------
+# Optional: ignore automatically generated
+# linker scripts or listing outputs
+# (uncomment only if your team does not track them)
+# -----------------------------------------
+# *.ld
+# *.map
