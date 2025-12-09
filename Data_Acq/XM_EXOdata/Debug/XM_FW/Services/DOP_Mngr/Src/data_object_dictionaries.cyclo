@@ -1,5 +1,0 @@
-../XM_FW/Services/DOP_Mngr/Src/data_object_dictionaries.c:55:9:DOP_ConvertDataSize	11
-../XM_FW/Services/DOP_Mngr/Src/data_object_dictionaries.c:73:6:DOP_CreateSDOTable	1
-../XM_FW/Services/DOP_Mngr/Src/data_object_dictionaries.c:282:6:DOP_CreatePDOTable	1
-../XM_FW/Services/DOP_Mngr/Src/data_object_dictionaries.c:456:13:AssembleSDO	1
-../XM_FW/Services/DOP_Mngr/Src/data_object_dictionaries.c:462:13:AssemblePDO	1

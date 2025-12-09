@@ -1,7 +1,0 @@
-../XM_FW/Devices/XSENS/mti-630.c:108:13:initialize	1
-../XM_FW/Devices/XSENS/mti-630.c:126:13:ConfigureOutput	3
-../XM_FW/Devices/XSENS/mti-630.c:165:13:uart_callback	6
-../XM_FW/Devices/XSENS/mti-630.c:189:13:parse_byte	18
-../XM_FW/Devices/XSENS/mti-630.c:259:13:process_packet	2
-../XM_FW/Devices/XSENS/mti-630.c:272:14:_Xsens_ReverseFloat	1
-../XM_FW/Devices/XSENS/mti-630.c:287:13:parse_mtdata2	6

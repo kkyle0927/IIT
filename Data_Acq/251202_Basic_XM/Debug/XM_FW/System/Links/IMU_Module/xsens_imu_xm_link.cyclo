@@ -1,7 +1,0 @@
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:101:15:XsensIMU_XM_Link_GetModule	1
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:109:6:XsensIMU_XM_Link_IsConnected	1
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:118:6:XsensIMU_XM_Link_UpdateData	2
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:148:6:XsensIMU_XM_Link_GetLatest	3
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:176:13:_Link_Init	1
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:187:13:_Link_RunPeriodic	3
-../XM_FW/System/Links/IMU_Module/xsens_imu_xm_link.c:203:13:_Link_IsConnected	1

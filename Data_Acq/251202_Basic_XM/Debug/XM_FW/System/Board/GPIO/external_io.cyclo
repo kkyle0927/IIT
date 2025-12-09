@@ -1,5 +1,0 @@
-../XM_FW/System/Board/GPIO/external_io.c:67:6:ExternalIO_Init	5
-../XM_FW/System/Board/GPIO/external_io.c:95:6:ExternalIO_SetPinMode	6
-../XM_FW/System/Board/GPIO/external_io.c:127:6:ExternalIO_WritePin	3
-../XM_FW/System/Board/GPIO/external_io.c:138:6:ExternalIO_ReadPin	2
-../XM_FW/System/Board/GPIO/external_io.c:147:10:ExternalIO_ReadAdc	10

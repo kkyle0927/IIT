@@ -1,5 +1,0 @@
-../Compatible/FATFS/Target/usbh_diskio.c:76:9:USBH_initialize	1
-../Compatible/FATFS/Target/usbh_diskio.c:88:9:USBH_status	2
-../Compatible/FATFS/Target/usbh_diskio.c:116:9:USBH_read	17
-../Compatible/FATFS/Target/usbh_diskio.c:204:9:USBH_write	18
-../Compatible/FATFS/Target/usbh_diskio.c:294:9:USBH_ioctl	8

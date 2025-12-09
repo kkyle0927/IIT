@@ -1,8 +1,0 @@
-../XM_FW/System/Core/system_startup.c:164:6:System_Startup	1
-../XM_FW/System/Core/system_startup.c:180:15:System_GetFDCAN1_Id	1
-../XM_FW/System/Core/system_startup.c:188:5:System_Fdcan1_Transmit	1
-../XM_FW/System/Core/system_startup.c:195:6:System_Switch_To_IMU_Mode	2
-../XM_FW/System/Core/system_startup.c:250:6:StartStartupTask	2
-../XM_FW/System/Core/system_startup.c:283:13:_InitIoInterfaces	2
-../XM_FW/System/Core/system_startup.c:394:13:_InitSystemServices	1
-../XM_FW/System/Core/system_startup.c:446:13:_Manual_UART4_MspInit	2

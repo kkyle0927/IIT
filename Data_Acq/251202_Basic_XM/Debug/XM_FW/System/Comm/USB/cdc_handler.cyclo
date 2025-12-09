@@ -1,7 +1,0 @@
-../XM_FW/System/Comm/USB/cdc_handler.c:83:6:CdcStream_Init	1
-../XM_FW/System/Comm/USB/cdc_handler.c:94:6:CdcStream_Send	8
-../XM_FW/System/Comm/USB/cdc_handler.c:123:10:CdcStream_Read	5
-../XM_FW/System/Comm/USB/cdc_handler.c:146:6:CdcStream_IsStreamingActive	1
-../XM_FW/System/Comm/USB/cdc_handler.c:152:6:CdcStream_OnTxComplete	1
-../XM_FW/System/Comm/USB/cdc_handler.c:161:6:CdcStream_OnRxReceived	9
-../XM_FW/System/Comm/USB/cdc_handler.c:204:13:_TryTransmit	7

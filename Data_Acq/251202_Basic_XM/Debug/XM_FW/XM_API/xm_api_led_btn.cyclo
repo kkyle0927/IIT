@@ -1,5 +1,0 @@
-../XM_FW/XM_API/xm_api_led_btn.c:63:6:XM_SetLedState	1
-../XM_FW/XM_API/xm_api_led_btn.c:73:6:XM_SetLedEffect	1
-../XM_FW/XM_API/xm_api_led_btn.c:82:14:XM_GetButtonState	1
-../XM_FW/XM_API/xm_api_led_btn.c:90:14:XM_GetButtonEvent	1
-../XM_FW/XM_API/xm_api_led_btn.c:99:6:XM_IO_Update	1
