@@ -13,8 +13,6 @@
 #include "xm_api.h"      // 통합 API 헤더
 #include "mti-630.h"
 
-#include <math.h>
-#include <stdlib.h>
 #include <string.h>
 
 /**
