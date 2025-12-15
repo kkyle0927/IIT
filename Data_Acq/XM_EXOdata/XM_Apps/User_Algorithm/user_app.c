@@ -68,11 +68,9 @@ typedef enum {
 } LFootContact_t;
 
 typedef enum {
-    FVECPROF_LF  = 1,   // Left Flexion
-    FVECPROF_LE  = 2,   // Left Extension
-    FVECPROF_RF  = 3,   // Right Flexion
-    FVECPROF_RE  = 4,   // Right Extension
-    FVECPROF_NAN = 5    // 사용하지 않는 trajectory (TRAJ_ID_NAN)
+    FVECPROF_LH  = 1,   // Left Hip actuator
+    FVECPROF_RH  = 2,   // Right Hip actuator
+    FVECPROF_NAN = 3    // 사용하지 않는 block (TRAJ_ID_NAN)
 } FVecTrajId_t;
 
 
@@ -235,19 +233,13 @@ typedef struct {
     uint8_t is_full;
 } FVecSlot_t;
 
-// 채널별 버퍼 (Left Flexion / Left Extension / Right Flexion / Right Extension)
-static FVecSlot_t s_fvec_buf_LF[F_VECTOR_BUFF_SIZE];
-static FVecSlot_t s_fvec_buf_LE[F_VECTOR_BUFF_SIZE];
-static FVecSlot_t s_fvec_buf_RF[F_VECTOR_BUFF_SIZE];
-static FVecSlot_t s_fvec_buf_RE[F_VECTOR_BUFF_SIZE];
+// Actuator별 버퍼 (Left Hip / Right Hip)
+static FVecSlot_t s_fvec_buf_LH[F_VECTOR_BUFF_SIZE];
+static FVecSlot_t s_fvec_buf_RH[F_VECTOR_BUFF_SIZE];
 
-// 채널별 출력 토크
-static float L_Fl_Torque = 0.0f;
-static float L_Ex_Torque = 0.0f;
-static float R_Fl_Torque = 0.0f;
-static float R_Ex_Torque = 0.0f;
-
-static FVecTrajId_t traj_id = FVECPROF_LF;
+// Actuator별 출력 토크
+static float LH_Torque = 0.0f;
+static float RH_Torque = 0.0f;
 
 #define FVECPKT_MAX_BYTES 256u   // 패킷 최대 바이트 수 (필요시 여유있게 늘려도 됨)
 
@@ -287,7 +279,6 @@ static float FVecDecoder_StepSingle(FVecSlot_t buf[]);
 static void  FVecRx_Process(void);
 static void  FVecRx_ParseFrames(void);
 static void  ProcessFVecPacket(const uint8_t* payload, uint16_t payload_len);
-static void FVec_ReplayLastForTraj(FVecTrajId_t traj);
 static bool FVecDecoder_IsAllIdle(void);
 
 /**
@@ -350,7 +341,7 @@ void User_Setup(void)
 	sync_signal_pre = XM_LOW;
 
 	FVecDecoder_Init();   // F-vector 버퍼 초기화
-	traj_id = FVECPROF_LF;
+    // traj_id 개념을 구동기(LH/RH)로 통합하면서 별도 전역 선택값은 사용하지 않음
 
     // 외부 XSENS IMU 사용 설정
 //    if (XM_EnableExternalImu()) {
@@ -573,10 +564,8 @@ static void Active_Loop(void)
 
     // 1) falling edge: ON -> OFF (토크 0 + 디코더 리셋)
     if (s_prevEnable == Enable_ON && currEnable == Enable_OFF) {
-        L_Fl_Torque = 0.0f;
-        L_Ex_Torque = 0.0f;
-        R_Fl_Torque = 0.0f;
-        R_Ex_Torque = 0.0f;
+        LH_Torque = 0.0f;
+        RH_Torque = 0.0f;
 
         XM_SetAssistTorqueLH(0.0f);
         XM_SetAssistTorqueRH(0.0f);
@@ -584,34 +573,20 @@ static void Active_Loop(void)
         FVecDecoder_Init();   // 디코더 상태 전부 리셋
     }
 
-    // 2) rising edge: OFF -> ON (마지막 F-vector를 처음부터 다시 로딩)
-    if (s_prevEnable == Enable_OFF && currEnable == Enable_ON) {
-        FVecDecoder_Init();   // 모든 슬롯 초기화
-
-        // 현재 traj_id 값에 해당하는 trajectory만 재트리거
-        FVec_ReplayLastForTraj(traj_id);
-    }
+    // 2) rising edge: OFF -> ON
+    //    New behavior: trajectories are triggered immediately in ProcessFVecPacket
+    //    (or queued to append). So we do not reset/replay here.
 
     // 3) Enable이 ON일 때만 디코더 진행 + 토크 출력
     if (currEnable == Enable_ON) {
 
         for (int n = 0; n < 2; ++n) {
-            L_Fl_Torque = FVecDecoder_StepSingle(s_fvec_buf_LF);
-            L_Ex_Torque = FVecDecoder_StepSingle(s_fvec_buf_LE);
-            R_Fl_Torque = FVecDecoder_StepSingle(s_fvec_buf_RF);
-            R_Ex_Torque = FVecDecoder_StepSingle(s_fvec_buf_RE);
+            LH_Torque = FVecDecoder_StepSingle(s_fvec_buf_LH);
+            RH_Torque = FVecDecoder_StepSingle(s_fvec_buf_RH);
         }
 
-        switch (traj_id) {
-            case FVECPROF_LF: XM_SetAssistTorqueLH(L_Fl_Torque); break;
-            case FVECPROF_LE: XM_SetAssistTorqueLH(L_Ex_Torque); break;
-            case FVECPROF_RF: XM_SetAssistTorqueRH(R_Fl_Torque); break;
-            case FVECPROF_RE: XM_SetAssistTorqueRH(R_Ex_Torque); break;
-            default:
-                XM_SetAssistTorqueLH(0.0f);
-                XM_SetAssistTorqueRH(0.0f);
-                break;
-        }
+        XM_SetAssistTorqueLH(LH_Torque);
+        XM_SetAssistTorqueRH(RH_Torque);
 
         assist_activation_num++;
 
@@ -760,10 +735,8 @@ static void FVecDecoder_InitSingle(FVecSlot_t buf[])
 
 static void FVecDecoder_Init(void)
 {
-    FVecDecoder_InitSingle(s_fvec_buf_LF);
-    FVecDecoder_InitSingle(s_fvec_buf_LE);
-    FVecDecoder_InitSingle(s_fvec_buf_RF);
-    FVecDecoder_InitSingle(s_fvec_buf_RE);
+    FVecDecoder_InitSingle(s_fvec_buf_LH);
+    FVecDecoder_InitSingle(s_fvec_buf_RH);
 }
 
 static bool FVecDecoder_IsBufIdle(FVecSlot_t buf[])
@@ -778,10 +751,8 @@ static bool FVecDecoder_IsBufIdle(FVecSlot_t buf[])
 
 static bool FVecDecoder_IsAllIdle(void)
 {
-    if (!FVecDecoder_IsBufIdle(s_fvec_buf_LF)) return false;
-    if (!FVecDecoder_IsBufIdle(s_fvec_buf_LE)) return false;
-    if (!FVecDecoder_IsBufIdle(s_fvec_buf_RF)) return false;
-    if (!FVecDecoder_IsBufIdle(s_fvec_buf_RE)) return false;
+    if (!FVecDecoder_IsBufIdle(s_fvec_buf_LH)) return false;
+    if (!FVecDecoder_IsBufIdle(s_fvec_buf_RH)) return false;
 
     return true;            // 네 채널 전체가 다 비어 있음 → trajectory 종료
 }
@@ -979,52 +950,9 @@ static void FVecRx_Process(void)
     FVecRx_ParseFrames();
 }
 
-//static void ProcessFVecPacket(const uint8_t* payload, uint16_t payload_len)
-//{
-//    // 1) 마지막 수신 payload를 그대로 보관 (나중에 다시 재생하기 위함)
-//    if (payload_len > FVECPKT_MAX_BYTES) {
-//        payload_len = FVECPKT_MAX_BYTES;
-//    }
-//    memcpy(g_lastFvecPayload, payload, payload_len);
-//    g_lastFvecLenBytes = payload_len;
-//
-//    // 2) 기존 동작 그대로 유지 (아래는 원래 있던 코드)
-//    const float* f32 = (const float*)payload;
-//    uint16_t n = payload_len / sizeof(float);
-//    uint16_t i = 0;
-//    FVecSlot_t* target_buf = NULL;
-//
-//    while (i < n) {
-//        int id = (int)f32[i++];
-//
-//        switch (id) {
-//            case FVECPROF_LF: target_buf = s_fvec_buf_LF; break;
-//            case FVECPROF_LE: target_buf = s_fvec_buf_LE; break;
-//            case FVECPROF_RF: target_buf = s_fvec_buf_RF; break;
-//            case FVECPROF_RE: target_buf = s_fvec_buf_RE; break;
-//            default:
-//                target_buf = NULL;
-//                continue;
-//        }
-//
-//        while (i + 3 < n) {
-//            if ((int)f32[i] == -1) {
-//                i += 4;
-//                break;
-//            }
-//
-//            if (!target_buf) break;
-//
-//            const float f_vec[4] = { f32[i], f32[i+1], f32[i+2], f32[i+3] };
-//            FVecDecoder_TriggerSingle(target_buf, f_vec);
-//            i += 4;
-//        }
-//    }
-//}
-
 static void ProcessFVecPacket(const uint8_t* payload, uint16_t payload_len)
 {
-    // 1) 마지막 수신 payload를 그대로 보관 (나중에 FVec_ReplayLastForTraj에서 사용)
+    // 1) 마지막 수신 payload를 그대로 보관 (디버깅/확인용)
     if (payload_len > FVECPKT_MAX_BYTES) {
         payload_len = FVECPKT_MAX_BYTES;
     }
@@ -1036,98 +964,66 @@ static void ProcessFVecPacket(const uint8_t* payload, uint16_t payload_len)
     memcpy(g_lastFvecPayload, payload, payload_len);
     g_lastFvecLenBytes = payload_len;
 
-    // 2) payload를 float 배열로 해석해서 "이번에 쓸 traj_id 하나"를 찾는다
-    const float* f32 = (const float*)g_lastFvecPayload;
-    uint16_t n = g_lastFvecLenBytes / (uint16_t)sizeof(float);
-    uint16_t i = 0u;
+    // 2) Overlay trigger:
+    //    - 기존에 돌고 있는 슬롯들을 유지한 채(진행 중 trajectory),
+    //      새 패킷에서 나온 이벤트를 추가로 trigger하여 출력이 '합(superposition)'
+    //      되도록 한다.
+    //    - 새 이벤트는 +1 tick delay offset을 적용해 다음 제어주기부터 반영되게 한다.
 
-    int selected_id = -1;
+        // Overlay trigger policy:
+        // - Do NOT clear buffer even if idle (clearing would remove ongoing contributions if any).
+        // - Trigger new slot(s) with a 1-tick delay offset to start from the next control step.
+        //   (Prevents partial-step ambiguity when packet arrives mid-loop.)
+        // We achieve this by temporarily adding an offset to each f-vector's delay.
 
-    while (i < n) {
-        // 블록의 첫 원소는 Traj ID
-        int id = (int)f32[i++];
-
-        // 1~4 (FVECPROF_LF/LE/RF/RE) 중 하나이고,
-        // 아직 아무 것도 선택되지 않았다면 이번 패킷의 유효 traj_id로 채택
-        if (selected_id < 0 &&
-            id >= (int)FVECPROF_LF &&
-            id <= (int)FVECPROF_RE) {
-            selected_id = id;
+        // Build a small local copy of payload as float array, apply delay offset in-place,
+        // then trigger from that adjusted payload.
+        uint8_t local_payload[FVECPKT_MAX_BYTES];
+        uint16_t local_len = g_lastFvecLenBytes;
+        if (local_len > FVECPKT_MAX_BYTES) {
+            local_len = FVECPKT_MAX_BYTES;
         }
+        memcpy(local_payload, g_lastFvecPayload, local_len);
 
-        // 이 id에 속한 f-vector 블록을 끝까지 스킵 (F_END = -1 만날 때까지)
-        while (i + 3u < n) {
-            if ((int)f32[i] == -1) {
-                // [ -1, 0, 0, 0 ] F_END까지 포함해서 건너뜀
-                i += 4u;
-                break;
+        const uint16_t nf = local_len / (uint16_t)sizeof(float);
+        float* lf32 = (float*)local_payload;
+        const float delay_offset = 1.0f; // 1 control tick
+
+        // Packet format: [traj_id][m,tmax,delay,tend]...[-1,0,0,0] repeat per traj block
+        uint16_t j = 0u;
+        bool any_triggered = false;
+
+        while (j < nf) {
+            const int traj_id = (int)lf32[j++];
+
+            FVecSlot_t* target_buf = NULL;
+            if (traj_id == (int)FVECPROF_LH) {
+                target_buf = s_fvec_buf_LH;
+            } else if (traj_id == (int)FVECPROF_RH) {
+                target_buf = s_fvec_buf_RH;
             }
-            // [m, tmax, delay, tend] 하나씩 건너뜀
-            i += 4u;
-        }
-    }
 
-    // 3) 유효한 trajectory를 찾은 경우 → traj_id 설정 + Enable ON으로 올려서
-    //    Active_Loop()의 rising-edge 로직(Init + FVec_ReplayLastForTraj)을 타게 함
-    if (selected_id >= (int)FVECPROF_LF &&
-        selected_id <= (int)FVECPROF_RE) {
-
-        traj_id = (FVecTrajId_t)selected_id;
-        Enable  = Enable_ON;
-    }
-}
-
-static void FVec_ReplayLastForTraj(FVecTrajId_t traj)
-{
-    if (g_lastFvecLenBytes == 0) {
-        return; // 아직 받은 F-vector가 없음
-    }
-
-    const float* f32 = (const float*)g_lastFvecPayload;
-    uint16_t n = g_lastFvecLenBytes / sizeof(float);
-    uint16_t i = 0;
-
-    while (i < n) {
-        int id = (int)f32[i++];
-        FVecSlot_t* target_buf = NULL;
-
-        switch (id) {
-            case FVECPROF_LF:  target_buf = s_fvec_buf_LF; break;
-            case FVECPROF_LE:  target_buf = s_fvec_buf_LE; break;
-            case FVECPROF_RF:  target_buf = s_fvec_buf_RF; break;
-            case FVECPROF_RE:  target_buf = s_fvec_buf_RE; break;
-            case FVECPROF_NAN: // 사용하지 않는 trajectory → 통째로 스킵
-            default:
-            {
-                // 이 id 블록은 F_END(-1) 나올 때까지 몽땅 건너뜀
-                while (i + 3 < n) {
-                    if ((int)f32[i] == -1) {
-                        i += 4;
-                        break;
-                    }
-                    i += 4;
+            while (j + 3u < nf) {
+                if ((int)lf32[j] == -1) {
+                    j += 4u;
+                    break;
                 }
-                continue;
+
+                // Apply +1 tick offset on delay, then trigger if this block is LH/RH
+                lf32[j + 2u] += delay_offset;
+
+                if (target_buf != NULL) {
+                    FVecDecoder_TriggerSingle(target_buf, &lf32[j]);
+                    any_triggered = true;
+                }
+
+                j += 4u;
             }
         }
 
-        // 이 블록이 현재 traj_id에 해당하는지 여부
-        bool use_this = ((FVecTrajId_t)id == traj);
-
-        while (i + 3 < n) {
-            // F_END 체크
-            if ((int)f32[i] == -1) {
-                i += 4;
-                break;
-            }
-
-            if (use_this && target_buf) {
-                const float f_vec[4] = { f32[i], f32[i+1], f32[i+2], f32[i+3] };
-                FVecDecoder_TriggerSingle(target_buf, f_vec);
-            }
-            i += 4;
+        if (any_triggered) {
+            Enable = Enable_ON;
         }
-    }
 }
 
 
