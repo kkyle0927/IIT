@@ -141,6 +141,9 @@ static IOIF_GPIOx_t  s_gpio_rgb_b_id = IOIF_GPIO_NOT_INITIALIZED;   // PC9
 static IOIF_GPIOx_t s_dio_ids[EXT_DIO_COUNT]; // 8개
 static IOIF_ADCx_t  s_adc2_id = IOIF_ADC_NOT_INITIALIZED; // (hadc2: Ext A2/A3)
 
+// GRF module power enable
+static IOIF_GPIOx_t s_gpio_pwr_left_grf_id = IOIF_GPIO_NOT_INITIALIZED; // PG12
+static IOIF_GPIOx_t s_gpio_pwr_right_grf_id = IOIF_GPIO_NOT_INITIALIZED; // PG14
 /**
  *------------------------------------------------------------
  * STATIC (PRIVATE) FUNCTION PROTOTYPES
@@ -384,6 +387,10 @@ static void _InitIoInterfaces(void)
     // --- [신규] External ADC 핀 IOIF 초기화 (PA0, PA0_C, PA1, PA1_C) ---
     // [수정] ADC2 (외부핀 2개) 그룹을 ID 1개로 할당
     IOIF_ADC_INITIALIZE(s_adc2_id, &hadc2);
+
+    // Sensor hub module power enable 핀 IOIF 초기화
+    IOIF_GPIO_INITIALIZE(s_gpio_pwr_left_grf_id, L_GRF_PWR_EN_GPIO_Port, L_GRF_PWR_EN_Pin, IOIF_GPIO_Mode_Output);
+    IOIF_GPIO_INITIALIZE(s_gpio_pwr_right_grf_id, R_GRF_PWR_EN_GPIO_Port, R_GRF_PWR_EN_Pin, IOIF_GPIO_Mode_Output);
 }
 
 /**
@@ -437,9 +444,11 @@ static void _InitSystemServices(void)
     // [수정] External IO 모듈에는 adc1과 adc2의 ID를 모두 주입
     ExternalIO_Init(s_dio_ids, s_adc1_id, s_adc2_id);
 
-    // --- Power On LED 켜기 ---
+    // --- Sensor module Power Option ---
     // 모든 초기화가 완료되었으므로 Power LED(PC6)를 켬
     IOIF_GPIO_SET(s_gpio_pwr_led_id);
+    IOIF_GPIO_SET(s_gpio_pwr_left_grf_id); // PG12
+	IOIF_GPIO_SET(s_gpio_pwr_right_grf_id); // PG14
 }
 
 /* [신규] UART4 하드웨어 수동 초기화 함수 (CubeMX가 안 만들어주므로 직접 작성) */
