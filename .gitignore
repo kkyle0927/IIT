@@ -4,6 +4,9 @@
 # Prerequisites
 *.d
 
+# Data / Model files
+*.h5
+
 # Object files
 *.o
 *.ko

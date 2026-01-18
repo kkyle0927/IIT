@@ -1,0 +1,6 @@
+- Ground contact 여부 gating 추가
+- domain knowledge 활용해서 여러 조합 해볼건데, 여러 조합 한번에 테스팅 할 수 있는 플랫폼 구축 
+- network 구조 고도화
+- velocity 평탄화 ('동작 의도'에 맞는 velocity 정의 후 그거에 맞는 필터링)
+- network 학습 서버에 올리기
+- 네트워크 특성 공부
