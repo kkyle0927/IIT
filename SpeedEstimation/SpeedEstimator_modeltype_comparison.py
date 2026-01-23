@@ -19,6 +19,10 @@ import h5py
 import matplotlib.pyplot as plt
 import time
 
+from matplotlib.widgets import Button
+from scipy.signal import butter, filtfilt
+from scipy.interpolate import CubicSpline
+
 # 데이터셋 로드
 data_path = '251030_combined_data.h5'
 
@@ -30,19 +34,148 @@ cond_names = [
 ]
 data_length = 12000
 
-class WindowDataset(Dataset):
-    def __init__(self, X, Y, target_mode="sequence"):
-        self.X = torch.from_numpy(X).float()
-        Y = torch.from_numpy(Y).float()  # (N, H, D)
+def get_ground_contact(grf_fz, threshold=20.0):
+    """[절차 1] GRF Fz 데이터를 이용한 접촉 판별 (0 또는 1)"""
+    return (np.nan_to_num(grf_fz) > threshold).astype(float)
 
-        if target_mode == "sequence":
-            self.Y = Y  # (N, H, D) 그대로
-        elif target_mode == "mean":
-            self.Y = Y.mean(dim=1)  # (N, D)
+def centered_moving_average(x, win, pad_mode="reflect"):
+    """
+    Offline centered moving average (zero-phase 성격)
+    x: (T,) 또는 (T, D)
+    win: samples (권장: 홀수)
+    """
+    x = np.asarray(x, dtype=float)
+    if win <= 1:
+        return x
+
+    # centered 정렬을 위해 홀수 권장
+    if (win % 2) == 0:
+        win += 1
+
+    pad = win // 2
+    kernel = np.ones(win, dtype=float) / win
+
+    if x.ndim == 1:
+        xp = np.pad(x, (pad, pad), mode=pad_mode)
+        return np.convolve(xp, kernel, mode="valid")
+
+    out = np.empty_like(x, dtype=float)
+    for j in range(x.shape[1]):
+        xp = np.pad(x[:, j], (pad, pad), mode=pad_mode)
+        out[:, j] = np.convolve(xp, kernel, mode="valid")
+    return out
+
+
+def butter_lowpass_filter(data, cutoff, fs, order=4):
+    """
+    Zero-phase Butterworth Low-Pass Filter.
+    data: (T,) or (T, D)
+    cutoff: Cutoff frequency (Hz)
+    fs: Sampling frequency (Hz)
+    order: Filter order
+    """
+    from scipy.signal import butter, filtfilt
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='low', analog=False)
+    
+    if data.ndim == 1:
+        y = filtfilt(b, a, data)
+    else:
+        # data is (T, D), apply along time axis 0
+        y = filtfilt(b, a, data, axis=0)
+    return y
+
+
+def plot_velocity_comparison_filter(raw_v, filtered_v, fs=100, lpf_cutoff=None):
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    t = np.arange(raw_v.shape[0]) / fs
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+
+    # Y
+    axes[0].plot(t, raw_v[:, 0], color='silver', label='Raw v_Y')
+    axes[0].plot(t, filtered_v[:, 0], 'r', linewidth=1.5, label='Filtered v_Y')
+    axes[0].set_ylabel('v_Y [m/s]')
+    axes[0].grid(True)
+    axes[0].legend()
+
+    # Z
+    axes[1].plot(t, raw_v[:, 1], color='silver', label='Raw v_Z')
+    axes[1].plot(t, filtered_v[:, 1], 'r', linewidth=1.5, label='Filtered v_Z')
+    axes[1].set_ylabel('v_Z [m/s]')
+    axes[1].set_xlabel('Time [s]')
+    axes[1].grid(True)
+    axes[1].legend()
+
+    title = "Speed reference filtering (Butterworth LPF)"
+    if lpf_cutoff is not None:
+        title += f" | cutoff={lpf_cutoff} Hz"
+    fig.suptitle(title)
+
+    plt.tight_layout()
+
+
+class LiveTrainingPlotter:
+    def __init__(self):
+        self.fig, self.ax = plt.subplots(figsize=(8, 5))
+        self.ax.set_xlabel('Epoch')
+        self.ax.set_ylabel('Loss')
+        self.ax.grid(True)
+        plt.ion()
+        plt.show(block=False)
+        self.train_line = None
+        self.val_line = None
+        self.epochs = []
+        self.train_losses = []
+        self.val_losses = []
+
+    def start_session(self, model_name, seed):
+        self.ax.clear()
+        self.ax.set_xlabel('Epoch')
+        self.ax.set_ylabel('Loss')
+        self.ax.set_title(f"Training {model_name} (seed={seed})")
+        self.ax.grid(True)
+        
+        self.train_line, = self.ax.plot([], [], 'b-', label='Train Loss')
+        self.val_line,   = self.ax.plot([], [], 'r--', label='Val Loss')
+        self.ax.legend()
+        
+        self.epochs = []
+        self.train_losses = []
+        self.val_losses = []
+        plt.pause(0.1)
+
+    def update_epoch(self, epoch, train_loss, val_loss):
+        self.epochs.append(epoch)
+        self.train_losses.append(train_loss)
+        self.val_losses.append(val_loss)
+
+        self.train_line.set_data(self.epochs, self.train_losses)
+        self.val_line.set_data(self.epochs, self.val_losses)
+        
+        self.ax.relim()
+        self.ax.autoscale_view()
+        
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+
+class WindowDataset(Dataset):
+    def __init__(self, X, Y, target_mode="mean"):
+        self.X = torch.from_numpy(X).float()
+        Y = torch.from_numpy(Y).float()   # Y: (N, Tw, D)
+
+        if target_mode == "mean":
+            self.Y = Y.mean(dim=1)        # (N, D)
         elif target_mode == "last":
-            self.Y = Y[:, -1, :]    # (N, D)
+            self.Y = Y[:, -1, :]          # (N, D)
+        elif target_mode == "sequence":
+            self.Y = Y                    # (N, Tw, D)
         else:
-            raise ValueError("target_mode must be 'sequence', 'mean' or 'last'")
+            raise ValueError("target_mode must be 'mean', 'last', or 'sequence'")
 
     def __len__(self):
         return self.X.shape[0]
@@ -84,6 +217,20 @@ class TCNEncoder(nn.Module):
         return y[:, :, -1]
 
 
+class TCN_FC(nn.Module):
+    def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1):
+        super().__init__()
+        self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout)
+        self.horizon = horizon
+        self.output_dim = output_dim
+        self.head = nn.Linear(self.enc.out_ch, horizon * output_dim)
+
+    def forward(self, x):
+        z = self.enc(x)  # (B, C)
+        y = self.head(z) # (B, H*D)
+        return y.view(-1, self.horizon, self.output_dim)
+
+
 class TCN_MLP(nn.Module):
     def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1, mlp_hidden=256):
         super().__init__()
@@ -100,10 +247,10 @@ class TCN_MLP(nn.Module):
     def forward(self, x):
         z = self.enc(x)  # (B, C)
         y = self.head(z) # (B, H*D)
-        return y.view(-1, self.horizon, self.output_dim)  # (B, H, D)
+        return y.view(-1, self.horizon, self.output_dim)
 
 
-class TCN_GRUDecoder(nn.Module):
+class TCN_GRU_FC(nn.Module):
     def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1, hidden_size=128, num_layers=1):
         super().__init__()
         self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout)
@@ -123,7 +270,33 @@ class TCN_GRUDecoder(nn.Module):
         return self.fc(yseq)        # (B, H, D)
 
 
-class TCN_LSTMDecoder(nn.Module):
+class TCN_GRU_MLP(nn.Module):
+    def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1, hidden_size=128, num_layers=1):
+        super().__init__()
+        self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout)
+        self.horizon = horizon
+        self.output_dim = output_dim
+        self.gru = nn.GRU(
+            input_size=self.enc.out_ch, hidden_size=hidden_size,
+            num_layers=num_layers, batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0
+        )
+        # MLP Head: hidden_size -> hidden_size -> output_dim
+        self.head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, output_dim)
+        )
+
+    def forward(self, x):
+        ctx = self.enc(x)  # (B, C)
+        dec_in = ctx.unsqueeze(1).repeat(1, self.horizon, 1)  # (B, H, C)
+        yseq, _ = self.gru(dec_in)  # (B, H, hidden)
+        return self.head(yseq)      # (B, H, D)
+
+
+class TCN_LSTM_FC(nn.Module):
     def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1, hidden_size=128, num_layers=1):
         super().__init__()
         self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout)
@@ -143,31 +316,43 @@ class TCN_LSTMDecoder(nn.Module):
         return self.fc(yseq)         # (B, H, D)
 
 
-class TCN_TemporalConvDecoder(nn.Module):
-    def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1):
+class TCN_LSTM_MLP(nn.Module):
+    def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, dropout=0.1, hidden_size=128, num_layers=1):
         super().__init__()
-        self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout=dropout)
+        self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout)
         self.horizon = horizon
         self.output_dim = output_dim
-        # length 1 -> length H 로 병렬 생성
-        self.deconv = nn.ConvTranspose1d(self.enc.out_ch, output_dim, kernel_size=horizon, stride=1)
+        self.lstm = nn.LSTM(
+            input_size=self.enc.out_ch, hidden_size=hidden_size,
+            num_layers=num_layers, batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0
+        )
+        self.head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_size, output_dim)
+        )
 
     def forward(self, x):
-        ctx = self.enc(x)            # (B, C)
-        z = ctx.unsqueeze(-1)        # (B, C, 1)
-        y = self.deconv(z)           # (B, D, H)
-        return y.transpose(1, 2)     # (B, H, D)
+        ctx = self.enc(x)  # (B, C)
+        dec_in = ctx.unsqueeze(1).repeat(1, self.horizon, 1)  # (B, H, C)
+        yseq, _ = self.lstm(dec_in)  # (B, H, hidden)
+        return self.head(yseq)       # (B, H, D)
+
 
 def train_speed_estimator(
     X_train, Y_train,
     X_val, Y_val,
     X_test, Y_test,
-    model_type="tcn",
-    target_mode="mean",
+    model_type="TCN_MLP",
+    target_mode="sequence",
     cfg=None,
     seed=42,
-    save_path="speed_estimator_best.pt"
+    save_path="speed_estimator_best.pt",
+    live_plotter=None
 ):
+    import time
     """
     cfg 예시:
     cfg = {
@@ -276,7 +461,13 @@ def train_speed_estimator(
 
         return best_h
 
-    if model_type == "tcn_mlp":
+    if model_type == "TCN_FC":
+        model = TCN_FC(input_dim, output_dim, horizon,
+                       channels=tcn_channels, kernel_size=kernel_size,
+                       dropout=dropout_p)
+        model_config = {}
+
+    elif model_type == "TCN_MLP":
         mlp_hidden0 = int(cfg.get("mlp_hidden", 256))
         mlp_hidden = _tune_hidden(
             lambda h: TCN_MLP(input_dim, output_dim, horizon,
@@ -287,43 +478,74 @@ def train_speed_estimator(
         model = TCN_MLP(input_dim, output_dim, horizon,
                         channels=tcn_channels, kernel_size=kernel_size,
                         dropout=dropout_p, mlp_hidden=mlp_hidden)
+        model_config = {"mlp_hidden": mlp_hidden}
 
-    elif model_type == "tcn_gru":
+    elif model_type == "TCN_GRU_FC":
         hidden0 = int(cfg.get("rnn_hidden", 128))
         num_layers  = int(cfg.get("rnn_layers", 1))
         hidden_size = _tune_hidden(
-            lambda h: TCN_GRUDecoder(input_dim, output_dim, horizon,
+            lambda h: TCN_GRU_FC(input_dim, output_dim, horizon,
                                     channels=tcn_channels, kernel_size=kernel_size,
                                     dropout=dropout_p, hidden_size=h, num_layers=num_layers),
             hidden0
         )
-        model = TCN_GRUDecoder(input_dim, output_dim, horizon,
+        model = TCN_GRU_FC(input_dim, output_dim, horizon,
                             channels=tcn_channels, kernel_size=kernel_size,
                             dropout=dropout_p, hidden_size=hidden_size, num_layers=num_layers)
         rnn_hidden = hidden_size
         rnn_layers = num_layers
+        model_config = {"hidden_size": hidden_size, "num_layers": num_layers}
 
-    elif model_type == "tcn_lstm":
+    elif model_type == "TCN_GRU_MLP":
         hidden0 = int(cfg.get("rnn_hidden", 128))
         num_layers  = int(cfg.get("rnn_layers", 1))
         hidden_size = _tune_hidden(
-            lambda h: TCN_LSTMDecoder(input_dim, output_dim, horizon,
+            lambda h: TCN_GRU_MLP(input_dim, output_dim, horizon,
                                     channels=tcn_channels, kernel_size=kernel_size,
                                     dropout=dropout_p, hidden_size=h, num_layers=num_layers),
             hidden0
         )
-        model = TCN_LSTMDecoder(input_dim, output_dim, horizon,
+        model = TCN_GRU_MLP(input_dim, output_dim, horizon,
+                            channels=tcn_channels, kernel_size=kernel_size,
+                            dropout=dropout_p, hidden_size=hidden_size, num_layers=num_layers)
+        rnn_hidden = hidden_size
+        rnn_layers = num_layers
+        model_config = {"hidden_size": hidden_size, "num_layers": num_layers}
+
+    elif model_type == "TCN_LSTM_FC":
+        hidden0 = int(cfg.get("rnn_hidden", 128))
+        num_layers  = int(cfg.get("rnn_layers", 1))
+        hidden_size = _tune_hidden(
+            lambda h: TCN_LSTM_FC(input_dim, output_dim, horizon,
+                                    channels=tcn_channels, kernel_size=kernel_size,
+                                    dropout=dropout_p, hidden_size=h, num_layers=num_layers),
+            hidden0
+        )
+        model = TCN_LSTM_FC(input_dim, output_dim, horizon,
                                 channels=tcn_channels, kernel_size=kernel_size,
                                 dropout=dropout_p, hidden_size=hidden_size, num_layers=num_layers)
         rnn_hidden = hidden_size
         rnn_layers = num_layers
+        model_config = {"hidden_size": hidden_size, "num_layers": num_layers}
 
-    elif model_type == "tcn_tconv":
-        model = TCN_TemporalConvDecoder(input_dim, output_dim, horizon,
-                                        channels=tcn_channels, kernel_size=kernel_size,
-                                        dropout=dropout_p)
+    elif model_type == "TCN_LSTM_MLP":
+        hidden0 = int(cfg.get("rnn_hidden", 128))
+        num_layers  = int(cfg.get("rnn_layers", 1))
+        hidden_size = _tune_hidden(
+            lambda h: TCN_LSTM_MLP(input_dim, output_dim, horizon,
+                                    channels=tcn_channels, kernel_size=kernel_size,
+                                    dropout=dropout_p, hidden_size=h, num_layers=num_layers),
+            hidden0
+        )
+        model = TCN_LSTM_MLP(input_dim, output_dim, horizon,
+                                channels=tcn_channels, kernel_size=kernel_size,
+                                dropout=dropout_p, hidden_size=hidden_size, num_layers=num_layers)
+        rnn_hidden = hidden_size
+        rnn_layers = num_layers
+        model_config = {"hidden_size": hidden_size, "num_layers": num_layers}
+
     else:
-        raise ValueError("model_type must be one of: tcn_mlp, tcn_gru, tcn_lstm, tcn_tconv")
+        raise ValueError(f"Unknown model_type: {model_type}")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
@@ -384,6 +606,9 @@ def train_speed_estimator(
         print(f"[Epoch {epoch:03d}/{epochs:03d}] "
               f"train_loss={train_loss:.6f} val_loss={val_loss:.6f} "
               f"lr={cur_lr:.2e} time={dt:.1f}s")
+              
+        if live_plotter is not None:
+            live_plotter.update_epoch(epoch, train_loss, val_loss)
 
         if val_loss < best_val:
             best_val = val_loss
@@ -450,6 +675,7 @@ def train_speed_estimator(
         "step_mae": step_mae,
         "step_rmse": step_rmse,
         "n_params": int(n_params),
+        "model_config": model_config
     }
     return metrics
 
@@ -470,7 +696,9 @@ def plot_pred_true_all_conditions(
     fs=100,
     window_seconds=20.0,
     max_points=5000,
-    model_cfg=None
+    model_cfg=None,
+    lpf_cutoff=None,
+    lpf_order=4
 ):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -481,7 +709,7 @@ def plot_pred_true_all_conditions(
         input_vars, output_vars,
         time_window_input, time_window_output, stride,
         subject_selection={'include': test_subjects, 'exclude': []},
-        condition_selection={'include': [first_cond], 'exclude': []}
+        condition_selection={'include': [first_cond], 'exclude': []}, lpf_cutoff=lpf_cutoff, lpf_order=lpf_order
     )
     if X0 is None or Y0 is None or X0.size == 0:
         print("[WARN] No samples for first condition. Check test_subjects/cond_names.")
@@ -508,16 +736,20 @@ def plot_pred_true_all_conditions(
     kernel_size  = int(model_cfg.get("kernel_size", 3))
     dropout_p    = float(model_cfg.get("dropout_p", 0.1))
 
-    if model_type == "tcn_mlp":
+    if model_type == "TCN_FC":
+        model = TCN_FC(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p)
+    elif model_type == "TCN_MLP":
         model = TCN_MLP(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, mlp_hidden=int(model_cfg.get("mlp_hidden", 256)))
-    elif model_type == "tcn_gru":
-        model = TCN_GRUDecoder(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, hidden_size=int(model_cfg.get("rnn_hidden", 128)), num_layers=int(model_cfg.get("rnn_layers", 1)))
-    elif model_type == "tcn_lstm":
-        model = TCN_LSTMDecoder(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, hidden_size=int(model_cfg.get("rnn_hidden", 128)), num_layers=int(model_cfg.get("rnn_layers", 1)))
-    elif model_type == "tcn_tconv":
-        model = TCN_TemporalConvDecoder(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p)
+    elif model_type == "TCN_GRU_FC":
+        model = TCN_GRU_FC(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, hidden_size=int(model_cfg.get("rnn_hidden", 128)), num_layers=int(model_cfg.get("rnn_layers", 1)))
+    elif model_type == "TCN_GRU_MLP":
+        model = TCN_GRU_MLP(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, hidden_size=int(model_cfg.get("rnn_hidden", 128)), num_layers=int(model_cfg.get("rnn_layers", 1)))
+    elif model_type == "TCN_LSTM_FC":
+        model = TCN_LSTM_FC(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, hidden_size=int(model_cfg.get("rnn_hidden", 128)), num_layers=int(model_cfg.get("rnn_layers", 1)))
+    elif model_type == "TCN_LSTM_MLP":
+        model = TCN_LSTM_MLP(input_dim, output_dim, horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, hidden_size=int(model_cfg.get("rnn_hidden", 128)), num_layers=int(model_cfg.get("rnn_layers", 1)))
     else:
-        raise ValueError("unsupported model_type")
+        raise ValueError(f"unsupported model_type: {model_type}")
 
     obj = torch.load(ckpt_path, map_location=device)
     state = obj["state_dict"] if isinstance(obj, dict) and "state_dict" in obj else obj
@@ -536,7 +768,10 @@ def plot_pred_true_all_conditions(
             input_vars, output_vars,
             time_window_input, time_window_output, stride,
             subject_selection={'include': test_subjects, 'exclude': []},
-            condition_selection={'include': [cond], 'exclude': []}
+
+
+
+            condition_selection={'include': [cond], 'exclude': []}, lpf_cutoff=lpf_cutoff, lpf_order=lpf_order
         )
 
         if Xc is None or Yc is None or Xc.size == 0: 
@@ -576,32 +811,68 @@ def plot_pred_true_all_conditions(
         for j in range(output_dim):
             name = out_names[j] if j < len(out_names) else f"out{j}"
             fig = plt.figure(figsize=(14, 5))
-            plt.plot(t, true_all[:n_show, j], label="true")
-            plt.plot(t, pred_all[:n_show, j], label="pred")
-            plt.title(f"{cond} | {name} | test={test_subjects} | model={model_type} | target={target_mode}")
-            plt.xlabel("Time [s]")
-            plt.ylabel(name)
-            plt.grid(True)
-            plt.legend()
+            ax = plt.gca()
+
+            ax.plot(t, true_all[:n_show, j], label="true")
+            ax.plot(t, pred_all[:n_show, j], label="pred")
+            ax.set_title(f"{cond} | {name} | test={test_subjects} | model={model_type} | target={target_mode}")
+            ax.set_xlabel("Time [s]")
+            ax.set_ylabel(name)
+            ax.grid(True)
+            ax.legend()
 
             # 스크롤 확대/축소 연결
             attach_zoom_factory(fig)
+
+            # ---- 버튼: x축 토글 (20-25초 <-> 전체) ----
+            # 버튼 영역(figure 좌표): [left, bottom, width, height]
+            btn_ax = fig.add_axes([0.75, 0.02, 0.22, 0.06])
+            btn = Button(btn_ax, "Toggle 20-25s")
+
+            # 전체 범위 저장 (현재 플롯의 x 데이터 기준)
+            full_xlim = ax.get_xlim()
+            zoom_xlim = (20.0, 25.0)
+
+            # fig에 상태 저장
+            fig._toggle_zoom_state = False
+            fig._toggle_full_xlim = full_xlim
+
+            def _on_toggle(_event):
+                # 토글 상태 반전
+                fig._toggle_zoom_state = not fig._toggle_zoom_state
+
+                if fig._toggle_zoom_state:
+                    ax.set_xlim(zoom_xlim)
+                else:
+                    ax.set_xlim(fig._toggle_full_xlim)
+
+                fig.canvas.draw_idle()
+
+            btn.on_clicked(_on_toggle)
+
+            # 버튼 객체가 GC로 사라지지 않게 참조 유지
+            fig._toggle_btn = btn
 
 
     plt.show()
 
 def build_nn_dataset(h5_path, sub_names, cond_names, input_vars, output_vars, input_window, output_window, stride=1,
-    subject_selection=None, condition_selection=None):
+    subject_selection=None, condition_selection=None, use_gating=False, alpha=0.5, debug_plot=False, lpf_cutoff=None, lpf_order=4):
     """
-    input_vars: list of (group_path, variable_list) tuples, e.g.
-        [ ('Robot', ['incPosLH','incPosRH']),
-          ('Back_imu', ['Accel_X',...]), ... ]
-    output_vars: list of (group_path, variable_list) tuples, e.g.
-        [ ('Common', ['v_Y_true','v_Z_true']) ]
+    기존의 모든 데이터 로드 및 전처리 기능을 유지하면서 다음 기능을 추가함:
+    1) use_gating: True일 경우 입력 피처 끝에 좌/우 접촉 정보(0,1) 추가
+    2) Adaptive LPF: 보행 주기에 연동된 1차 Butterworth 양방향 필터로 저주파 의도 속도 추출
+    3) Debug Plot: accel_sine 조건에 대해 필터링 전후 시각화
     """
     X_list, Y_list = [], []
+    fs = 100  # 데이터 샘플링 주파수 고정
+
     with h5py.File(h5_path, 'r') as f:
-        # ---- subject selection ----
+        # vel_debug_cache = {}   # key=sub, val=(raw_v, filtered_v)
+        # -> 변경: condition별로 별도 cache 관리
+        target_conds_for_plot = ['accel_sine', 'asym_60deg']
+        vel_debug_caches = {c: {} for c in target_conds_for_plot}
+        # ---- [기존 유지] subject selection ----
         if subject_selection is not None:
             eff_sub_names = sub_names.copy()
             if subject_selection.get('include') is not None:
@@ -616,7 +887,7 @@ def build_nn_dataset(h5_path, sub_names, cond_names, input_vars, output_vars, in
         else:
             eff_sub_names = sub_names
 
-        # ---- condition selection ----
+        # ---- [기존 유지] condition selection ----
         if condition_selection is not None:
             eff_cond_names = cond_names.copy()
             if condition_selection.get('include') is not None:
@@ -637,103 +908,139 @@ def build_nn_dataset(h5_path, sub_names, cond_names, input_vars, output_vars, in
                 if trial_path not in f:
                     continue
                 g = f[trial_path]
-                # Build input features
+
+                # --- [추가 1] GRF 및 Contact 정보 추출 (Gating용) ---
+                l_grf = g['MoCap/grf_measured/left/force/Fz'][:]
+                r_grf = g['MoCap/grf_measured/right/force/Fz'][:]
+                l_contact = get_ground_contact(l_grf)[:, None]
+                r_contact = get_ground_contact(r_grf)[:, None]
+                
+                # --- [추가 2] 보행 주기 기반 적응형 필터링 (Reference 수정) ---
+                # 기존 v_Y_true, v_Z_true 로드 (저주파 성분 추출용)
+                raw_vy = g['Common/v_Y_true'][:][:, None]
+                raw_vz = g['Common/v_Z_true'][:][:, None]
+                raw_v = np.concatenate([raw_vy, raw_vz], axis=1)
+
+                filtered_v = raw_v
+                if lpf_cutoff is not None and lpf_cutoff > 0:
+                    # print(f"Applying LPF: cutoff={lpf_cutoff}, order={lpf_order} for {sub}/{cond}")
+                    filtered_v = butter_lowpass_filter(raw_v, lpf_cutoff, fs, order=lpf_order)
+
+                # --- [추가 3] 디버깅 시각화 데이터 수집: subject당 1회만 저장 (표시는 나중에 일괄) ---
+                if debug_plot and (cond in target_conds_for_plot):
+                    c_cache = vel_debug_caches[cond]
+                    if sub not in c_cache:
+                        c_cache[sub] = (raw_v.copy(), filtered_v.copy())
+
+                # ---- [기존 유지] Build input features ----
                 input_feat = []
                 for group_path, var_list in (input_vars or []):
                     grp = g
                     ok = True
                     for p in group_path.split('/'):
-                        if not p:
-                            continue
+                        if not p: continue
                         if p not in grp:
                             ok = False
                             break
                         grp = grp[p]
-                    if not ok:
-                        continue
+                    if not ok: continue
 
                     for v in var_list:
-                        if v not in grp:
-                            continue
+                        if v not in grp: continue
                         arr = grp[v][:]
                         if arr.ndim == 1:
-                            arr = arr[:,None]
+                            arr = arr[:, None]
                         input_feat.append(arr)
-                # Build output features
-                output_feat = []
-                for group_path, var_list in (output_vars or []):
-                    grp = g
-                    ok = True
-                    for p in group_path.split('/'):
-                        if not p:
-                            continue
-                        if p not in grp:
-                            ok = False
-                            break
-                        grp = grp[p]
-                    if not ok:
-                        continue
 
-                    for v in var_list:
-                        if v not in grp:
-                            continue
-                        arr = grp[v][:]
-                        if arr.ndim == 1:
-                            arr = arr[:,None]
-                        output_feat.append(arr)
-                        
+                # [추가 4] Gating 옵션: 입력 피처 끝에 접촉 정보 추가
+                if use_gating:
+                    input_feat.append(l_contact)
+                    input_feat.append(r_contact)
+
+                # ---- [기존 유지 및 수정] Build output features ----
+                output_feat = []
+                # output_vars 리스트를 순회하며 속도 데이터만 필터링된 버전으로 교체
+                for group_path, var_list in (output_vars or []):
+                    # v_Y_true 또는 v_Z_true가 포함된 경우 필터링된 filtered_v를 사용
+                    if 'v_Y_true' in var_list or 'v_Z_true' in var_list:
+                        # filtered_v는 [v_Y, v_Z]로 구성됨 (요청된 변수 순서에 따라 처리)
+                        output_feat.append(filtered_v)
+                    else:
+                        # 그 외의 변수는 기존 로직대로 로드
+                        grp = g
+                        ok = True
+                        for p in group_path.split('/'):
+                            if not p: continue
+                            if p not in grp:
+                                ok = False
+                                break
+                            grp = grp[p]
+                        if not ok: continue
+                        for v in var_list:
+                            if v not in grp: continue
+                            arr = grp[v][:]
+                            if arr.ndim == 1:
+                                arr = arr[:, None]
+                            output_feat.append(arr)
+
                 if len(input_feat) == 0 or len(output_feat) == 0:
                     continue
+                
                 input_mat = np.concatenate(input_feat, axis=1)
                 output_mat = np.concatenate(output_feat, axis=1)
 
-                # 여기 추가: NaN이 있으면 학습 데이터에 반영되도록 보간
+                # ---- [기존 유지] NaN 보간 처리 ----
                 trial_tag = f"{sub}/{cond}/trial_01"
+                # verbose_nan 옵션을 지원하기 위해 condition_selection 확인
                 verbose_nan = bool(condition_selection.get("verbose_nan", False)) if condition_selection else False
+                # 기존 interp_nan_2d_linear 또는 _local 함수 사용 (파일명에 맞춰 호출)
                 input_mat = interp_nan_2d_linear_local(input_mat, fill_all_nan_with=0.0, verbose=verbose_nan, tag=trial_tag + " input")
                 output_mat = interp_nan_2d_linear_local(output_mat, fill_all_nan_with=0.0, verbose=verbose_nan, tag=trial_tag + " output")
 
+                # ---- [기존 유지] Sliding Window 생성 ----
                 n = len(input_mat)
                 for i in range(0, n - input_window - output_window + 1, stride):
                     X = input_mat[i:i+input_window]
                     Y = output_mat[i+input_window:i+input_window+output_window]
                     X_list.append(X)
                     Y_list.append(Y)
+
+    # 시각화 (조건별로 그림 그리기)
+    # 시각화 (조건별로 그림 그리기)
+    if debug_plot:
+        all_figs = []
+        for c_name, c_cache in vel_debug_caches.items():
+            if len(c_cache) > 0:
+                figs = plot_velocity_4subjects_per_fig(
+                    c_cache,
+                    fs=fs,
+                    lpf_cutoff=lpf_cutoff,
+                    subjects_per_fig=4,
+                    title_prefix=f"Training target speed ({c_name}, all subjects)"
+                )
+                if figs:
+                    all_figs.extend(figs)
+
+        # 렌더링 강제(빈 창 방지)
+        # 렌더링 강제(빈 창 방지)
+        for fig in all_figs:
+            try:
+                fig.canvas.draw()
+                fig.canvas.flush_events()
+            except Exception:
+                pass
+
+        # 여기서 멈춤: 열린 figure들을 모두 닫아야 return되어 training 진행
+        plt.show(block=True)
+        plt.close('all')
+
+
     if len(X_list) == 0:
         return np.empty((0, input_window, 0), dtype=np.float32), np.empty((0, output_window, 0), dtype=np.float32)
 
     X_arr = np.stack(X_list).astype(np.float32)
     Y_arr = np.stack(Y_list).astype(np.float32)
     return X_arr, Y_arr
-
-def load_subject_fsr_imu(data_path, sub_names, cond_names, data_length):
-    Sub = {}
-    with h5py.File(data_path, 'r') as f:
-        for sub_idx, sub_name in enumerate(sub_names, start=1):
-            Sub[sub_idx] = {}
-            # FSR1
-            for side, prefix in [('Left','L'), ('Right','R')]:
-                key = f'fsr{prefix}1'
-                arr = np.empty((data_length, len(cond_names)), dtype=np.float32)
-                for c, cond in enumerate(cond_names):
-                    d = f[f"{sub_name}/{cond}/trial_01/Insole/{side}/{key}"]
-                    n = min(len(d), data_length)
-                    arr[:n, c] = d[:n].astype(np.float32)
-                    if n < data_length:
-                        arr[n:, c] = np.nan
-                Sub[sub_idx][key] = arr
-            # Back IMU
-            for out_key, h5key in [('BackIMUAccX','Accel_X'), ('BackIMUAccY','Accel_Y'), ('BackIMUAccZ','Accel_Z'),
-                                   ('BackIMUGyrX','Gyro_X'),  ('BackIMUGyrY','Gyro_Y'),  ('BackIMUGyrZ','Gyro_Z')]:
-                arr = np.empty((data_length, len(cond_names)), dtype=np.float32)
-                for c, cond in enumerate(cond_names):
-                    d = f[f"{sub_name}/{cond}/trial_01/Back_imu/{h5key}"]
-                    n = min(len(d), data_length)
-                    arr[:n, c] = d[:n].astype(np.float32)
-                    if n < data_length:
-                        arr[n:, c] = np.nan
-                Sub[sub_idx][out_key] = arr
-    return Sub
 
 def load_subject_fsr_imu_kin(data_path, sub_names, cond_names, data_length):
     Sub = {}
@@ -832,169 +1139,184 @@ def load_subject_fsr_imu_kin(data_path, sub_names, cond_names, data_length):
                 Sub[sub_idx][out_key] = arr
     return Sub
 
-def visualize_subject_sensors(Sub, sub_names, cond_names, data_length, fs=100, seconds=20):
-    for sub_idx, sub_name in enumerate(sub_names, start=1):
-        D = Sub[sub_idx]
-        fig, axes = plt.subplots(3, 1, figsize=(14, 8), sharex=True)
-        fig.suptitle(f"Subject {sub_name}", fontsize=16)
-        t = np.arange(data_length) / fs
-        # FSR1 (Left/Right)
-        for side in ['L', 'R']:
-            key = f'fsr{side}1'
-            arr = D[key]
-            mean_data = np.nanmean(arr, axis=1)
-            axes[0].plot(t, mean_data, label=f'fsr1_{side}')
-        axes[0].set_title('FSR1 (Left/Right)')
-        axes[0].legend()
-        axes[0].grid(True)
-        # IMU Acc (X/Y/Z)
-        for axis in ['X', 'Y', 'Z']:
-            arr = D['BackIMUAcc'+axis]
-            mean_data = np.nanmean(arr, axis=1)
-            axes[1].plot(t, mean_data, label=f'Acc_{axis}')
-        axes[1].set_title('Back IMU Acceleration')
-        axes[1].legend()
-        axes[1].grid(True)
-        # IMU Gyr (X/Y/Z)
-        for axis in ['X', 'Y', 'Z']:
-            arr = D['BackIMUGyr'+axis]
-            mean_data = np.nanmean(arr, axis=1)
-            axes[2].plot(t, mean_data, label=f'Gyr_{axis}')
-        axes[2].set_title('Back IMU Gyroscope')
-        axes[2].legend()
-        axes[2].grid(True)
-        axes[2].set_xlabel('Time [s]')
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-        # plt.show()
+def visualize_speed(raw_v, filtered_v, fs=100, lpf_cutoff=None, title="Velocity filtering (training target)", show=True):
+    import numpy as np
+    import matplotlib.pyplot as plt
 
-def visualize_subject_sensors_all(Sub, sub_names, cond_names, data_length, fs=100, seconds=30):
+    T = raw_v.shape[0]
+    t = np.arange(T) / fs
+
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), sharex=True)
+    fig.suptitle(title, fontsize=16)
+
+    # v_Y
+    axes[0].plot(t, raw_v[:, 0], color='silver', label='Raw v_Y', alpha=0.7)
+    axes[0].plot(t, filtered_v[:, 0], 'r', linewidth=2, label='Filtered v_Y')
+    axes[0].set_ylabel('Velocity [m/s]')
+    axes[0].legend()
+    axes[0].grid(True)
+
+    # v_Z
+    axes[1].plot(t, raw_v[:, 1], color='silver', label='Raw v_Z', alpha=0.7)
+    axes[1].plot(t, filtered_v[:, 1], 'r', linewidth=2, label='Filtered v_Z')
+    axes[1].set_ylabel('Velocity [m/s]')
+    axes[1].set_xlabel('Time [s]')
+    axes[1].legend()
+    axes[1].grid(True)
+
+    if lpf_cutoff is not None:
+        fig.text(0.02, 0.01, f"Butterworth LPF cutoff = {lpf_cutoff} Hz")
+
+    plt.tight_layout()
+    attach_zoom_factory(fig)
+
+    # ---- 버튼: x축 토글 (20-25초 <-> 전체) ----
+    # 버튼 영역(figure 좌표): [left, bottom, width, height]
+    # visualize_speed는 subplot이 꽉 차 있을 수 있으므로 위치 조정 필요
+    # tight_layout 후에 axes 위치가 잡히므로, 별도의 axes를 추가
+    
+    # 2행 1열 구조이므로 하단 여백이 좁을 수 있음. tight_layout(rect=[0, 0.08, 1, 1]) 처럼 아래 여백 확보 후 추가 권장
+    # 여기서는 기존 코드 구조상 레이아웃 조정 없이 간단히 우측 하단이나 별도 위치에 추가
+    btn_ax = fig.add_axes([0.75, 0.01, 0.22, 0.05])
+    btn = Button(btn_ax, "Toggle 20-25s")
+
+    # 전체 범위 저장 (현재 플롯의 x 데이터 기준)
+    # axes[1]이 Time 축을 공유하므로 이를 기준으로 함
+    full_xlim = axes[1].get_xlim()
+    zoom_xlim = (20.0, 25.0)
+
+    # fig에 상태 저장
+    fig._toggle_zoom_state = False
+    fig._toggle_full_xlim = full_xlim
+
+    def _on_toggle(_event):
+        fig._toggle_zoom_state = not fig._toggle_zoom_state
+        if fig._toggle_zoom_state:
+            # 줌하기 전에 현재 full 범위를 업데이트(혹시 사용자가 팬/줌 했을 수 있으므로)하고 싶다면 여기서 get_xlim()을 다시 해도 됨
+            # 여기서는 편의상 처음 렌더링 시점의 범위를 full로 사용
+            for ax in axes:
+                ax.set_xlim(zoom_xlim)
+        else:
+            for ax in axes:
+                ax.set_xlim(fig._toggle_full_xlim)
+        fig.canvas.draw_idle()
+
+    btn.on_clicked(_on_toggle)
+    fig._toggle_btn = btn  # GC 방지
+
+    if show:
+        import matplotlib.pyplot as plt
+        plt.show(block=False)
+        plt.pause(0.01)
+
+    return fig
+
+def plot_velocity_4subjects_per_fig(vel_debug_cache, fs=100, lpf_cutoff=None, subjects_per_fig=4, title_prefix=""):
+    """
+    vel_debug_cache: dict[sub] = (raw_v(T,2), filtered_v(T,2))
+    한 figure에 4명(subjects_per_fig)씩 묶어 표시.
+    레이아웃: rows=subjects_per_fig, cols=2 (왼쪽 v_Y, 오른쪽 v_Z)
+    각 subplot에는 raw/filtered를 함께 plot.
+    """
+    import numpy as np
+    import matplotlib.pyplot as plt
+
+    subs = list(vel_debug_cache.keys())
     figs = []
-    T_show = min(int(seconds * fs), data_length)
-    t = np.arange(T_show) / fs
-    cond_idx = 0  # 첫 번째 조건만 사용
 
-    for sub_idx, sub_name in enumerate(sub_names, start=1):
-        D = Sub[sub_idx]
+    # subject 4명씩 배치
+    for start in range(0, len(subs), subjects_per_fig):
+        batch = subs[start:start + subjects_per_fig]
 
-        # load 단계에서 저장해둔 값 사용
-        mass = D.get('mass_kg', 'N/A')
-        height = D.get('height_m', 'N/A')
+        fig, axes = plt.subplots(len(batch), 2, figsize=(18, 3.8 * len(batch)), sharex=False)
+        if len(batch) == 1:
+            axes = np.array([axes])  # (1,2) 형태로 맞춤
 
-        fig, axes = plt.subplots(3, 2, figsize=(16, 12), sharex=True)
-        figs.append(fig)
-        fig.suptitle(f"Subject {sub_name} (mass: {mass} kg, height: {height} m)", fontsize=16)
-        # 1. FSR1 (Left/Right)
-        for side, prefix in [('Left', 'L'), ('Right', 'R')]:
-            key = f'fsr{prefix}1'
-            arr = D.get(key)
-            if arr is not None:
-                data = arr[:T_show, cond_idx]
-                axes[0,0].plot(t, data, label=f'fsr{prefix}1', linewidth=1)
-        axes[0,0].set_title('FSR1 (Left/Right)')
-        axes[0,0].legend()
-        axes[0,0].grid(True)
-        # 2. Back IMU Acc (X/Y/Z)
-        for axis in ['X', 'Y', 'Z']:
-            arr = D.get(f'BackIMUAcc{axis}')
-            if arr is not None:
-                data = arr[:T_show, cond_idx]
-                axes[0,1].plot(t, data, label=f'Acc_{axis}', linewidth=1)
-        axes[0,1].set_title('Back IMU Acceleration')
-        axes[0,1].legend()
-        axes[0,1].grid(True)
-        # 3. Back IMU Gyr (X/Y/Z)
-        for axis in ['X', 'Y', 'Z']:
-            arr = D.get(f'BackIMUGyr{axis}')
-            if arr is not None:
-                data = arr[:T_show, cond_idx]
-                axes[1,0].plot(t, data, label=f'Gyr_{axis}', linewidth=1)
-        axes[1,0].set_title('Back IMU Gyroscope')
-        axes[1,0].legend()
-        axes[1,0].grid(True)
-        # 4. Common v_Y_true, v_Z_true
-        arr_vy = D.get('v_Y_true')
-        arr_vz = D.get('v_Z_true')
-        if arr_vy is not None and arr_vz is not None:
-            data_vy = arr_vy[:T_show, cond_idx]
-            data_vz = arr_vz[:T_show, cond_idx]
-            axes[1,1].plot(t, data_vy, label='v_Y_true', linewidth=1)
-            axes[1,1].plot(t, data_vz, label='v_Z_true', linewidth=1)
-            axes[1,1].set_title('Common v_Y_true, v_Z_true')
-            axes[1,1].legend()
-            axes[1,1].grid(True)
-        else:
-            axes[1,1].set_title('Common v_Y_true, v_Z_true (missing)')
-        # 5. GRF Fz (left/right)
-        arr_LFz = D.get('LGRFz')
-        arr_RFz = D.get('RGRFz')
-        if arr_LFz is not None and arr_RFz is not None:
-            data_LFz = arr_LFz[:T_show, cond_idx]
-            data_RFz = arr_RFz[:T_show, cond_idx]
-            axes[2,0].plot(t, data_LFz, label='LGRFz', linewidth=1)
-            axes[2,0].plot(t, data_RFz, label='RGRFz', linewidth=1)
-            axes[2,0].set_title('GRF Fz (Left/Right)')
-            axes[2,0].legend()
-            axes[2,0].grid(True)
-        else:
-            axes[2,0].set_title('GRF Fz (missing)')
-        # 6. Robot Encoder (currentLH/currentRH만 plot)
-        arr_LH = D.get('currentLH')
-        arr_RH = D.get('currentRH')
-        if arr_LH is not None and arr_RH is not None:
-            data_LH = arr_LH[:T_show, cond_idx]
-            data_RH = arr_RH[:T_show, cond_idx]
-            axes[2,1].plot(t, data_LH, label='currentLH', linewidth=1)
-            axes[2,1].plot(t, data_RH, label='currentRH', linewidth=1)
-            axes[2,1].set_title('Robot Encoder (currentLH/currentRH)')
-            axes[2,1].legend()
-            axes[2,1].grid(True)
-        else:
-            axes[2,1].set_title('Robot Encoder (missing)')
-        # Add scroll zoom to the first figure (connect once per figure)
+        for r, sub in enumerate(batch):
+            raw_v, filtered_v = vel_debug_cache[sub]
+            T = raw_v.shape[0]
+            t = np.arange(T) / fs
+
+            # v_Y (col 0)
+            ax0 = axes[r, 0]
+            ax0.plot(t, raw_v[:, 0], color="silver", label="Raw v_Y", alpha=0.7)
+            ax0.plot(t, filtered_v[:, 0], "r", linewidth=2, label="Filtered v_Y")
+            ax0.set_ylabel(f"{sub}\nVelocity [m/s]")
+            ax0.grid(True)
+            if r == 0:
+                ax0.set_title("v_Y")
+            ax0.legend(loc="upper right")
+
+            # v_Z (col 1)
+            ax1 = axes[r, 1]
+            ax1.plot(t, raw_v[:, 1], color="silver", label="Raw v_Z", alpha=0.7)
+            ax1.plot(t, filtered_v[:, 1], "r", linewidth=2, label="Filtered v_Z")
+            ax1.grid(True)
+            if r == 0:
+                ax1.set_title("v_Z")
+            ax1.legend(loc="upper right")
+
+            if r == len(batch) - 1:
+                ax0.set_xlabel("Time [s]")
+                ax1.set_xlabel("Time [s]")
+
+        title = title_prefix
+        if lpf_cutoff is not None:
+            if title:
+                title += " | "
+            title += f"Butterworth LPF cutoff = {lpf_cutoff} Hz"
+        fig.suptitle(title, fontsize=14)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        
+        # 하단 여백 확보를 위해 subplots_adjust 등을 쓸 수도 있지만, tight_layout rect로 상단만 비웠음.
+        # 하단에 버튼을 넣으려면 rect=[0, 0.05, 1, 0.96] 정도로 하는게 좋음.
+        # 일단은 겹치더라도 추가.
+        plt.subplots_adjust(bottom=0.08)
+        
         attach_zoom_factory(fig)
 
-        for ax in axes.flat:
-            ax.set_xlabel('Time [s]')
+        # ---- 버튼 추가 ----
+        btn_ax = fig.add_axes([0.75, 0.01, 0.22, 0.05])
+        btn = Button(btn_ax, "Toggle 20-25s")
 
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        # 여기서는 subplot이 여러 개 (rows x 2)
+        # axes는 2차원 배열 (rows, 2)
+        # sharex=False로 되어있으나 시간축은 비슷할 것임. 대표로 첫번째 ax의 xlim을 full로 잡거나, 
+        # 각 ax별로 full을 따로 저장해야할 수도 있음. 
+        # 코드상 sharex=False이므로 개별 full_xlim 저장 필요
+        
+        # 각 ax별 full range 저장
+        full_xlims = {}
+        for row_axes in axes:
+            for ax in row_axes:
+                full_xlims[ax] = ax.get_xlim()
+        
+        zoom_xlim = (20.0, 25.0)
+        
+        fig._toggle_zoom_state = False
+        
+        # 클로저 문제를 피하기 위해 함수 내 함수 정의
+        def _on_toggle(event, f=fig, axs=axes, f_xlims=full_xlims, z_lim=zoom_xlim):
+            f._toggle_zoom_state = not f._toggle_zoom_state
+            is_zoom = f._toggle_zoom_state
+            
+            for row_axes in axs:
+                for ax in row_axes:
+                    if is_zoom:
+                        ax.set_xlim(z_lim)
+                    else:
+                        ax.set_xlim(f_xlims[ax])
+            f.canvas.draw_idle()
 
-        # Kinematics 3x2 subplot
-        fig2, axes2 = plt.subplots(3, 2, figsize=(14, 10), sharex=True)
-        figs.append(fig2)
-        fig2.suptitle(f"Subject {sub_name} - Kinematics (mass: {mass} kg, height: {height} m)", fontsize=16)
+        # lambda나 functools.partial 대신 직접 정의한 함수 연결
+        btn.on_clicked(_on_toggle)
+        fig._toggle_btn = btn  # GC 방지
 
-        kin_pairs = [
-            (['LhipFE','hip_flexion_l'], ['RhipFE','hip_flexion_r'], 'Hip FE'),
-            (['LhipAA','hip_adduction_l'], ['RhipAA','hip_adduction_r'], 'Hip AA'),
-            (['LhipRot','hip_rotation_l'], ['RhipRot','hip_rotation_r'], 'Hip Rot'),
-            (['LkneeFE','knee_angle_l'], ['RkneeFE','knee_angle_r'], 'Knee FE'),
-            (['LankleFE','ankle_angle_l'], ['RankleFE','ankle_angle_r'], 'Ankle FE'),
-            (['incPosLH'], ['incPosRH'], 'Robot Encoder (incPosLH/RH)')
-        ]
+        figs.append(fig)
 
-        for i, (lkeys, rkeys, title) in enumerate(kin_pairs):
-            row, col = divmod(i, 2)
-            arrL = next((D.get(k) for k in lkeys if D.get(k) is not None), None)
-            arrR = next((D.get(k) for k in rkeys if D.get(k) is not None), None)
-            if arrL is not None and arrR is not None:
-                dataL = arrL[:T_show, cond_idx]
-                dataR = arrR[:T_show, cond_idx]
-                axes2[row, col].plot(t, dataL, label=lkeys[0], linewidth=1)
-                axes2[row, col].plot(t, dataR, label=rkeys[0], linewidth=1)
-                axes2[row, col].set_title(title)
-                axes2[row, col].legend()
-                axes2[row, col].grid(True)
-            else:
-                axes2[row, col].set_title(f'{title} (missing)')
+    return figs
 
-        # Add scroll zoom to the second figure (connect once per figure)
-        attach_zoom_factory(fig2)
-
-        for ax in axes2.flat:
-            ax.set_xlabel('Time [s]')
-
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
-    # plt.show()
 
 def print_hdf5_structure_simple(file_path):
     import h5py
@@ -1180,22 +1502,6 @@ def plot_trials_with_nan(h5_path, sub_names, cond_names, input_vars, output_vars
     if shown <= 0:
         print("[INFO] NaN이 포함된 trial 데이터셋이 없습니다.")
 
-def interp_nan_1d_linear(x):
-    import numpy as np
-    x = np.asarray(x, dtype=float)
-    n = x.size
-    if n == 0:
-        return x
-    idx = np.arange(n)
-    mask = np.isfinite(x)
-    if mask.all():
-        return x
-    if not mask.any():
-        return x  # 전부 NaN이면 그대로 반환 (2D에서 처리)
-    y = x.copy()
-    y[~mask] = np.interp(idx[~mask], idx[mask], x[mask])
-    return y
-
 def interp_nan_2d_linear_local(A, fill_all_nan_with=0.0, verbose=False, tag=""):
     """
     A: (T, D) 2D array
@@ -1203,28 +1509,275 @@ def interp_nan_2d_linear_local(A, fill_all_nan_with=0.0, verbose=False, tag=""):
     특정 column이 전부 NaN이면 fill_all_nan_with로 채움.
     """
     import numpy as np
+
     A = np.asarray(A, dtype=float)
     if A.ndim != 2:
         return A
 
     out = A.copy()
+    T = out.shape[0]
+    idx = np.arange(T)
+
     for j in range(out.shape[1]):
         col = out[:, j]
-        if np.isfinite(col).all():
+        mask = np.isfinite(col)
+
+        # NaN 없음
+        if mask.all():
             continue
-        if not np.isfinite(col).any():
+
+        # 전부 NaN
+        if not mask.any():
             out[:, j] = fill_all_nan_with
             if verbose:
                 print(f"[WARN] All-NaN column filled with {fill_all_nan_with}: {tag} col={j}")
             continue
-        out[:, j] = interp_nan_1d_linear(col)
+
+        # 부분 NaN -> 선형 보간
+        out[~mask, j] = np.interp(idx[~mask], idx[mask], col[mask])
+
     return out
+
+def plot_fft_velocity_analysis(h5_path, target_sub, cond_names, fs=100):
+    """
+    특정 피험자(target_sub)의 모든 조건(cond_names)에 대해 
+    v_Y_true, v_Z_true 속도의 FFT 결과를 하나의 Figure에 서브플롯으로 시각화.
+    두 속도 성분을 동일한 plot에 겹쳐서 표시.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.fft import fft, fftfreq
+    
+    # 3행 4열 (최대 12개 조건 가정)
+    n_cols = 4
+    n_rows = (len(cond_names) + n_cols - 1) // n_cols
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 3*n_rows), constrained_layout=True)
+    axes = axes.flatten()
+    
+    # Load paths
+    var_path_y = "Common/v_Y_true"
+    var_path_z = "Common/v_Z_true"
+
+    with h5py.File(h5_path, 'r') as f:
+        for idx, cond in enumerate(cond_names):
+            ax = axes[idx]
+            trial_path = f"{target_sub}/{cond}/trial_01"
+            
+            if trial_path not in f:
+                ax.text(0.5, 0.5, "No Data", ha='center', va='center')
+                ax.set_title(cond)
+                continue
+                
+            g = f[trial_path]
+            
+            # Helper to load and process data
+            def get_fft_amp(grp, v_path):
+                # path parsing
+                parts = v_path.split('/')
+                curr = grp
+                for p in parts[:-1]:
+                    if p not in curr: return None
+                    curr = curr[p]
+                vname = parts[-1]
+                if vname not in curr: return None
+                
+                d = curr[vname][:]
+                if d.ndim > 1: d = d.flatten()
+                
+                # NaN interp
+                if np.isnan(d).any():
+                    nans, x = np.isnan(d), lambda z: z.nonzero()[0]
+                    if np.all(nans):
+                        d[:] = 0.0
+                    else:
+                        d[nans] = np.interp(x(nans), x(~nans), d[~nans])
+                
+                # FFT
+                N = len(d)
+                yf = fft(d)
+                # xf = fftfreq(N, 1/fs)[:N//2] # identical for both
+                amp = 2.0/N * np.abs(yf[0:N//2])
+                return amp, N
+
+            # Calculate FFT for Y and Z
+            res_y = get_fft_amp(g, var_path_y)
+            res_z = get_fft_amp(g, var_path_z)
+            
+            if res_y is None and res_z is None:
+                ax.text(0.5, 0.5, "Vars Not Found", ha='center', va='center')
+                ax.set_title(cond)
+                continue
+            
+            # Frequency axis (assumes same N for both if both exist)
+            N = res_y[1] if res_y else (res_z[1] if res_z else 0)
+            xf = fftfreq(N, 1/fs)[:N//2]
+            
+            # Plot
+            if res_y is not None:
+                ax.plot(xf, res_y[0], label='v_Y', alpha=0.8)
+            if res_z is not None:
+                ax.plot(xf, res_z[0], label='v_Z', alpha=0.8)
+                
+            ax.set_title(cond)
+            ax.set_xlabel("Freq [Hz]")
+            ax.set_ylabel("Mag")
+            ax.set_xlim(0, 5) 
+            ax.grid(True)
+            ax.legend(fontsize=8)
+            
+        # Hide unused subplots
+        for idx in range(len(cond_names), len(axes)):
+            axes[idx].axis('off')
+            
+    fig.suptitle(f"Velocity FFT Analysis (v_Y, v_Z) - Subject: {target_sub}", fontsize=16)
+    fig.canvas.manager.set_window_title(f"FFT Analysis: {target_sub}")
+    
+    return fig
+
+def calculate_and_plot_feature_importance(model, X_test, Y_test, input_vars, device, criterion, fs, stride, tag="BestModel"):
+    """
+    Permutation Importance:
+    X_test의 각 channel(feature)을 하나씩 섞어서 Loss가 얼마나 증가하는지 측정.
+    """
+    import torch
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    model.eval()
+    
+    # 1. Base Loss
+    inputs = torch.from_numpy(X_test).float().to(device)
+    targets = torch.from_numpy(Y_test).float().to(device)
+    
+    with torch.no_grad():
+        preds = model(inputs)
+        base_loss = criterion(preds, targets).item()
+    
+    print(f"[{tag}] Baseline Loss: {base_loss:.6f}")
+    
+    # 2. Get Feature Names
+    # build_nn_dataset 로직 순서대로 이름 생성
+    feature_names = []
+    for group_path, var_list in input_vars:
+        for v in var_list:
+            feature_names.append(f"{group_path.split('/')[-1]}/{v}")
+            
+    # X_test.shape = (N, Window, Channels)
+    n_features = X_test.shape[2]
+    
+    # Gating 정보(l_contact, r_contact)가 추가되었을 수 있음 (use_gating logic)
+    # input_vars 길이보다 n_features가 크다면 뒤쪽은 Gating feature임
+    if len(feature_names) < n_features:
+        diff = n_features - len(feature_names)
+        if diff == 2:
+            feature_names.extend(["Gating/L_contact", "Gating/R_contact"])
+        else:
+            for k in range(diff):
+                feature_names.append(f"Extra_{k}")
+                
+    importances = []
+    
+    # 3. Permutation Loop
+    # 메모리 절약을 위해 numpy상에서 shuffle 후 tensor 변환
+    X_test_perm = X_test.copy()
+    
+    for i in range(n_features):
+        old_col = X_test_perm[:, :, i].copy()
+        
+        # Shuffle along batch dimension (preserve temporal structure within sample? No, usually shuffle samples)
+        # Permutation Importance: "Break association between feature and target"
+        # Shuffling across samples (axis 0) for the whole column matrix (N, T) is standard.
+        np.random.shuffle(X_test_perm[:, :, i])
+        
+        inputs_p = torch.from_numpy(X_test_perm).float().to(device)
+        with torch.no_grad():
+            preds_p = model(inputs_p)
+            loss_p = criterion(preds_p, targets).item()
+            
+        imp = loss_p - base_loss
+        importances.append(imp)
+        print(f"  Feature {i} ({feature_names[i]}): Loss={loss_p:.6f}, Imp={imp:.6f}")
+        
+        # Restore
+        X_test_perm[:, :, i] = old_col
+
+    # 4. Plot
+    importances = np.array(importances)
+    indices = np.argsort(importances)
+    
+    sorted_names = [feature_names[i] for i in indices]
+    sorted_imp = importances[indices]
+    
+    # 너무 많으면 상위 20개만
+    if len(sorted_names) > 20:
+        sorted_names = sorted_names[-20:]
+        sorted_imp = sorted_imp[-20:]
+        
+    fig, ax = plt.subplots(figsize=(10, 8))
+    ax.barh(range(len(sorted_names)), sorted_imp, align='center')
+    ax.set_yticks(range(len(sorted_names)))
+    ax.set_yticklabels(sorted_names)
+    ax.set_xlabel("Increase in Loss (Importance)")
+    ax.set_title(f"Permutation Importance ({tag})")
+    ax.grid(axis='x')
+    plt.tight_layout()
+    
+    
+    return fig
+
+def plot_model_summary(results):
+    """
+    results: list of (model, seed, test_loss, ckpt, config)
+    모델별 Test Loss (Huber) 평균 및 표준편차를 Bar Plot으로 시각화
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Group by model
+    model_stats = {}
+    for r in results:
+        m, s, loss, ckpt, cfg = r
+        if m not in model_stats:
+            model_stats[m] = []
+        model_stats[m].append(loss)
+    
+    models = sorted(model_stats.keys())
+    means = []
+    stds = []
+    
+    print("\n=== Summary (test_loss) ===")
+    for m in models:
+        vals = model_stats[m]
+        mean = np.mean(vals)
+        std = np.std(vals) if len(vals) > 1 else 0.0
+        
+        means.append(mean)
+        stds.append(std)
+        print(f"{m}: mean={mean:.6f}, std={std:.6f}, n={len(vals)}")
+        
+    # Plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    x_pos = np.arange(len(models))
+    
+    ax.bar(x_pos, means, yerr=stds, align='center', alpha=0.7, ecolor='black', capsize=10)
+    ax.set_xticks(x_pos)
+    ax.set_xticklabels(models)
+    ax.set_ylabel('Test Loss (Huber)')
+    ax.set_title('Model Comparison Results')
+    ax.grid(axis='y', linestyle='--', alpha=0.7)
+    
+    # Add value labels
+    for i, v in enumerate(means):
+        ax.text(i, v + stds[i] + 0.0001, f"{v:.4f}", ha='center', va='bottom')
+        
+    plt.tight_layout()
+    return fig
 
 if __name__ == "__main__":
     fs = 100
     print_hdf5_structure_simple(data_path)
     Sub = load_subject_fsr_imu_kin(data_path, sub_names, cond_names, data_length)
-    visualize_subject_sensors_all(Sub, sub_names, cond_names, data_length)
 
     # ===============================
     # User-defined subject split
@@ -1257,9 +1810,20 @@ if __name__ == "__main__":
     time_window_output = 10  # output window length (samples)
     stride = 10
 
+    MA_WIN = None
+    LPF_CUTOFF = 0.3  # Butterworth Low-Pass Filter Cutoff Frequency (Hz)
+    LPF_ORDER = 5     # Butterworth Low-Pass Filter Order
+    
+    # [추가] Hip Joint FFT Plot -> [수정] Velocity FFT Plot (v_Y, v_Z)
+    target_fft_sub = sub_names[0] # 첫 번째 피험자 (예: S004)
+    fft_fig = plot_fft_velocity_analysis(data_path, target_fft_sub, cond_names, fs=100)
+
     plot_trials_with_nan(data_path, sub_names, cond_names, input_vars, output_vars, fs=100, max_trials=50)
+    
+    # [수정] 생성된 모든 Figure(FFT + NaN Check)를 화면에 띄움 (Non-blocking)
+    import matplotlib.pyplot as plt
     plt.show(block=False)
-    plt.pause(10)  # GUI 이벤트 루프에 제어권 잠깐 넘김
+    plt.pause(1.0)  # 렌더링 대기
 
     SUBJECT_SELECTION_TRAIN = make_subject_selection(TRAIN_SUBJECTS)
     SUBJECT_SELECTION_VAL   = make_subject_selection(VAL_SUBJECTS)
@@ -1270,7 +1834,8 @@ if __name__ == "__main__":
         input_vars, output_vars,
         time_window_input, time_window_output, stride,
         subject_selection=SUBJECT_SELECTION_TRAIN,
-        condition_selection=CONDITION_SELECTION
+        condition_selection=CONDITION_SELECTION,
+        debug_plot=True, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
     )
 
     X_val, Y_val = build_nn_dataset(
@@ -1278,7 +1843,8 @@ if __name__ == "__main__":
         input_vars, output_vars,
         time_window_input, time_window_output, stride,
         subject_selection=SUBJECT_SELECTION_VAL,
-        condition_selection=CONDITION_SELECTION
+        condition_selection=CONDITION_SELECTION,
+        lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
     )
 
     X_test, Y_test = build_nn_dataset(
@@ -1286,7 +1852,7 @@ if __name__ == "__main__":
         input_vars, output_vars,
         time_window_input, time_window_output, stride,
         subject_selection=SUBJECT_SELECTION_TEST,
-        condition_selection=CONDITION_SELECTION
+        condition_selection=CONDITION_SELECTION, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
     )
 
     print("Train:", X_train.shape, Y_train.shape)
@@ -1296,7 +1862,7 @@ if __name__ == "__main__":
     train_cfg = {
         "batch_size": 1024,
         "val_batch_size": 1024,
-        "epochs": 20,
+        "epochs": 15,
         "patience": 5,
         "dropout_p": 0.3,
         "lr": 3e-4,
@@ -1337,13 +1903,19 @@ if __name__ == "__main__":
     # 미래 10 tick 전체를 학습하려면 sequence 모드로
     target_mode = "sequence"
 
-    model_list = ["tcn_mlp", "tcn_gru", "tcn_lstm", "tcn_tconv"]
+    model_list = ["TCN_FC", "TCN_MLP", "TCN_GRU_FC", "TCN_GRU_MLP", "TCN_LSTM_FC", "TCN_LSTM_MLP"]
     seeds = [42, 43, 44]  # 최소 3개, 여유되면 5개 이상 권장
 
     results = []
+    
+    # [추가] Live Plotter 시작
+    live_plotter = LiveTrainingPlotter()
 
     for m in model_list:
         for sd in seeds:
+            # [추가] 세션 시작 알림 (그래프 리셋)
+            live_plotter.start_session(m, sd)
+            
             ckpt = f"speed_estimator_best_{m}_seed{sd}.pt"
             metrics = train_speed_estimator(
                 X_train, Y_train,
@@ -1353,7 +1925,8 @@ if __name__ == "__main__":
                 target_mode=target_mode,
                 cfg=train_cfg,
                 seed=sd,
-                save_path=ckpt
+                save_path=ckpt,
+                live_plotter=live_plotter  # [추가] 전달
             )
             print(f"[RESULT] model={m} seed={sd} test_huber={metrics['test_huber']:.6f} "
                 f"params={metrics['n_params']} ckpt={ckpt}")
@@ -1369,23 +1942,61 @@ if __name__ == "__main__":
                 print("  step_MAE(mean over D):", np.array2string(step_mae, precision=4, separator=","))
                 print("  step_RMSE(mean over D):", np.array2string(step_rmse, precision=4, separator=","))
 
-            results.append((m, sd, float(metrics["test_huber"]), ckpt))
+            results.append((m, sd, float(metrics["test_huber"]), ckpt, metrics.get("model_config", {})))
 
-    # 결과 요약 출력
-    print("\n=== Summary (test_loss) ===")
-    for m in model_list:
-        vals = [r[2] for r in results if r[0] == m]
-        if len(vals) == 0:
-            continue
-        mean = sum(vals) / len(vals)
-        std = (sum((v-mean)**2 for v in vals) / max(1, len(vals)-1))**0.5 if len(vals) > 1 else 0.0
-        print(f"{m}: mean={mean:.6f}, std={std:.6f}, n={len(vals)}")
+    # [수정] 결과 요약 플롯 (Figure로 띄우기)
+    summary_fig = plot_model_summary(results)
 
-    best = min(results, key=lambda x: x[2])  # (model, seed, loss, ckpt)
-    best_model, best_seed, best_loss, best_ckpt = best
+    best = min(results, key=lambda x: x[2])  # (model, seed, loss, ckpt, config)
+    best_model, best_seed, best_loss, best_ckpt, best_config = best
 
     print(f"Done. Best test_huber: {best_loss:.6f} (model={best_model}, seed={best_seed})")
 
+    # [추가] Best Model Load & Feature Importance
+    print("\n=== Calculating Feature Importance for Best Model ===")
+    
+    # Re-instantiate model
+    input_dim = X_test.shape[2]
+    horizon = Y_test.shape[1]
+    output_dim = Y_test.shape[2]
+    
+    best_net_cls = {
+        "TCN_FC": TCN_FC, "TCN_MLP": TCN_MLP,
+        "TCN_GRU_FC": TCN_GRU_FC, "TCN_GRU_MLP": TCN_GRU_MLP,
+        "TCN_LSTM_FC": TCN_LSTM_FC, "TCN_LSTM_MLP": TCN_LSTM_MLP
+    }[best_model]
+    
+    # Construct args based on model type
+    base_args = {
+         "input_dim": input_dim, "output_dim": output_dim, "horizon": horizon,
+         "channels": tuple(train_cfg.get("tcn_channels", (64, 64, 128))),
+         "kernel_size": int(train_cfg.get("kernel_size", 3)),
+         "dropout": float(train_cfg.get("dropout_p", 0.1))
+    }
+    
+    # Add model-specific args from best_config
+    if best_model == "TCN_MLP":
+        base_args["mlp_hidden"] = best_config.get("mlp_hidden", 256)
+    elif best_model in ["TCN_GRU_FC", "TCN_GRU_MLP", "TCN_LSTM_FC", "TCN_LSTM_MLP"]:
+        base_args["hidden_size"] = best_config.get("hidden_size", 128)
+        base_args["num_layers"] = best_config.get("num_layers", 1)
+        
+    best_net = best_net_cls(**base_args)
+    
+    # Load weights
+    ckpt_obj = torch.load(best_ckpt)
+    state = ckpt_obj["state_dict"] if isinstance(ckpt_obj, dict) and "state_dict" in ckpt_obj else ckpt_obj
+    best_net.load_state_dict(state)
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    best_net.to(device)
+    
+    criterion = torch.nn.HuberLoss(delta=train_cfg.get("huber_delta", 0.5))
+    
+    fi_fig = calculate_and_plot_feature_importance(
+        best_net, X_test, Y_test, input_vars, device, criterion, fs, stride, tag=f"Best_{best_model}"
+    )
+    
     plot_pred_true_all_conditions(
         data_path=data_path,
         sub_names=sub_names,
@@ -1402,5 +2013,10 @@ if __name__ == "__main__":
         batch_size=512,
         fs=100,
         max_points=5000,
-        model_cfg=train_cfg
+        model_cfg=train_cfg,
+        lpf_cutoff=LPF_CUTOFF,
+        lpf_order=LPF_ORDER
     )
+    
+    # [수정] 마지막에 모든 플롯 유지
+    plt.show(block=True)
