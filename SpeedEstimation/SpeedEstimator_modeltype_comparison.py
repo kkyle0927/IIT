@@ -413,7 +413,13 @@ def train_speed_estimator(
         output_dim = train_ds.Y.shape[1]
 
     # backbone 공통 하이퍼 (필요시 cfg로 노출)
-    tcn_channels = tuple(cfg.get("tcn_channels", (64, 64, 128)))
+    if "tcn_channels" in cfg:
+        tcn_channels = tuple(cfg["tcn_channels"])
+    else:
+        n_layers = int(cfg.get("tcn_layers", 3))
+        n_hidden = int(cfg.get("tcn_hidden", 64))
+        tcn_channels = tuple([n_hidden] * n_layers)
+        
     kernel_size = int(cfg.get("kernel_size", 3))
 
     param_budget = cfg.get("param_budget", None)     # int 또는 None
@@ -1775,174 +1781,136 @@ def plot_model_summary(results):
     return fig
 
 if __name__ == "__main__":
+    import yaml
+    from pathlib import Path
+
+    # Load Base Config
+    config_path = Path("configs/base_config.yaml")
+    if not config_path.exists():
+        print("base_config.yaml not found!")
+        exit(1)
+        
+    with open(config_path, 'r') as f:
+        base_config = yaml.safe_load(f)
+
+    # Global Settings from Config
+    data_path = base_config.get("data_path", "combined_data.h5")
+    all_subjects = sorted(base_config.get("subjects"))
+    cond_names = base_config.get("conditions")
+    
+    input_vars = base_config.get("input_vars")
+    output_vars = base_config.get("output_vars")
+    
+    time_window_input = base_config.get("time_window_input", 100)
+    time_window_output = 10 
+    stride = 10
+    
+    lpf_cutoff = base_config.get("lpf_cutoff", 6.0)
+    lpf_order = base_config.get("lpf_order", 5)
+
     fs = 100
     print_hdf5_structure_simple(data_path)
-    Sub = load_subject_fsr_imu_kin(data_path, sub_names, cond_names, data_length)
-
-    # ===============================
-    # User-defined subject split
-    # ===============================
-    TRAIN_SUBJECTS = ['S004', 'S005', 'S006', 'S007', 'S008', 'S009']
-    VAL_SUBJECTS   = ['S010']
-    TEST_SUBJECTS  = ['S011']
-
-    def make_subject_selection(include_list):
-        return {'include': include_list, 'exclude': []}
-
-    CONDITION_SELECTION = {
-        'include': None,      # e.g. ['level_12mps']
-        'exclude': []         # e.g. ['crouch']
-    }
-
-    input_vars = [
-        ('Robot', ['incPosLH', 'incPosRH']),
-        ('Back_imu', ['Accel_X', 'Accel_Y', 'Accel_Z', 'Gyro_X', 'Gyro_Y', 'Gyro_Z', 'Pitch', 'Roll', 'Yaw']),
-        ('MoCap/grf_measured/left/force', ['Fx', 'Fy', 'Fz']),
-        ('MoCap/grf_measured/right/force', ['Fx', 'Fy', 'Fz']),
-        ('MoCap/kin_q', ['ankle_angle_l', 'ankle_angle_r', 'hip_adduction_l', 'hip_adduction_r', 'hip_flexion_l', 'hip_flexion_r', 'hip_rotation_l', 'hip_rotation_r', 'knee_angle_l', 'knee_angle_r']),
-        ('MoCap/kin_qdot', ['ankle_angle_l', 'ankle_angle_r', 'hip_adduction_l', 'hip_adduction_r', 'hip_flexion_l', 'hip_flexion_r', 'hip_rotation_l', 'hip_rotation_r', 'knee_angle_l', 'knee_angle_r'])
-    ]
-    output_vars = [
-        ('Common', ['v_Y_true', 'v_Z_true'])
-    ]
-
-    time_window_input = 100  # input window length (samples)
-    time_window_output = 10  # output window length (samples)
-    stride = 10
-
-    MA_WIN = None
-    LPF_CUTOFF = 0.3  # Butterworth Low-Pass Filter Cutoff Frequency (Hz)
-    LPF_ORDER = 5     # Butterworth Low-Pass Filter Order
     
-    # [추가] Hip Joint FFT Plot -> [수정] Velocity FFT Plot (v_Y, v_Z)
-    target_fft_sub = sub_names[0] # 첫 번째 피험자 (예: S004)
-    fft_fig = plot_fft_velocity_analysis(data_path, target_fft_sub, cond_names, fs=100)
+    # Models to Compare
+    # You can add/remove models here
+    model_list = ["TCN_MLP", "TCN_LSTM_MLP"] 
+    seeds = [42] # Reduced for speed, user can expand
 
-    plot_trials_with_nan(data_path, sub_names, cond_names, input_vars, output_vars, fs=100, max_trials=50)
+    all_results = [] # (model, seed, folder_sub, metrics)
     
-    # [수정] 생성된 모든 Figure(FFT + NaN Check)를 화면에 띄움 (Non-blocking)
-    import matplotlib.pyplot as plt
-    plt.show(block=False)
-    plt.pause(1.0)  # 렌더링 대기
-
-    SUBJECT_SELECTION_TRAIN = make_subject_selection(TRAIN_SUBJECTS)
-    SUBJECT_SELECTION_VAL   = make_subject_selection(VAL_SUBJECTS)
-    SUBJECT_SELECTION_TEST  = make_subject_selection(TEST_SUBJECTS)
-
-    X_train, Y_train = build_nn_dataset(
-        data_path, sub_names, cond_names,
-        input_vars, output_vars,
-        time_window_input, time_window_output, stride,
-        subject_selection=SUBJECT_SELECTION_TRAIN,
-        condition_selection=CONDITION_SELECTION,
-        debug_plot=True, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
-    )
-
-    X_val, Y_val = build_nn_dataset(
-        data_path, sub_names, cond_names,
-        input_vars, output_vars,
-        time_window_input, time_window_output, stride,
-        subject_selection=SUBJECT_SELECTION_VAL,
-        condition_selection=CONDITION_SELECTION,
-        lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
-    )
-
-    X_test, Y_test = build_nn_dataset(
-        data_path, sub_names, cond_names,
-        input_vars, output_vars,
-        time_window_input, time_window_output, stride,
-        subject_selection=SUBJECT_SELECTION_TEST,
-        condition_selection=CONDITION_SELECTION, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
-    )
-
-    print("Train:", X_train.shape, Y_train.shape)
-    print("Val  :", X_val.shape,   Y_val.shape)
-    print("Test :", X_test.shape,  Y_test.shape)
-
-    train_cfg = {
-        "batch_size": 1024,
-        "val_batch_size": 1024,
-        "epochs": 15,
-        "patience": 5,
-        "dropout_p": 0.3,
-        "lr": 3e-4,
-        "weight_decay": 1e-2,
-        "cos_T0": 10,
-        "cos_Tmult": 1,
-        "eta_min": 1e-5,
-        "huber_delta": 0.5,
-        "print_every": 50,
-        "tcn_channels": (64, 64, 128),
-        "kernel_size": 3,
-
-        # 파라미터 budget 맞추기
-        "param_budget": None,   # None이면 main에서 tcn_mlp 기준으로 자동 설정
-        "param_tol": 0.03,      # 3% 정도 오차 허용
-        "max_hidden": 1024      # mlp_hidden / rnn_hidden 탐색 상한
-    }
-
-    if train_cfg.get("param_budget", None) is None:
-        # (input_dim, output_dim, horizon)을 여기서 알 수 있어야 함
-        input_dim = X_train.shape[2]
-        horizon = Y_train.shape[1]         # target_mode="sequence" 가정
-        output_dim = Y_train.shape[2]
-
-        ref = TCN_MLP(
-            input_dim=input_dim,
-            output_dim=output_dim,
-            horizon=horizon,
-            channels=tuple(train_cfg.get("tcn_channels", (64, 64, 128))),
-            kernel_size=int(train_cfg.get("kernel_size", 3)),
-            dropout=float(train_cfg.get("dropout_p", 0.1)),
-            mlp_hidden=int(train_cfg.get("mlp_hidden", 256)),
+    print(f"[INFO] Starting Model Comparison with LOSO. Subjects: {all_subjects}")
+    
+    # Visualization (One-off)
+    try:
+        target_fft_sub = all_subjects[0]
+        # plot_fft_velocity_analysis(data_path, target_fft_sub, cond_names, fs=100)
+        # plt.show(block=False)
+        pass # Skip for now to focus on training loop
+    except: pass
+    
+    # LOSO Loop
+    for i in range(len(all_subjects)):
+        test_sub = all_subjects[i]
+        val_sub = all_subjects[i-1]
+        train_subs = [s for s in all_subjects if s != test_sub and s != val_sub]
+        
+        print(f"\n==================================================")
+        print(f" Fold: Test={test_sub}, Val={val_sub}")
+        print(f"==================================================")
+        
+        # Build Datasets
+        X_train, Y_train = build_nn_dataset(
+            data_path, train_subs, cond_names,
+            input_vars, output_vars,
+            time_window_input, time_window_output, stride,
+            lpf_cutoff=lpf_cutoff, lpf_order=lpf_order
         )
-        ref_budget = sum(p.numel() for p in ref.parameters() if p.requires_grad)
-        train_cfg["param_budget"] = int(ref_budget)
-        print(f"[PARAM_BUDGET] reference=tcn_mlp params={ref_budget}")
-
-    # 미래 10 tick 전체를 학습하려면 sequence 모드로
-    target_mode = "sequence"
-
-    model_list = ["TCN_FC", "TCN_MLP", "TCN_GRU_FC", "TCN_GRU_MLP", "TCN_LSTM_FC", "TCN_LSTM_MLP"]
-    seeds = [42, 43, 44]  # 최소 3개, 여유되면 5개 이상 권장
-
-    results = []
-    
-    # [추가] Live Plotter 시작
-    live_plotter = LiveTrainingPlotter()
-
-    for m in model_list:
-        for sd in seeds:
-            # [추가] 세션 시작 알림 (그래프 리셋)
-            live_plotter.start_session(m, sd)
+        X_val, Y_val = build_nn_dataset(
+            data_path, [val_sub], cond_names,
+            input_vars, output_vars,
+            time_window_input, time_window_output, stride,
+            lpf_cutoff=lpf_cutoff, lpf_order=lpf_order
+        )
+        X_test, Y_test = build_nn_dataset(
+            data_path, [test_sub], cond_names,
+            input_vars, output_vars,
+            time_window_input, time_window_output, stride,
+            lpf_cutoff=lpf_cutoff, lpf_order=lpf_order
+        )
+        
+        if len(X_train) == 0: 
+            print("Skipping empty fold.")
+            continue
             
-            ckpt = f"speed_estimator_best_{m}_seed{sd}.pt"
-            metrics = train_speed_estimator(
-                X_train, Y_train,
-                X_val, Y_val,
-                X_test, Y_test,
-                model_type=m,
-                target_mode=target_mode,
-                cfg=train_cfg,
-                seed=sd,
-                save_path=ckpt,
-                live_plotter=live_plotter  # [추가] 전달
-            )
-            print(f"[RESULT] model={m} seed={sd} test_huber={metrics['test_huber']:.6f} "
-                f"params={metrics['n_params']} ckpt={ckpt}")
+        print("Train:", X_train.shape, Y_train.shape)
+        print("Val  :", X_val.shape,   Y_val.shape)
+        print("Test :", X_test.shape,  Y_test.shape)
 
-            if metrics.get("step_mae") is not None:
-                step_mae = metrics["step_mae"].mean(axis=1)    # (H,)
-                step_rmse = metrics["step_rmse"].mean(axis=1)  # (H,)
-                dt_fs = 1.0 / fs
-                ahead_s_fs = (np.arange(len(step_mae)) + 1) * dt_fs
-                ahead_s_stride = (np.arange(len(step_mae)) + 1) * (stride / fs)
-                print("  ahead_s(fs):", np.array2string(ahead_s_fs, precision=3, separator=","))
-                print("  ahead_s(stride):", np.array2string(ahead_s_stride, precision=3, separator=","))
-                print("  step_MAE(mean over D):", np.array2string(step_mae, precision=4, separator=","))
-                print("  step_RMSE(mean over D):", np.array2string(step_rmse, precision=4, separator=","))
+        # Prepare Config for this run
+        # We can either tune or use fixed config.
+        # Let's use base_config, but ensure TCN stuff is passed correctly.
+        train_cfg = base_config.copy()
+        train_cfg["epochs"] = base_config.get("epochs", 15)
+        # Ensure TCN layers/hidden are present if needed, handled by train_speed_estimator logic we updated
 
-            results.append((m, sd, float(metrics["test_huber"]), ckpt, metrics.get("model_config", {})))
+        target_mode = "sequence"
+        
+        for m in model_list:
+            print(f"   [Model: {m}]")
+            for sd in seeds:
+                ckpt_name = f"ckpt_{test_sub}_{m}_seed{sd}.pt"
+                
+                # Check if we need live plotter? Maybe too chaotic for 48 runs?
+                # Keep it off or optional.
+                
+                metrics = train_speed_estimator(
+                    X_train, Y_train,
+                    X_val, Y_val,
+                    X_test, Y_test,
+                    model_type=m,
+                    target_mode=target_mode,
+                    cfg=train_cfg,
+                    seed=sd,
+                    save_path=ckpt_name,
+                    live_plotter=None # Disable for massive loop
+                )
+                
+                print(f"      -> Seed={sd}: Huber={metrics['test_huber']:.6f}, Params={metrics['n_params']}")
+                
+                all_results.append((m, sd, metrics['test_huber'], ckpt_name, metrics.get("model_config", {})))
+
+    # Summary Plot
+    if all_results:
+        # Convert to format expected by plot_model_summary
+        # (model, seed, loss, ckpt, config) - we used (model, seed, loss, ckpt, config) above?
+        # Actually plot_model_summary expects: list of (model, seed, test_loss, ckpt, config)
+        # My append above: (m, sd, metrics['test_huber'], ckpt_name, metrics.get("model_config", {}))
+        # Matches!
+        
+        summary_fig = plot_model_summary(all_results)
+        plt.show(block=True)
+    else:
+        print("No results to plot.")
 
     # [수정] 결과 요약 플롯 (Figure로 띄우기)
     summary_fig = plot_model_summary(results)

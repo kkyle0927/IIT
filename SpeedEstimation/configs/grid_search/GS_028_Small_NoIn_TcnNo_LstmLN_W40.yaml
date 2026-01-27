@@ -1,0 +1,14 @@
+epochs: 25
+experiment_name: GS_028_Small_NoIn_TcnNo_LstmLN_W40
+lpf_cutoff: 0.5
+lstm_hidden: 64
+lstm_use_ln: true
+mlp_hidden: 64
+mlp_norm: null
+tcn_channels:
+- 32
+- 64
+- 128
+tcn_norm: null
+time_window_input: 40
+use_input_norm: false

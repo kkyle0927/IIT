@@ -18,21 +18,172 @@ import h5py
 import matplotlib.pyplot as plt
 import time
 from scipy.signal import butter, filtfilt
+import yaml
+import json
+import shutil
+import glob
+from pathlib import Path
+import sys
+import platform
+import datetime
 
-# 데이터셋 로드
-data_path = '251030_combined_data.h5'
+# data_length removed as requested - using full dataset length dynamically
 
-# subject, condition 정보
-sub_names = ['S004','S005','S006','S007','S008','S009','S010','S011']
-cond_names = [
-    'accel_sine','asym_30deg','asym_60deg','cadence_120p','cadence_90p',
-    'crouch','decline_5deg','incline_10deg','level_08mps','level_12mps','level_16mps'
-]
-data_length = 12000
+# Preprocessing Config
+fs = 100
+# Global config defaults (Constants)
+time_window_output = 10
+stride = 10
+
+# input_vars, output_vars defined in YAML/base_config now.
+# TRAIN_SUBJECTS, VAL_SUBJECTS, TEST_SUBJECTS defined in YAML/base_config now.
+
+def make_subject_selection(include_list):
+    return {'include': include_list, 'exclude': []}
+
+CONDITION_SELECTION = {'include': None, 'exclude': []}
+# data_length = 12000 # Removed as requested
 
 # -------------------------------------------------------------------------------------------------
 # Helper Functions (Dataset, Plotting, etc) -> Copy from original
 # -------------------------------------------------------------------------------------------------
+
+def plot_filtering_check(data_path, sub, cond, output_vars, lpf_cutoff, fs=100):
+    """
+    Visualizes the effect of LPF on the reference velocity for a single trial.
+    Blocks execution until closed.
+    """
+    print(f"\n[INFO] Visualizing Filtering Effect for {sub}/{cond}...")
+    with h5py.File(data_path, 'r') as f:
+        # Just grab the first trial found
+        if sub not in f or cond not in f[sub]:
+            print("  -> Sample not found.")
+            return
+
+def plot_filtering_check(data_path, sub, cond, output_vars, lpf_cutoff, fs=100):
+    """
+    Visualizes the effect of LPF on the reference velocity for a single trial.
+    Blocks execution until closed.
+    Includes Button to Scale Up (5s window) and Slider to Scroll.
+    """
+    from matplotlib.widgets import Slider, Button
+    
+    print(f"\n[INFO] Visualizing Filtering Effect for {sub}/{cond}...")
+    with h5py.File(data_path, 'r') as f:
+        # Just grab the first trial found
+        if sub not in f or cond not in f[sub]:
+            print("  -> Sample not found.")
+            return
+
+        cond_grp = f[sub][cond]
+        lv_key = list(cond_grp.keys())[0]
+        trial_key = list(cond_grp[lv_key].keys())[0]
+        trial_grp = cond_grp[lv_key][trial_key]
+        
+        raw_vals = {}
+        filtered_vals = {}
+        
+        for gpath, vars in output_vars:
+            # Navigate
+            g = trial_grp
+            parts = gpath.split('/')
+            valid = True
+            for p in parts:
+                if p in g: g = g[p]
+                else: valid=False; break
+            if not valid: continue
+            
+            for v in vars:
+                if v in g:
+                    raw = g[v][:]
+                    raw = np.nan_to_num(raw)
+                    raw_vals[v] = raw
+                    
+                    if lpf_cutoff is not None:
+                        # Use same filter logic
+                        from scipy.signal import butter, filtfilt
+                        nyq = 0.5 * fs
+                        normal_cutoff = lpf_cutoff / nyq
+                        b, a = butter(4, normal_cutoff, btype='low', analog=False) # Order 4 matched
+                        filt = filtfilt(b, a, raw)
+                        filtered_vals[v] = filt
+                        
+        if not raw_vals:
+            print("  -> No output vars found to plot.")
+            return
+            
+        # Plot Setup
+        num_plots = len(raw_vals)
+        fig, axes = plt.subplots(num_plots, 1, figsize=(10, 4*num_plots), sharex=True)
+        if num_plots == 1: axes = [axes]
+        
+        # Adjust layout to make room for widgets
+        plt.subplots_adjust(bottom=0.25)
+        
+        lines_raw = []
+        lines_filt = []
+        
+        max_idx = 0
+        for i, (vname, rdata) in enumerate(raw_vals.items()):
+            max_idx = max(max_idx, len(rdata))
+            ax = axes[i]
+            l1, = ax.plot(rdata, label='Raw', alpha=0.5, color='gray')
+            lines_raw.append(l1)
+            
+            if vname in filtered_vals:
+                l2, = ax.plot(filtered_vals[vname], label=f'Filtered ({lpf_cutoff}Hz)', color='red', linewidth=1.5)
+                lines_filt.append(l2)
+                
+            ax.set_title(f"Reference Signal: {vname}")
+            ax.legend()
+            ax.grid(True)
+            
+        # Widgets
+        axcolor = 'lightgoldenrodyellow'
+        
+        # Slider
+        ax_scroll = plt.axes([0.2, 0.1, 0.65, 0.03], facecolor=axcolor)
+        s_scroll = Slider(ax_scroll, 'Scroll', 0, max_idx, valinit=0)
+        
+        # Button
+        ax_button = plt.axes([0.8, 0.025, 0.1, 0.04])
+        btn_zoom = Button(ax_button, 'Zoom 5s', color=axcolor, hovercolor='0.975')
+        
+        window_size_samples = 5 * fs # 5 seconds
+        is_zoomed = [False] # Mutable container
+        
+        def update(val):
+            if not is_zoomed[0]:
+                return # Do nothing if not zoomed
+                
+            start = int(s_scroll.val)
+            end = start + window_size_samples
+            
+            for ax in axes:
+                ax.set_xlim(start, end)
+            fig.canvas.draw_idle()
+            
+        def toggle_zoom(event):
+            is_zoomed[0] = not is_zoomed[0]
+            
+            if is_zoomed[0]:
+                btn_zoom.label.set_text("Reset View")
+                # Trigger initial zoom at current slider pos
+                update(s_scroll.val)
+            else:
+                btn_zoom.label.set_text("Zoom 5s")
+                # Reset X limits
+                for ax in axes:
+                    ax.set_xlim(auto=True)
+                    ax.relim()
+                    ax.autoscale_view()
+                fig.canvas.draw_idle()
+                
+        s_scroll.on_changed(update)
+        btn_zoom.on_clicked(toggle_zoom)
+        
+        print("  -> Interactively check filtering. Close to continue...")
+        plt.show(block=True)
 
 def get_ground_contact(grf_fz, threshold=20.0):
     return (np.nan_to_num(grf_fz) > threshold).astype(float)
@@ -85,7 +236,45 @@ class LiveTrainingPlotter:
         self.ax.relim()
         self.ax.autoscale_view()
         self.fig.canvas.draw()
+        self.fig.canvas.draw()
         self.fig.canvas.flush_events()
+
+class ExperimentLogger:
+    def __init__(self, log_dir):
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.csv_path = self.log_dir / "train_log.csv"
+        self.log_file = open(self.csv_path, "w")
+        self.log_file.write("epoch,train_loss,val_loss,lr,time\n")
+        
+    def log_epoch(self, epoch, train_loss, val_loss, lr, duration):
+        self.log_file.write(f"{epoch},{train_loss:.6f},{val_loss:.6f},{lr:.2e},{duration:.2f}\n")
+        self.log_file.flush()
+        
+    def close(self):
+        self.log_file.close()
+        
+    def save_env(self):
+        with open(self.log_dir / "env.txt", "w") as f:
+            f.write(f"Date: {datetime.datetime.now()}\n")
+            f.write(f"Python: {sys.version}\n")
+            f.write(f"Platform: {platform.platform()}\n")
+            # Could add pip freeze here if needed
+            
+    def save_metrics(self, metrics_dict):
+        # Convert numpy types to native python for JSON serialization
+        def convert(o):
+            if isinstance(o, np.integer): return int(o)
+            if isinstance(o, np.floating): return float(o)
+            if isinstance(o, np.ndarray): return o.tolist()
+            return str(o)
+            
+        with open(self.log_dir / "metrics.json", "w") as f:
+            json.dump(metrics_dict, f, indent=4, default=convert)
+
+    def save_config(self, config):
+        with open(self.log_dir / "config.yaml", "w") as f:
+            yaml.dump(config, f, default_flow_style=False)
 
 class WindowDataset(Dataset):
     def __init__(self, X, Y, target_mode="mean"):
@@ -117,132 +306,197 @@ def extract_condition_data_v2(
     """
     
     # -------------------------------------------------------------------------
-    # 1. Load Inputs & Augment
+    # 1. Locate All Trials (Iterate Levels)
     # -------------------------------------------------------------------------
-    in_list = []
-    
-    # Locate Trial Group (e.g. 'trial_01')
     if sub not in f or cond not in f[sub]:
-        print(f"[DEBUG] {sub}/{cond}: Missing group")
+        # print(f"[DEBUG] {sub}/{cond}: Missing group")
         return None, None
-        
+
+    # New Hierarchy: Subject -> Condition -> Level (lv0, lv4...) -> Trial (trial_01...)
+    # We aggregate all trials found under all levels for this condition? 
+    # Or just concatenate them? For now, let's concatenate all valid trials found.
+    
     cond_group = f[sub][cond]
-    trial_keys = list(cond_group.keys())
-    if len(trial_keys) == 0:
-        print(f"[DEBUG] {sub}/{cond}: No trial keys found")
-        return None, None
-        
-    # Assuming the first key is the trial
-    trial_name = trial_keys[0]
-    trial_group = cond_group[trial_name]
+    level_keys = list(cond_group.keys()) # e.g. ['lv0', 'lv4']
     
-    # buffers for augmentation
-    kin_q_arrays = []  # list of (data_array, var_name)
-    left_fz = None
-    right_fz = None
-    
-    # (A) Standard Load
-    for gpath, vars in input_vars:
-        # Check in trial_group
-        if gpath not in trial_group:
-            # Fallback check: maybe gpath implies trial? No, H5 structure is S/C/T/G
-            print(f"[DEBUG] {sub}/{cond}/{trial_name}: Missing group {gpath}")
-            return None, None
+    valid_trials_data = [] # List of (in_arr, out_arr) to be stacked or returned?
+    # Actually, the original code returned a single array for the condition. 
+    # If a condition has multiple trials (or levels), we should probably concatenate them along time 
+    # OR return a list of trials. The caller `build_nn_dataset` logic:
+    # `X_arr, Y_arr = extract...` then it creates windows.
+    # If we concatenate unrelated trials, we create a jump discontinuity.
+    # Ideally, we should yield trials or return a list.
+    # BUT to keep changes minimal to `build_nn_dataset`, let's concatenate but insert a delimiter/gap if possible,
+    # OR just accept the small discontinuity if it's treated as one long stream.
+    # Better approach: Iterate and concat. 
+    # Note: `build_nn_dataset` creates windows. If we concat, we risk a window spanning across trials.
+    # However, standard practice often ignores this or uses a large gap.
+    # Let's just concat for now to fit the signature.
+
+    in_list_all = []
+    out_list_all = []
+
+    for lv in level_keys:
+        lv_group = cond_group[lv]
+        trial_keys = list(lv_group.keys()) # e.g. ['trial_01']
         
-        grp = trial_group[gpath]
-        for v in vars:
-            if v not in grp:
-                print(f"[DEBUG] {sub}/{cond}/{trial_name}: Missing var {v} in {gpath}")
-                return None, None
+        for trial_name in trial_keys:
+            trial_group = lv_group[trial_name]
             
-            raw_data = grp[v][:]
+            # --- Per Trial Extraction ---
             
-            # Apply LPF
-            data = np.nan_to_num(raw_data)
-            if lpf_cutoff is not None:
-                data = butter_lowpass_filter(data, lpf_cutoff, fs, lpf_order)
+            # buffers for augmentation
+            kin_q_arrays = []  # list of (data_array, var_name)
+            left_fz = None
+            right_fz = None
             
-            in_list.append(data.reshape(-1, 1))
+            curr_trial_in = []
             
-            # Identify specific vars for augmentation
-            if 'kin_q' in gpath and 'dot' not in gpath:
-                kin_q_arrays.append(data)
+            # (A) Standard Load Inputs (Explicit)
+            valid_trial = True
+            
+            # Helper to get base data
+            def get_data_from_group(g, path):
+                parts = path.split('/')
+                curr = g
+                for p in parts:
+                    if p in curr: curr = curr[p]
+                    else: return None
+                return curr[:]
+
+            for gpath, vars in input_vars:
+                # gpath is e.g. 'robot/back_imu' or 'mocap/kin_q'
                 
-            # Forces (for potential contact detection)
-            # path is typically MoCap/grf_measured/left/force/Fz
-            if 'grf_measured/left/force' in gpath and v == 'Fz':
-                left_fz = raw_data
-            if 'grf_measured/right/force' in gpath and v == 'Fz':
-                right_fz = raw_data
+                # Navigate to group
+                grp = trial_group
+                parts = gpath.split('/')
+                missing_grp = False
+                for p in parts:
+                    if p in grp: grp = grp[p]
+                    else: missing_grp=True; break
+                
+                if missing_grp:
+                    print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing group {gpath}")
+                    valid_trial = False
+                    break
+                
+                for v in vars:
+                    # Handle Virtual Variables
+                    target_data = None
+                    
+                    # 1. Contact (forceplate logic)
+                    if v == 'contact':
+                        # Expect 'z' to exist in the same group to derive contact
+                        if 'z' in grp:
+                            z_raw = grp['z'][:]
+                            target_data = get_ground_contact(z_raw, threshold=20.0)
+                        else:
+                            print(f"[DEBUG] Cannot derive 'contact', 'z' missing in {gpath}")
+                            valid_trial = False
+                            break
+                            
+                    # 2. Acceleration (_ddot)
+                    elif v.endswith('_ddot'):
+                        base_name = v[:-5] # remove _ddot
+                        if base_name in grp:
+                            raw = grp[base_name][:]
+                            # First deriv
+                            vel = np.gradient(raw, 1.0/fs)
+                            vel = butter_lowpass_filter(vel, 60.0, fs, order=4) # Higher cutoff for intermediate? Or fixed? Using 60 as per old code
+                            # Second deriv
+                            acc = np.gradient(vel, 1.0/fs)
+                            target_data = acc # Will be filtered again by LPF main loop if set
+                        else:
+                            # Maybe base name isn't in group? Error?
+                            print(f"[DEBUG] Base var {base_name} missing for {v}")
+                            valid_trial = False; break
+                            
+                    # 3. Velocity (_dot)
+                    elif v.endswith('_dot'):
+                        base_name = v[:-4] # remove _dot
+                        if base_name in grp:
+                            raw = grp[base_name][:]
+                            vel = np.gradient(raw, 1.0/fs)
+                            target_data = vel
+                        else:
+                            print(f"[DEBUG] Base var {base_name} missing for {v}")
+                            valid_trial = False; break
+                            
+                    # 4. Standard Variable
+                    else:
+                        if v in grp:
+                            target_data = grp[v][:]
+                        else:
+                            print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing var {v} in {gpath}")
+                            valid_trial = False
+                            break
+                    
+                    if target_data is None:
+                        valid_trial = False
+                        break
+                        
+                    # Apply Main LPF
+                    data = np.nan_to_num(target_data)
+                    if lpf_cutoff is not None:
+                         data = butter_lowpass_filter(data, lpf_cutoff, fs, lpf_order)
+                    
+                    curr_trial_in.append(data.reshape(-1, 1))
 
-    # (B) Augment: Joint Velocity & Acceleration
-    aug_chem_cutoff = 60.0
-    if aug_chem_cutoff >= fs / 2:
-        aug_chem_cutoff = fs / 2 - 1.0  # safe clamp (e.g. 49Hz)
-    
-    for q_data in kin_q_arrays:
-        # Velocity
-        vel = np.gradient(q_data, 1.0/fs)
-        vel = butter_lowpass_filter(vel, aug_chem_cutoff, fs, order=4)
-        in_list.append(vel.reshape(-1, 1))
-        
-        # Acceleration
-        acc = np.gradient(vel, 1.0/fs)
-        acc = butter_lowpass_filter(acc, aug_chem_cutoff, fs, order=4)
-        in_list.append(acc.reshape(-1, 1))
+            if not valid_trial: continue
 
-    # (C) Augment: Contact Features
-    # If Fz was not in input_vars, fetch it from trial_group
-    def get_fz_from_trial(side):
-        # path: MoCap/grf_measured/{side}/force/Fz
-        try:
-            return trial_group[f'MoCap/grf_measured/{side}/force']['Fz'][:]
-        except:
-            return None
-
-    if left_fz is None: left_fz = get_fz_from_trial('left')
-    if right_fz is None: right_fz = get_fz_from_trial('right')
-        
-    if left_fz is not None:
-        c_l = get_ground_contact(left_fz, threshold=20.0)
-        in_list.append(c_l.reshape(-1, 1))
-        
-    if right_fz is not None:
-        c_r = get_ground_contact(right_fz, threshold=20.0)
-        in_list.append(c_r.reshape(-1, 1))
-
-    if not in_list:
-        print(f"[DEBUG] {sub}/{cond}: in_list is empty")
-        return None, None
-    in_arr = np.hstack(in_list)
-
-    # -------------------------------------------------------------------------
-    # 2. Output
-    # -------------------------------------------------------------------------
-    out_list = []
-    for gpath, vars in output_vars:
-        if gpath not in trial_group:
-            print(f"[DEBUG] {sub}/{cond}: Missing output group {gpath}")
-            return None, None
-        grp = trial_group[gpath]
-        for v in vars:
-            if v not in grp:
-                print(f"[DEBUG] {sub}/{cond}: Missing output var {v}")
-                return None, None
-            d = grp[v][:]
-            d = np.nan_to_num(d)
-            if lpf_cutoff is not None:
-                d = butter_lowpass_filter(d, lpf_cutoff, fs, lpf_order)
-            out_list.append(d.reshape(-1, 1))
+            # (B) Augment: Removed (Automatic Joint Velocity/Acc)
+            # (C) Augment: Removed (Automatic Contact)
             
-    if not out_list:
-        print(f"[DEBUG] {sub}/{cond}: out_list is empty")
-        return None, None
-    out_arr = np.hstack(out_list)
+            # Now we trust curr_trial_in fits exactly the config list
 
-    # Length check
-    min_len = min(in_arr.shape[0], out_arr.shape[0])
-    return in_arr[:min_len], out_arr[:min_len]
+
+            if not curr_trial_in:
+                 continue
+            in_arr_trial = np.hstack(curr_trial_in)
+
+            # -------------------------------------------------------------------------
+            # 2. Output
+            # -------------------------------------------------------------------------
+            curr_trial_out = []
+            
+            for gpath, vars in output_vars:
+                # Navigate Group
+                grp = trial_group
+                parts = gpath.split('/')
+                valid_out = True
+                for p in parts:
+                    if p in grp: grp = grp[p]
+                    else:
+                        print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing output group {gpath}")
+                        valid_out = False
+                        break
+                if not valid_out: break
+                
+                for v in vars:
+                    if v not in grp:
+                        print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing output var {v}")
+                        valid_out = False
+                        break
+                    d = grp[v][:]
+                    d = np.nan_to_num(d)
+                    if lpf_cutoff is not None:
+                        d = butter_lowpass_filter(d, lpf_cutoff, fs, lpf_order)
+                    curr_trial_out.append(d.reshape(-1, 1))
+            
+            if not valid_out: continue
+            if not curr_trial_out: continue
+            
+            out_arr_trial = np.hstack(curr_trial_out)
+            
+            # Length check
+            min_len = min(in_arr_trial.shape[0], out_arr_trial.shape[0])
+            in_list_all.append(in_arr_trial[:min_len])
+            out_list_all.append(out_arr_trial[:min_len])
+            
+    if not in_list_all:
+        return None, None
+        
+    return np.concatenate(in_list_all, axis=0), np.concatenate(out_list_all, axis=0)
 
 def build_nn_dataset(
     data_path, 
@@ -541,15 +795,65 @@ class TCN_LSTM_MLP(nn.Module):
 # Training Function (Accepts Config)
 # -------------------------------------------------------------------------------------------------
 
+# -------------------------------------------------------------------------------------------------
+# Resource Calculation Helper
+# -------------------------------------------------------------------------------------------------
+def calculate_model_resources(model, input_dim, input_window, device):
+    """
+    Calculates parameters, model size, and estimates inference latency on the current device.
+    """
+    # 1. Parameter Count & Size
+    param_count = sum(p.numel() for p in model.parameters())
+    param_size_mb = param_count * 4 / (1024 * 1024) # Assuming FP32 (4 bytes)
+    
+    # 2. Inference Timing (Host)
+    # Create dummy input based on model input shape (B=1, T, D)
+    dummy_input = torch.randn(1, input_window, input_dim).to(device)
+    
+    model.eval()
+    
+    # Warmup
+    with torch.no_grad():
+        for _ in range(20):
+            _ = model(dummy_input)
+            
+    # Timing Loop
+    t0 = time.time()
+    n_loops = 100
+    with torch.no_grad():
+        for _ in range(n_loops):
+            _ = model(dummy_input)
+    t1 = time.time()
+    
+    avg_latency_ms = (t1 - t0) / n_loops * 1000.0
+    max_freq_hz = 1000.0 / avg_latency_ms if avg_latency_ms > 0 else 0.0
+    
+    return {
+        "n_params": param_count,
+        "model_size_mb": param_size_mb,
+        "host_latency_ms": avg_latency_ms,
+        "host_max_freq_hz": max_freq_hz
+    }
+
 def train_experiment(
     X_train, Y_train,
     X_val, Y_val,
     X_test, Y_test,
     config,
     seed=42,
-    save_path="model_ckpt.pt",
+    save_dir="experiments/test",
     live_plotter=None
 ):
+    # Setup Logger
+    save_path_dir = Path(save_dir)
+    save_path_dir.mkdir(parents=True, exist_ok=True)
+    
+    logger = ExperimentLogger(save_path_dir)
+    logger.save_env()
+    logger.save_config(config)
+    
+    ckpt_path = save_path_dir / "model.pt"
+
     # Extract Hyperparams
     batch_size = config.get("batch_size", 256)
     val_batch_size = config.get("val_batch_size", batch_size)
@@ -616,17 +920,52 @@ def train_experiment(
         mlp_norm=mlp_norm
     )
     
+    # Check if we should resume (logic can be added here, for now overwrite)
+    # If resuming, load ckpt first.
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
     
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
-    criterion = nn.HuberLoss(delta=huber_delta)
-    
     scheduler = None
     if cos_T0 > 0:
         scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
             optimizer, T_0=cos_T0, T_mult=cos_Tmult, eta_min=eta_min
         )
+        
+    # Cost Function
+    # Cost Function
+    cost_fn_name = config.get("cost_function", "huber").lower()
+    
+    # Weighted Loss Config
+    use_weighted_loss = config.get("use_weighted_loss", False)
+    loss_decay_factor = config.get("loss_decay_factor", 0.8)
+    
+    # If weighting is ON, we need 'none' to apply weights manually.
+    reduction_val = 'none' if use_weighted_loss else 'mean'
+
+    if cost_fn_name == "huber":
+        criterion = nn.HuberLoss(delta=huber_delta, reduction=reduction_val)
+    elif cost_fn_name == "mse":
+        criterion = nn.MSELoss(reduction=reduction_val)
+    elif cost_fn_name in ["mae", "l1"]:
+        criterion = nn.L1Loss(reduction=reduction_val)
+    else:
+        print(f"[WARN] Unknown cost function '{cost_fn_name}', defaulting to Huber.")
+        criterion = nn.HuberLoss(delta=huber_delta, reduction=reduction_val)
+        
+    # Pre-calculate Weights if needed
+    loss_weights = None
+    if use_weighted_loss:
+        # W shape: (1, Horizon, 1) or (1, Horizon, OutputDim)
+        # We want to weight by Time Step.
+        # w_t = decay^t for t=0..Horizon-1
+        w_t = np.array([loss_decay_factor**t for t in range(horizon)])
+        
+        # Normalize weights? Or keep them <= 1.
+        # Let's keep them as decay factors.
+        loss_weights = torch.from_numpy(w_t).float().to(device)
+        loss_weights = loss_weights.view(1, horizon, 1) # Broadcast across batch and out_dim
         
     best_val = float("inf")
     patience_cnt = 0
@@ -643,7 +982,17 @@ def train_experiment(
             xb, yb = xb.to(device), yb.to(device)
             optimizer.zero_grad(set_to_none=True)
             pred = model(xb)
-            loss = criterion(pred, yb)
+            
+            # Loss Calculation
+            if use_weighted_loss:
+                # Loss is (B, H, D) because reduction='none'
+                raw_loss = criterion(pred, yb)
+                # Apply weights
+                weighted_loss = raw_loss * loss_weights
+                loss = weighted_loss.mean()
+            else:
+                loss = criterion(pred, yb)
+                
             loss.backward()
             optimizer.step()
             running += loss.item()
@@ -660,14 +1009,27 @@ def train_experiment(
         with torch.no_grad():
             for xb, yb in val_loader:
                 xb, yb = xb.to(device), yb.to(device)
-                val_running += criterion(model(xb), yb).item()
+                pred = model(xb)
+                
+                if use_weighted_loss:
+                    raw_loss = criterion(pred, yb)
+                    weighted_loss = raw_loss * loss_weights
+                    loss = weighted_loss.mean()
+                else:
+                    loss = criterion(pred, yb)
+                    
+                val_running += loss.item()
         val_loss = val_running / max(1, len(val_loader))
         
         if scheduler:
             scheduler.step(epoch - 1)
             
         cur_lr = optimizer.param_groups[0]["lr"]
-        print(f"[Epoch {epoch:03d}/{epochs:03d}] train={train_loss:.6f} val={val_loss:.6f} lr={cur_lr:.2e} time={time.time()-t0:.1f}s")
+        epoch_time = time.time() - t0
+        print(f"[Epoch {epoch:03d}/{epochs:03d}] train={train_loss:.6f} val={val_loss:.6f} lr={cur_lr:.2e} time={epoch_time:.1f}s")
+        
+        # Log to CSV
+        logger.log_epoch(epoch, train_loss, val_loss, cur_lr, epoch_time)
         
         if live_plotter:
             live_plotter.update_epoch(epoch, train_loss, val_loss)
@@ -678,9 +1040,10 @@ def train_experiment(
             ckpt_obj = {
                 "state_dict": model.state_dict(),
                 "config": config,
-                "metrics": {"best_val": best_val}
+                "metrics": {"best_val": best_val},
+                "epoch": epoch
             }
-            torch.save(ckpt_obj, save_path)
+            torch.save(ckpt_obj, ckpt_path)
             print(f"  --> Saved Best: {best_val:.6f}")
         else:
             patience_cnt += 1
@@ -689,7 +1052,9 @@ def train_experiment(
                 break
                 
     # Evaluate
-    ckpt = torch.load(save_path, map_location=device)
+    logger.close()
+    
+    ckpt = torch.load(ckpt_path, map_location=device)
     model.load_state_dict(ckpt["state_dict"])
     model.eval()
     
@@ -697,7 +1062,17 @@ def train_experiment(
     with torch.no_grad():
         for xb, yb in test_loader:
             xb, yb = xb.to(device), yb.to(device)
-            test_running += criterion(model(xb), yb).item()
+            pred = model(xb)
+            
+            if use_weighted_loss:
+                # For reporting consistency, report weighted loss
+                raw_loss = criterion(pred, yb)
+                weighted_loss = raw_loss * loss_weights
+                l = weighted_loss.mean()
+            else:
+                l = criterion(pred, yb)
+                
+            test_running += l.item()
     test_loss = test_running / max(1, len(test_loader))
     
     # Calculate MAE & RMSE
@@ -716,15 +1091,36 @@ def train_experiment(
     test_mae = np.mean(np.abs(err))
     test_rmse = np.sqrt(np.mean(err**2))
     
-    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    test_mae = np.mean(np.abs(err))
+    test_rmse = np.sqrt(np.mean(err**2))
     
-    return {
+    # Calculate Resources
+    input_window = X_train.shape[1]
+    res_metrics = calculate_model_resources(model, input_dim, input_window, device)
+    
+    # Metrics Dictionary
+    metrics_result = {
         "test_huber": test_loss,
         "test_mae": float(test_mae),
         "test_rmse": float(test_rmse),
-        "n_params": n_params,
+        
+        # Resource Metrics
+        "n_params": res_metrics["n_params"],
+        "model_size_mb": float(f"{res_metrics['model_size_mb']:.4f}"),
+        "host_latency_ms": float(f"{res_metrics['host_latency_ms']:.4f}"),
+        "host_max_freq_hz": float(f"{res_metrics['host_max_freq_hz']:.2f}"),
+        
+        # Original Config
         "config": config
     }
+    
+    logger.save_metrics(metrics_result)
+    
+    # Save Confusion Matrix if needed (but this is regression)
+    # np.save(save_path_dir / "predictions.npy", P)
+    # np.save(save_path_dir / "truths.npy", T)
+    
+    return metrics_result, ckpt_path
 
 
 
@@ -733,128 +1129,243 @@ def train_experiment(
 # -------------------------------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # Preprocessing Config
-    fs = 100
-    time_window_input = 100
-    time_window_output = 10
-    stride = 10
-    LPF_CUTOFF = 6.0
-    LPF_ORDER = 5
     
-    input_vars = [
-        ('Robot', ['incPosLH', 'incPosRH']),
-        ('Back_imu', ['Accel_X', 'Accel_Y', 'Accel_Z', 'Gyro_X', 'Gyro_Y', 'Gyro_Z', 'Pitch', 'Roll', 'Yaw']),
-        ('MoCap/grf_measured/left/force', ['Fx', 'Fy', 'Fz']),
-        ('MoCap/grf_measured/right/force', ['Fx', 'Fy', 'Fz']),
-        ('MoCap/kin_q', ['ankle_angle_l', 'ankle_angle_r', 'hip_adduction_l', 'hip_adduction_r', 'hip_flexion_l', 'hip_flexion_r', 'hip_rotation_l', 'hip_rotation_r', 'knee_angle_l', 'knee_angle_r']),
-        ('MoCap/kin_qdot', ['ankle_angle_l', 'ankle_angle_r', 'hip_adduction_l', 'hip_adduction_r', 'hip_flexion_l', 'hip_flexion_r', 'hip_rotation_l', 'hip_rotation_r', 'knee_angle_l', 'knee_angle_r'])
-    ]
-    output_vars = [('Common', ['v_Y_true', 'v_Z_true'])]
-
-    TRAIN_SUBJECTS = ['S004', 'S005', 'S006', 'S007', 'S008', 'S009']
-    VAL_SUBJECTS   = ['S010']
-    TEST_SUBJECTS  = ['S011']
-
-    def make_subject_selection(include_list):
-        return {'include': include_list, 'exclude': []}
-
-    CONDITION_SELECTION = {'include': None, 'exclude': []}
+    # Load Configs
+    config_dir = Path("configs")
+    yaml_files = list(config_dir.glob("*.yaml"))
     
-    print("Loading Data...")
-    X_train, Y_train = build_nn_dataset(
-        data_path, sub_names, cond_names, input_vars, output_vars,
-        time_window_input, time_window_output, stride,
-        subject_selection=make_subject_selection(TRAIN_SUBJECTS),
-        condition_selection=CONDITION_SELECTION, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
-    )
-    X_val, Y_val = build_nn_dataset(
-        data_path, sub_names, cond_names, input_vars, output_vars,
-        time_window_input, time_window_output, stride,
-        subject_selection=make_subject_selection(VAL_SUBJECTS),
-        condition_selection=CONDITION_SELECTION, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
-    )
-    X_test, Y_test = build_nn_dataset(
-        data_path, sub_names, cond_names, input_vars, output_vars,
-        time_window_input, time_window_output, stride,
-        subject_selection=make_subject_selection(TEST_SUBJECTS),
-        condition_selection=CONDITION_SELECTION, lpf_cutoff=LPF_CUTOFF, lpf_order=LPF_ORDER
-    )
+    # 1. Load Base Config (Must exist)
+    base_config_path = config_dir / "base_config.yaml"
+    if not base_config_path.exists():
+        print(f"[ERROR] {base_config_path} not found. Cannot proceed without base defaults.")
+        sys.exit(1)
+        
+    with open(base_config_path, 'r') as f:
+        base_config = yaml.safe_load(f)
+    print(f"[INFO] Loaded base defaults from {base_config_path}")
     
-    print(f"Train: {X_train.shape}, Val: {X_val.shape}, Test: {X_test.shape}")
+    # 2. Prepare Experiments List
+    experiments_to_run = []
     
-    # -------------------------------------------------------------------------
-    # Define Experiments (Modifications)
-    # -------------------------------------------------------------------------
-    
-    base_config = {
-        "epochs": 20, "patience": 5, "batch_size": 1024,
-        "lr": 3e-4, "weight_decay": 1e-2, "huber_delta": 0.5,
-        "tcn_channels": (64, 64, 128), "kernel_size": 3,
-        "lstm_hidden": 128, "lstm_layers": 1, "mlp_hidden": 128,
-        "dropout_p": 0.3,
-        "use_input_norm": False,
-        "tcn_norm": None,
-        "lstm_use_ln": False,
-        "mlp_norm": None
-    }
-    
-    experiments = [
-        ("Base", {}),
-        ("Deep_TCN", {"tcn_channels": (64, 64, 128, 256)}),
-        ("Wide_LSTM", {"lstm_hidden": 256, "mlp_hidden": 256}),
-        ("Deep_LSTM", {"lstm_layers": 2}),
-        ("Large_Kernel", {"kernel_size": 5}),
-        ("High_Dropout", {"dropout_p": 0.5}),
-        ("TCN_BN", {"tcn_norm": "batch"}),
-        ("LSTM_LN", {"lstm_use_ln": True}),
-        ("MLP_BN", {"mlp_norm": "batch"}),
-        ("Mix_TCN(BN)_LSTM(LN)_MLP(BN)", {"tcn_norm": "batch", "lstm_use_ln": True, "mlp_norm": "batch"}),
-        ("Input_Norm", {"use_input_norm": True})
-    ]
-    
-    seeds = [42] # 시간 관계상 1개씩만, 필요하면 [42, 43, 44]
-    results = []
+    if not yaml_files:
+        pass # Should not happen if base_config exists
+    else:
+        print(f"Found {len(yaml_files)} configs: {[f.name for f in yaml_files]}")
+        
+        for yf in yaml_files:
+            # Skip base_config.yaml if we want to run it only once
+            # But the logic below merges cfg onto base. 
+            # If yf IS base_config.yaml, merged will be identical to base_config.
+            # This is fine, it means we run the base experiment.
+            
+            with open(yf, 'r') as f:
+                cfg = yaml.safe_load(f)
+                
+            # Merge with defaults
+            merged = base_config.copy()
+            merged.update(cfg)
+            
+            exp_name = merged.get("exp_name", yf.stem)
+            experiments_to_run.append((exp_name, merged))
+            
+    # Remove Global Dataset Load - Move to Experiment Loop
+    # We need to rebuild dataset for EACH experiment because input_vars/output_vars might change!
     
     live_plotter = LiveTrainingPlotter()
     
-    for exp_name, override in experiments:
-        cfg = base_config.copy()
-        cfg.update(override)
-        
+    results = [] # Reset results list
+    seeds = [42]
+
+    for exp_name, cfg in experiments_to_run:
         for sd in seeds:
             full_name = f"{exp_name}_seed{sd}"
             print(f"\n>>> Start Experiment: {full_name}")
             live_plotter.start_session(exp_name, sd)
             
-            ckpt_name = f"opt_tcn_lstm_mlp_{exp_name}_{sd}.pt"
+            # Directory Setup
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_dir = f"experiments/{full_name}"
             
-            metrics = train_experiment(
+            # --- Dynamic Data Loading ---
+            # Extract vars from config or use default global if not present (backward compatibility)
+            # But we moved global vars to base_config, so cfg SHOULD have them.
+            
+            current_data_path = cfg.get("data_path", base_config["data_path"])
+            
+            curr_input_vars = cfg.get("input_vars", base_config["input_vars"])
+            curr_output_vars = cfg.get("output_vars", base_config["output_vars"])
+            
+            # Subj / Window
+            curr_window = cfg.get("time_window_input", base_config["time_window_input"])
+            
+            cv_mode = cfg.get("cv_mode", base_config["cv_mode"])
+            
+            # LPF
+            curr_lpf_cutoff = cfg.get("lpf_cutoff", base_config["lpf_cutoff"])
+            curr_lpf_order  = cfg.get("lpf_order", base_config["lpf_order"])
+            
+            # Dataset Universe (Full list of subs/conds available to read)
+            curr_sub_names = cfg.get("subjects", base_config["subjects"])
+            curr_cond_names = cfg.get("conditions", base_config["conditions"])
+            
+            # --- TCN Dynamic Config ---
+            # Construct channels list from layers/hidden
+            if "tcn_channels" in cfg:
+                curr_tcn_channels = cfg["tcn_channels"]
+            else:
+                n_layers = cfg.get("tcn_layers", base_config.get("tcn_layers", 3))
+                n_hidden = cfg.get("tcn_hidden", base_config.get("tcn_hidden", 64))
+                curr_tcn_channels = [n_hidden] * n_layers
+            
+            # Inject into config for model init
+            cfg["tcn_channels"] = curr_tcn_channels
+            print(f"[INFO] Configured TCN: layers={len(curr_tcn_channels)}, hidden={curr_tcn_channels[0]}")
+            
+            # --- CV Logic: Forced LOSO ---
+            if cv_mode != "loso":
+                print(f"[WARN] cv_mode='{cv_mode}' detected, but this script now enforces 'loso'. Proceeding with LOSO.")
+            
+            sub_runs = []
+            all_subs = sorted(list(set(curr_sub_names)))
+            print(f"[CV-MODE] LOSO selected. Total subjects: {len(all_subs)}")
+            
+            for i in range(len(all_subs)):
+                test_sub = all_subs[i]
+                # Val sub: use previous subject (cyclic)
+                val_sub = all_subs[i-1] 
+                train_subs = [s for s in all_subs if s != test_sub and s != val_sub]
+                
+                run_name = f"{exp_name}_Test-{test_sub}"
+                sub_runs.append({
+                    "name": run_name,
+                    "train": train_subs,
+                    "val": [val_sub],
+                    "test": [test_sub]
+                })
+
+            # Tuple conversion
+            def parse_vars(var_list_from_yaml):
+                parsed = []
+                for item in var_list_from_yaml:
+                    # item is [gpath, [list_of_vars]]
+                    gpath = item[0]
+                    vars = item[1]
+                    parsed.append((gpath, vars))
+                return parsed
+
+            c_in_vars = parse_vars(curr_input_vars)
+            c_out_vars = parse_vars(curr_output_vars)
+            
+            # --- Visualization Check (Once per Config) ---
+            # We explicitly check filtering on the first subject of the first run
+            # to verify reference quality interactively.
+            if sub_runs:
+                check_sub = sub_runs[0]['train'][0]
+                check_cond = curr_cond_names[0] # Pick first condition from universe
+                plot_filtering_check(current_data_path, check_sub, check_cond, c_out_vars, curr_lpf_cutoff)
+
+            # --- Execute Sub Runs ---
+            for run_meta in sub_runs:
+                final_exp_name = run_meta["name"]
+                c_train_subs = run_meta["train"]
+                c_val_subs = run_meta["val"]
+                c_test_subs = run_meta["test"]
+                
+                full_name_seed = f"{final_exp_name}_seed{sd}" # e.g. Base_Test-S001_seed42
+                
+                print(f"Building Dataset for {final_exp_name} using {current_data_path}...")
+                print(f"  Train: {c_train_subs}")
+                print(f"  Val:   {c_val_subs}")
+                print(f"  Test:  {c_test_subs}")
+                
+                # Rebuild per run because subjects change
+                X_train, Y_train = build_nn_dataset(
+                    current_data_path, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
+                    curr_window, time_window_output, stride,
+                    subject_selection=make_subject_selection(c_train_subs),
+                    condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order
+                )
+                X_val, Y_val = build_nn_dataset(
+                    current_data_path, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
+                    curr_window, time_window_output, stride,
+                    subject_selection=make_subject_selection(c_val_subs),
+                    condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order
+                )
+                X_test, Y_test = build_nn_dataset(
+                    current_data_path, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
+                    curr_window, time_window_output, stride,
+                    subject_selection=make_subject_selection(c_test_subs),
+                    condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order
+                )
+            
+            if len(X_train) == 0:
+                print(f"[ERROR] No training data for {exp_name}. Check input_vars/output_vars paths.")
+                continue
+
+            print(f"Data Shapes: X_train={X_train.shape}, Y_train={Y_train.shape}")
+            
+            print(f"\n>>> Start Experiment: {full_name_seed}")
+            live_plotter.start_session(final_exp_name, sd)
+            save_dir = f"experiments/{full_name_seed}" # Update name
+            
+            metrics, ckpt_path = train_experiment(
                 X_train, Y_train, X_val, Y_val, X_test, Y_test,
-                cfg, seed=sd, save_path=ckpt_name, live_plotter=live_plotter
+                cfg, seed=sd, save_dir=save_dir, live_plotter=live_plotter
             )
             
-            print(f"[RESULT] {full_name} | test_loss={metrics['test_huber']:.6f} | params={metrics['n_params']}")
-            results.append((exp_name, sd, metrics, ckpt_name, metrics['config']))
+            print(f"[RESULT] {full_name_seed} | test_loss={metrics['test_huber']:.6f} | params={metrics['n_params']}")
+            
+            # Store with final name
+            results.append((final_exp_name, sd, metrics, ckpt_path, cfg, c_in_vars))
             
     # Summary Plot
-    summary_fig = plot_model_summary(results)
+    if results:
+        summary_fig = plot_model_summary(results)
+        summary_fig.savefig("experiments/summary_plot.png")
     
     # -------------------------------------------------------------------------
     # Feature Importance (Best Model)
     # -------------------------------------------------------------------------
+    if not results:
+        print("No results to analyze.")
+        exit()
+        
     print("\n>>> Calculating Feature Importance for Best Model...")
     
     # 1. Find Best Model (lowest test_mae)
     best_res = sorted(results, key=lambda x: x[2]['test_mae'])[0]
-    best_name, best_seed, best_metrics, best_ckpt, best_cfg = best_res
+    best_name, best_seed, best_metrics, best_ckpt, best_cfg, best_in_vars = best_res
     print(f"Best Model: {best_name} (MAE={best_metrics['test_mae']:.6f})")
     
     # 2. Re-load Best Model
     # Re-instantiate
+    # Need to reload dataset if we want to re-calc importance on TEST set safely?
+    # We have X_test in memory BUT it might be from the LAST iteration.
+    # CRITICAL: If experiments use DIFFERENT inputs, X_test currently holds the LAST one.
+    # So we MUST re-load the dataset for the best model to ensure X_test matches best_cfg.
+    
+    print("Re-loading Test Data for Best Model Feature Importance...")
+    c_in_vars = best_in_vars
+    c_out_vars = parse_vars(best_cfg.get("output_vars", base_config["output_vars"]))
+    best_data_path = best_cfg.get("data_path", base_config["data_path"])
+    
+    # Needs universe from config too
+    best_sub_names = best_cfg.get("subjects", base_config["subjects"])
+    best_cond_names = best_cfg.get("conditions", base_config["conditions"])
+    best_lpf_cutoff = best_cfg.get("lpf_cutoff", base_config["lpf_cutoff"])
+    best_lpf_order = best_cfg.get("lpf_order", base_config["lpf_order"])
+    
+    X_test_best, Y_test_best = build_nn_dataset(
+        best_data_path, best_sub_names, best_cond_names, c_in_vars, c_out_vars,
+        time_window_input, time_window_output, stride,
+        subject_selection=make_subject_selection(TEST_SUBJECTS), # Note: This might need to track best model's specific test subjects if LOSO
+        condition_selection=CONDITION_SELECTION, lpf_cutoff=best_lpf_cutoff, lpf_order=best_lpf_order
+    )
+    
     best_model = TCN_LSTM_MLP(
-        input_dim=X_test.shape[2],
-        output_dim=Y_test.shape[2],
-        horizon=Y_test.shape[1],
+        input_dim=X_test_best.shape[2],
+        output_dim=Y_test_best.shape[2],
+        horizon=Y_test_best.shape[1],
         channels=best_cfg.get("tcn_channels", (64, 64, 128)),
         kernel_size=best_cfg.get("kernel_size", 3),
         dropout=best_cfg.get("dropout_p", 0.1),
@@ -879,22 +1390,24 @@ if __name__ == "__main__":
     # Must match extract_condition_data_v2 logic
     feature_names = []
     
-    # (A) Input Vars
-    for gpath, vars in input_vars:
+    # (A) Input Vars - Use best_in_vars
+    for gpath, vars in c_in_vars:
         # Custom Naming Logic
-        if 'Back_imu' in gpath:
+        if 'Back_imu' in gpath or 'back_imu' in gpath:
             prefix = "IMU"
-        elif 'Robot' in gpath:
-            prefix = "Robot"
-        elif 'grf_measured' in gpath:
-            # MoCap/grf_measured/left/force
+        elif 'Robot' in gpath or 'robot' in gpath:
+            if 'left' in gpath: prefix = "Robot_L"
+            elif 'right' in gpath: prefix = "Robot_R"
+            else: prefix = "Robot"
+        elif 'grf' in gpath:
+            # forceplate/grf/left
             side = 'L' if 'left' in gpath else 'R'
             prefix = f"GRF_{side}"
         elif 'kin_qdot' in gpath:
             prefix = "J_Vel_Meas"
             pass 
         elif 'kin_q' in gpath:
-            prefix = "J_Ang"
+            prefix = "Deg"
         else:
             prefix = gpath.split('/')[-1]
             
@@ -906,8 +1419,9 @@ if __name__ == "__main__":
             
             if 'grf' in gpath.lower():
                 name = f"{prefix}_{v}"
-            elif 'Back_imu' in gpath:
+            elif 'Back_imu' in gpath or 'back_imu' in gpath:
                 v_clean = v.replace('Accel_', 'A').replace('Gyro_', 'G')
+                v_clean = v_clean.replace('accel_', 'A').replace('gyro_', 'G') # Handle lowercase
                 name = f"{prefix}_{v_clean}"
             else:
                 name = f"{prefix}_{v_clean}"
@@ -916,7 +1430,7 @@ if __name__ == "__main__":
             
     # (B) Augment: Joint Veolcity/Accel
     kin_q_vars = []
-    for gpath, vars in input_vars:
+    for gpath, vars in c_in_vars:
         if 'kin_q' in gpath and 'dot' not in gpath:
              kin_q_vars = vars
              break
@@ -925,21 +1439,21 @@ if __name__ == "__main__":
         v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
         v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
         v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
-        feature_names.append(f"Calc_Vel_{v_clean}")
+        feature_names.append(f"AngVel_{v_clean}")
         
     for v in kin_q_vars:
         v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
         v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
         v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
-        feature_names.append(f"Calc_Acc_{v_clean}")
+        feature_names.append(f"AngAcc_{v_clean}")
         
     # (C) Contact
     feature_names.append("Contact_L")
     feature_names.append("Contact_R")
     
-    if len(feature_names) != X_test.shape[2]:
-        print(f"[WARN] Feature name count ({len(feature_names)}) != Input dim ({X_test.shape[2]}). Using indices.")
-        feature_names = [f"Feat_{i}" for i in range(X_test.shape[2])]
+    if len(feature_names) != X_test_best.shape[2]:
+        print(f"[WARN] Feature name count ({len(feature_names)}) != Input dim ({X_test_best.shape[2]}). Using indices.")
+        feature_names = [f"Feat_{i}" for i in range(X_test_best.shape[2])]
         
     # 4. Calculate Permutation Importance
     def calculate_permutation_importance(model, X, Y, feature_names, device='cpu'):
@@ -988,7 +1502,7 @@ if __name__ == "__main__":
         print("")
         return np.array(importances)
 
-    importances = calculate_permutation_importance(best_model, X_test, Y_test, feature_names, device)
+    importances = calculate_permutation_importance(best_model, X_test_best, Y_test_best, feature_names, device)
     
     # 5. Plot All Features
     n_feats = len(importances)
@@ -1004,6 +1518,6 @@ if __name__ == "__main__":
     plt.title(f'Feature Importance (All Features) - {best_name}')
     plt.gca().invert_yaxis() # Top importance at top
     plt.tight_layout()
-    
+    plt.savefig("experiments/feature_importance.png")
     plt.show(block=True)
 

@@ -1,0 +1,102 @@
+{
+    "test_huber": 0.005630180503143684,
+    "test_mae": 0.07526810467243195,
+    "test_rmse": 0.10602462291717529,
+    "n_params": 195202,
+    "config": {
+        "epochs": 20,
+        "patience": 5,
+        "batch_size": 1024,
+        "val_batch_size": 1024,
+        "lr": 0.0003,
+        "weight_decay": 0.01,
+        "huber_delta": 0.5,
+        "tcn_channels": [
+            64,
+            64,
+            128
+        ],
+        "kernel_size": 3,
+        "lstm_hidden": 128,
+        "lstm_layers": 1,
+        "mlp_hidden": 128,
+        "dropout_p": 0.3,
+        "use_input_norm": false,
+        "tcn_norm": null,
+        "lstm_use_ln": false,
+        "mlp_norm": null,
+        "cos_T0": 10,
+        "cos_Tmult": 1,
+        "eta_min": 1e-05,
+        "input_vars": [
+            [
+                "robot/left",
+                [
+                    "hip_angle",
+                    "torque"
+                ]
+            ],
+            [
+                "robot/right",
+                [
+                    "hip_angle",
+                    "torque"
+                ]
+            ],
+            [
+                "robot/back_imu",
+                [
+                    "accel_x",
+                    "accel_y",
+                    "accel_z",
+                    "gyro_x",
+                    "gyro_y",
+                    "gyro_z"
+                ]
+            ],
+            [
+                "forceplate/grf/left",
+                [
+                    "x",
+                    "y",
+                    "z"
+                ]
+            ],
+            [
+                "forceplate/grf/right",
+                [
+                    "x",
+                    "y",
+                    "z"
+                ]
+            ],
+            [
+                "mocap/kin_q",
+                [
+                    "ankle_angle_l",
+                    "ankle_angle_r",
+                    "hip_adduction_l",
+                    "hip_adduction_r",
+                    "hip_flexion_l",
+                    "hip_flexion_r",
+                    "hip_rotation_l",
+                    "hip_rotation_r",
+                    "knee_angle_l",
+                    "knee_angle_r"
+                ]
+            ]
+        ],
+        "output_vars": [
+            [
+                "common",
+                [
+                    "v_Y_true",
+                    "v_Z_true"
+                ]
+            ]
+        ],
+        "data_path": "combined_data.h5",
+        "exp_name": "Base_Experiment",
+        "cost_function": "huber"
+    }
+}

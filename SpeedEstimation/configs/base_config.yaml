@@ -1,0 +1,88 @@
+# Experiment Name
+exp_name: "Base_Experiment"
+
+# Dataset Path
+data_path: "combined_data.h5"
+
+# Training Hyperparameters
+epochs: 30
+patience: 5
+batch_size: 1024
+val_batch_size: 2048
+lr: 0.0003
+weight_decay: 0.01
+huber_delta: 0.5
+dropout_p: 0.3
+
+# Scheduler
+cos_T0: 10
+cos_Tmult: 1
+eta_min: 0.00001
+
+# Model Architecture
+tcn_layers: 3
+tcn_hidden: 64
+# tcn_channels will be generated as [tcn_hidden] * tcn_layers
+
+kernel_size: 3
+lstm_hidden: 128
+lstm_layers: 1
+mlp_hidden: 128
+
+# Normalization
+use_input_norm: false
+tcn_norm: batch      # 'batch', 'layer', or null
+lstm_use_ln: false
+mlp_norm: layer      # 'batch', 'layer', or null
+
+# Cost Function
+cost_function: "huber" # 'huber', 'mse', 'mae', 'l1'
+use_weighted_loss: true
+loss_decay_factor: 0.8
+
+# Input Variables (Explicit Definition)
+input_vars:
+  # Robot
+  - ["robot/left", ["hip_angle", "torque"]]
+  - ["robot/right", ["hip_angle", "torque"]]
+  - ["robot/back_imu", ["accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"]]
+  
+  # Forceplate (Include contact explicitly)
+  - ["forceplate/grf/left", ["x", "y", "z", "contact"]]
+  - ["forceplate/grf/right", ["x", "y", "z", "contact"]]
+  
+  # Mocap Kinematics (Explicit q, q_dot, q_ddot)
+  - ["mocap/kin_q", [
+      "ankle_angle_l", "ankle_angle_l_dot", "ankle_angle_l_ddot",
+      "ankle_angle_r", "ankle_angle_r_dot", "ankle_angle_r_ddot",
+      "hip_adduction_l", "hip_adduction_l_dot", "hip_adduction_l_ddot",
+      "hip_adduction_r", "hip_adduction_r_dot", "hip_adduction_r_ddot",
+      "hip_flexion_l", "hip_flexion_l_dot", "hip_flexion_l_ddot",
+      "hip_flexion_r", "hip_flexion_r_dot", "hip_flexion_r_ddot",
+      "hip_rotation_l", "hip_rotation_l_dot", "hip_rotation_l_ddot",
+      "hip_rotation_r", "hip_rotation_r_dot", "hip_rotation_r_ddot",
+      "knee_angle_l", "knee_angle_l_dot", "knee_angle_l_ddot",
+      "knee_angle_r", "knee_angle_r_dot", "knee_angle_r_ddot"
+    ]]
+
+# Output Variables
+output_vars:
+  - ["common", ["v_Y_true"]]
+
+# Windowing
+time_window_input: 100
+
+# Subject Selection & Cross Validation
+cv_mode: "loso" # Forced to 'loso'
+# train_subjects, val_subjects, test_subjects REMOVED (Handled by LOSO loop)
+
+# Dataset Definition (Universe of available data)
+subjects: ["S001", "S002", "S003", "S004", "S005", "S006", "S007", "S008"]
+conditions: [
+  "accel_sine", "decline_5deg", "incline_10deg", 
+  "level_075mps", "level_100mps", "level_125mps", "stopandgo"
+]
+
+# Preprocessing / LPF
+lpf_cutoff: 0.5
+lpf_order: 5
