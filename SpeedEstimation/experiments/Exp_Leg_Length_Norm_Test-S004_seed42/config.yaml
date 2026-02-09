@@ -1,0 +1,114 @@
+02_train:
+  data:
+    est_tick_ranges: &id001
+    - 5
+    normalize: true
+    normalize_type: leg_length_scaled
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_gait_phase: false
+    use_physical_velocity_model: true
+    window_size: 200
+    y_delay: 5
+  experiment_name: Exp_Leg_Length_Norm
+  model: &id004
+    attention_heads: 0
+    attention_type: null
+    channels: &id006
+    - 16
+    - 16
+    - 32
+    - 32
+    dropout: 0.5
+    gating_signal: null
+    head_dropout: 0.5
+    head_hidden:
+    - 32
+    kernel_size: 7
+    model_norm: layer
+    type: TCN
+    use_norm: true
+  train:
+    amp: true
+    augment_noise_std: 0.0
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 1e-03
+    early_stop_patience: 10
+    early_stop_warmup: 5
+    epochs: 100
+    eta_min: 1.0e-05
+    k_fold: 4
+    kinematic_loss_degrees: false
+    kinematic_loss_tolerance: 0.05
+    kinematic_loss_weight_limit: 0
+    kinematic_loss_weight_pos: 0.0
+    loss: mse
+    loss_penalty: null
+    loss_penalty_cutoff: null
+    loss_penalty_weight: 0.0
+    lr: 0.001
+    save_dir: ./runs_tcn
+    smoothness_loss_weight: 0.0
+    task_type: regression
+    train_loss_target: 0.0
+    wd: 0.01
+03_eval:
+  data: &id003
+    est_tick_ranges: *id001
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 200
+    y_delay: 5
+  io_h5: combined_data_speed_diff.h5
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    manual:
+      test:
+      - S001
+    mode: manual
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id002
+- level
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data.h5
+est_tick_ranges:
+- 5
+exp_name: Exp_Leg_Length_Norm
+shared:
+  conditions: *id002
+  data: *id003
+  dst_h5: combined_data_speed_diff.h5
+  input_vars:
+  - - mocap/kin_q
+    - - hip_flexion_l
+      - hip_flexion_r
+      - knee_angle_l
+      - knee_angle_r
+      - ankle_angle_l
+      - ankle_angle_r
+  model: *id004
+  output_vars:
+  - - treadmill/left
+    - - speed_leftbelt
+  src_h5: ./combined_data.h5
+  subjects: &id005
+  - S001
+  - S002
+  - S003
+  - S004
+subjects: *id005
+tcn_channels: *id006
