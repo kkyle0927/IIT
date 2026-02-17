@@ -29,8 +29,12 @@ def check_lpf_effect_all_conditions(data_path, config_path, subject="S004"):
         return
         
     # Load Config
-    with open(config_path, 'r') as f:
-        cfg = yaml.safe_load(f)
+    if not os.path.exists(config_path):
+        print(f"[WARN] Config not found: {config_path}. Using defaults.")
+        cfg = {}
+    else:
+        with open(config_path, 'r') as f:
+            cfg = yaml.safe_load(f)
         
     cutoff = cfg.get("lpf_cutoff")
     if cutoff is None and "01_construction" in cfg:

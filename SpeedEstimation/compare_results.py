@@ -37,6 +37,7 @@ def get_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--auto', action='store_true', help='Run in automated mode (no interaction)')
     parser.add_argument('--filter', type=str, default=None, help='Filter pattern for directories (e.g. "baseline_*")')
+    parser.add_argument('--ablation', action='store_true', help='Generate ablation study comparison report')
     parser.add_argument('target_dir', nargs='?', help='Target experiment directory to analyze (optional)')
     return parser.parse_args()
 
@@ -47,8 +48,26 @@ def get_args():
 # Import Model and Dataset from main script
 # Ensure the directory is in path
 sys.path.append(str(Path(__file__).parent))
+
+# -----------------------------------------------------------------------------
+# Helper Functions (Replacing import dependencies)
+# -----------------------------------------------------------------------------
+def parse_subject_prefix(s):
+    if s.startswith("m1_"): return "m1_", s[3:]
+    if s.startswith("m2_"): return "m2_", s[3:]
+    if s.startswith("m3_"): return "m3_", s[3:]
+    return None, s
+
+def get_data_sources_from_config(cfg):
+    sources = {}
+    raw_sources = cfg.get("shared", {}).get("data_sources", {}) or cfg.get("data_sources", {})
+    if not isinstance(raw_sources, dict): return {}
+    for key, val in raw_sources.items():
+        if isinstance(val, dict) and 'prefix' in val:
+            sources[val['prefix']] = val
+    return sources
 from SpeedEstimator_TCN_MLP_experiments import (
-    TCN_MLP, StanceGatedTCN, AttentionTCN, LazyWindowDataset, build_nn_dataset,
+    TCN_MLP, StanceGatedTCN, AttentionTCN, TCN_GRU_Head, LazyWindowDataset, build_nn_dataset, build_nn_dataset_multi,
     make_subject_selection, CONDITION_SELECTION
 )
 import SpeedEstimator_TCN_MLP_experiments as main_script
@@ -61,8 +80,25 @@ def list_experiments(exp_root="experiments"):
         print(f"Directory {root} does not exist.")
         return []
     
-    # List all subdirectories containing model.pt
-    exp_dirs = [d for d in root.iterdir() if d.is_dir() and (d / "model.pt").exists()]
+    # [NEW] Support hierarchical structure: experiments/{exp_name}/fold_{subject}/
+    # Search for model.pt in both:
+    # 1. Direct children (old flat structure)
+    # 2. Grandchildren (new nested structure)
+    exp_dirs = []
+    
+    for item in root.iterdir():
+        if not item.is_dir():
+            continue
+        
+        # Check if this is a fold directory (has model.pt)
+        if (item / "model.pt").exists():
+            exp_dirs.append(item)
+        else:
+            # Check if this is an experiment group (has fold_* subdirectories)
+            for fold_dir in item.iterdir():
+                if fold_dir.is_dir() and (fold_dir / "model.pt").exists():
+                    exp_dirs.append(fold_dir)
+    
     exp_dirs.sort(key=lambda x: x.name)
     return exp_dirs
 
@@ -88,339 +124,777 @@ def select_experiments(exp_dirs):
         print("Invalid input.")
         return []
 
-def calculate_lag(y_true, y_pred, fs=100):
+def calculate_lag(y_true, y_pred, fs=100, series_offsets=None):
     """
     Calculate temporal lag (phase shift) using Cross-Correlation.
     Positive lag => Prediction is DELAYED (behind truth).
     """
+    if series_offsets is not None:
+        lags_list = []
+        # series_offsets contains start indices of each trial in the concatenated array.
+        # The last element of offsets isn't the end, it's the start of the last block? 
+        # No, usually logical to have start of each. We need end of each.
+        # Check load_and_evaluate logic: offsets.append(curr). curr starts at 0.
+        # So offsets = [0, len_1, len_1+len_2, ...]. 
+        # Oh, wait.
+        # line 549: offsets.append(curr) -> offsets[0]=0.
+        # curr += num_samples.
+        # So offsets are [0, N1, N1+N2, ...].
+        # The lengths are diffs.
+        
+        # We need to iterate up to len(offsets). 
+        # The total length of y_true should match the sum of segments.
+        # If offsets is [0, 100], and total len is 100. Then segment is 0:100.
+        # If offsets is [0, 100, 200]. segments: 0:100, 100:200.
+        
+        num_segments = len(series_offsets)
+        total_len = len(y_true)
+        
+        for i in range(num_segments):
+            start = series_offsets[i]
+            end = series_offsets[i+1] if i < num_segments - 1 else total_len
+            
+            if start >= end: continue
+            
+            yt = y_true[start:end]
+            yp = y_pred[start:end]
+            
+            if len(yt) < 10: continue # Skip too short
+            
+            # Recurse without offsets
+            l = calculate_lag(yt, yp, fs, series_offsets=None)
+            lags_list.append(l)
+            
+        if not lags_list: return 0.0
+        return np.mean(lags_list)
+
     correlation = signal.correlate(y_true - np.mean(y_true), y_pred - np.mean(y_pred), mode="full")
     lags = signal.correlation_lags(len(y_true), len(y_pred), mode="full")
     lag_idx = np.argmax(correlation)
     lag_samples = lags[lag_idx]
     
-    # lag_samples < 0 means y_pred is ahead?
-    # correct: if y_pred is shifted right (delayed), peak is at negative lag? checking...
-    # signal.correlate(in1, in2): 
-    # If in2 is shifted right by k relative to in1, the peak is at index ...
-    # Easier: Time difference. 
-    # Let's say y_true is at t=0. y_pred is at t=10 (delayed).
-    # correlate(y_true, y_pred) peak will be at negative lag.
-    # So Lag (ms) = -lag_samples * (1000/fs)
-    
     lag_ms = -lag_samples * (1000.0 / fs)
     return lag_ms
 
-def calculate_smoothness(y_pred):
+def calculate_smoothness(y_pred, series_offsets=None):
     """
     Smoothness metric: Std Dev of the first derivative (Jitter).
     Lower is smoother.
     """
+    if series_offsets is not None:
+        jitters = []
+        total_len = len(y_pred)
+        num_segments = len(series_offsets)
+        for i in range(num_segments):
+            start = series_offsets[i]
+            end = series_offsets[i+1] if i < num_segments - 1 else total_len
+            if start >= end: continue
+            yp = y_pred[start:end]
+            if len(yp) < 2: continue
+            jitters.append(calculate_smoothness(yp, series_offsets=None))
+        if not jitters: return 0.0
+        return np.mean(jitters)
+
     diff = np.diff(y_pred, axis=0)
     jitter = np.std(diff)
     return jitter
 
+def resolve_cfg(cfg):
+    """Ensures input_vars, output_vars etc. are in the root of the cfg dictionary."""
+    if 'input_vars' not in cfg:
+        # Check shared
+        if 'shared' in cfg:
+            cfg['input_vars'] = cfg['shared'].get('input_vars')
+            cfg['output_vars'] = cfg['shared'].get('output_vars')
+            if 'data' in cfg['shared']:
+                 if 'time_window_input' not in cfg: cfg['time_window_input'] = cfg['shared']['data'].get('window_size')
+                 if 'time_window_output' not in cfg: cfg['time_window_output'] = cfg['shared']['data'].get('time_window_output')
+                 if 'stride' not in cfg: cfg['stride'] = cfg['shared']['data'].get('stride')
+        # Check 01_construction
+        if not cfg.get('input_vars') and '01_construction' in cfg:
+            cfg['input_vars'] = cfg['01_construction'].get('inputs')
+            cfg['output_vars'] = cfg['01_construction'].get('outputs')
+            if 'include_subjects' in cfg['01_construction']: cfg['subjects'] = cfg['01_construction']['include_subjects']
+            if 'include_conditions' in cfg['01_construction']: cfg['conditions'] = cfg['01_construction']['include_conditions']
+    
+    if 'conditions' not in cfg and 'shared' in cfg:
+        cfg['conditions'] = cfg['shared'].get('conditions', [])
+    if 'subjects' not in cfg and 'shared' in cfg:
+        cfg['subjects'] = cfg['shared'].get('subjects', [])
+        
+    return cfg
+
+def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg, 
+                          window_size, window_output, stride_eval, est_tick_ranges):
+    """
+    Applies Overlap-Averaging and Post-LPF based on config.
+    Returns (y_pred, y_true, offsets).
+    """
+    output_dim = y_pred_raw.shape[-1]
+    
+    # 1. Sequence Overlap Averaging
+    if y_pred_raw.ndim == 3 and est_tick_ranges is None and window_output > 1:
+        print(f"[EVAL] Applying Sequence Overlap Averaging (H={window_output})...")
+        y_pred_list = []
+        y_true_list = []
+        curr_offset = 0
+        for i, trial_x in enumerate(X_list):
+            length = len(trial_x)
+            limit = length - window_size - window_output + 1
+            if limit <= 0: continue
+            num_samples = len(range(0, limit, stride_eval))
+            if num_samples == 0: continue
+            
+            trial_pred_win = y_pred_raw[curr_offset : curr_offset + num_samples]
+            recon_len = num_samples + window_output - 1
+            sum_pred = np.zeros((recon_len, output_dim))
+            count_pred = np.zeros((recon_len, 1))
+            
+            trial_true_full = Y_list[i][window_size : window_size + recon_len]
+            
+            for t_idx in range(num_samples):
+                sum_pred[t_idx : t_idx + window_output] += trial_pred_win[t_idx]
+                count_pred[t_idx : t_idx + window_output] += 1
+            
+            y_pred_trial = sum_pred / count_pred
+            y_pred_list.append(y_pred_trial)
+            y_true_list.append(trial_true_full[:len(y_pred_trial)])
+            curr_offset += num_samples
+            
+        if y_pred_list:
+            y_pred = np.concatenate(y_pred_list, axis=0)
+            y_true = np.concatenate(y_true_list, axis=0)
+            offsets = [0]
+            for i in range(len(y_pred_list)-1):
+                offsets.append(offsets[-1] + len(y_pred_list[i]))
+        else:
+            y_pred = y_pred_raw
+            y_true = y_true_raw
+            offsets = [0]
+    else:
+        # Single point mode
+        y_pred = y_pred_raw
+        y_true = y_true_raw
+        offsets = []
+        curr = 0
+        for i in range(len(X_list)):
+            offsets.append(curr)
+            length = len(X_list[i])
+            max_lookahead = window_output if est_tick_ranges is None else max(est_tick_ranges)
+            limit = length - window_size - max_lookahead + 1
+            num_samples = len(range(0, limit, stride_eval)) if limit > 0 else 0
+            curr += num_samples
+
+    # 2. Post-Processing LPF
+    post_cfg = cfg.get("03_eval", {}).get("post_process", {})
+    if post_cfg.get("enable_lpf", False):
+        cutoff = post_cfg.get("lpf_cutoff", 1.5)
+        order = post_cfg.get("lpf_order", 4)
+        print(f"[EVAL] Applying Post-Process LPF (fc={cutoff}Hz)...")
+        from scipy.signal import butter, filtfilt
+        nyq = 0.5 * 100
+        b, a = butter(order, cutoff/nyq, btype='low')
+        
+        trial_preds = []
+        for i in range(len(offsets)):
+            start = offsets[i]
+            end = offsets[i+1] if i < len(offsets)-1 else len(y_pred)
+            segment = y_pred[start:end]
+            if len(segment) > 3 * order:
+                filtered = filtfilt(b, a, segment, axis=0) if segment.ndim == 2 else filtfilt(b, a, segment)
+                trial_preds.append(filtered)
+            else:
+                trial_preds.append(segment)
+        if trial_preds:
+            y_pred = np.concatenate(trial_preds, axis=0)
+
+    # 3. Overlap Ensemble (Multi-Step predictions only)
+    overlap_cfg = cfg.get("03_eval", {}).get("overlap_ensemble", {})
+    if overlap_cfg.get("enable", False) and est_tick_ranges and len(est_tick_ranges) > 1:
+        method = overlap_cfg.get("method", "mean")
+        print(f"[EVAL] Applying Overlap Ensemble (method={method}, H={len(est_tick_ranges)})...")
+        # y_pred at this point: (N, H, D) where each sample predicts H future steps
+        # For absolute time t, predictions come from multiple run-steps
+        H = len(est_tick_ranges)
+        new_preds = []
+        new_trues = []
+        curr = 0
+        for trial_idx, trial_x in enumerate(X_list):
+            length = len(trial_x)
+            max_la = max(est_tick_ranges)
+            limit = length - window_size - max_la + 1
+            if limit <= 0: continue
+            num_samples = len(range(0, limit, stride_eval))
+            if num_samples == 0: continue
+            
+            trial_pred = y_pred[curr:curr+num_samples]  # (num_samples, H, D)
+            out_dim = trial_pred.shape[-1] if trial_pred.ndim == 3 else 1
+            
+            # Reconstruct: for each absolute time step, collect all predictions
+            recon_len = num_samples + max_la - 1
+            if method == "median":
+                # Collect all predictions per time step
+                buckets = [[] for _ in range(recon_len)]
+                for s_idx in range(num_samples):
+                    for h_idx, h_val in enumerate(est_tick_ranges):
+                        t_abs = s_idx * stride_eval + h_val - 1
+                        if t_abs < recon_len:
+                            val = trial_pred[s_idx, h_idx] if trial_pred.ndim == 3 else trial_pred[s_idx]
+                            buckets[t_abs].append(val)
+                fused = np.array([np.median(b, axis=0) if b else 0.0 for b in buckets])
+            else:
+                # Mean or Weighted Mean
+                sum_pred = np.zeros((recon_len, out_dim)) if out_dim > 1 else np.zeros(recon_len)
+                weight_sum = np.zeros(recon_len)
+                
+                for s_idx in range(num_samples):
+                    for h_idx, h_val in enumerate(est_tick_ranges):
+                        t_abs = s_idx * stride_eval + h_val - 1
+                        if t_abs < recon_len:
+                            if method == "weighted_mean":
+                                w = overlap_cfg.get("weights_decay", 0.8) ** (h_val - 1)
+                            else:
+                                w = 1.0
+                            val = trial_pred[s_idx, h_idx] if trial_pred.ndim == 3 else trial_pred[s_idx]
+                            sum_pred[t_abs] += val * w
+                            weight_sum[t_abs] += w
+                
+                weight_sum[weight_sum == 0] = 1.0
+                if out_dim > 1:
+                    fused = sum_pred / weight_sum[:, None]
+                else:
+                    fused = sum_pred / weight_sum
+            
+            # Get corresponding true values
+            trial_true = Y_list[trial_idx][window_size:window_size + len(fused)]
+            if len(trial_true) > len(fused):
+                trial_true = trial_true[:len(fused)]
+            elif len(fused) > len(trial_true):
+                fused = fused[:len(trial_true)]
+            
+            new_preds.append(fused if fused.ndim >= 1 else fused.reshape(-1, 1))
+            new_trues.append(trial_true)
+            curr += num_samples
+        
+        if new_preds:
+            y_pred = np.concatenate(new_preds, axis=0)
+            y_true = np.concatenate(new_trues, axis=0)
+            offsets = [0]
+            for i in range(len(new_preds) - 1):
+                offsets.append(offsets[-1] + len(new_preds[i]))
+
+    # 4. EMA Post-Filter
+    ema_alpha = cfg.get("03_eval", {}).get("ema_alpha", None)
+    if ema_alpha is not None and ema_alpha > 0:
+        alpha = float(ema_alpha)
+        print(f"[EVAL] Applying EMA Post-Filter (alpha={alpha})...")
+        # Apply per-trial to avoid bleeding across trials
+        if offsets:
+            trial_preds_ema = []
+            for i in range(len(offsets)):
+                start = offsets[i]
+                end = offsets[i+1] if i < len(offsets)-1 else len(y_pred)
+                seg = y_pred[start:end].copy()
+                if len(seg) > 1:
+                    for t in range(1, len(seg)):
+                        seg[t] = alpha * seg[t] + (1 - alpha) * seg[t-1]
+                trial_preds_ema.append(seg)
+            y_pred = np.concatenate(trial_preds_ema, axis=0)
+        else:
+            seg = y_pred.copy()
+            for t in range(1, len(seg)):
+                seg[t] = alpha * seg[t] + (1 - alpha) * seg[t-1]
+            y_pred = seg
+
+    return y_pred, y_true, offsets
+
 def load_and_evaluate(exp_dir, device, return_seqs=False):
     """
     Loads model and config, rebuilds test dataset, runs inference.
-    Returns metrics and time-series.
+    
+    [REFACTORED] Training 스크립트(SpeedEstimator_TCN_MLP_experiments.py)의
+    config 해석, 데이터 로딩, normalization, 모델 초기화 경로를 정확히 재사용합니다.
+    
+    참조:
+      - Config 해석: train_experiment() line 1335-1349 + CV loop line 1833-1905
+      - 모델 초기화: train_experiment() line 1275-1410
+      - Normalization: CV loop line 2019-2042
     """
+    import re
+    import yaml
+    
     exp_path = Path(exp_dir)
-    config_path = exp_path / "config.yaml"
     model_path = exp_path / "model.pt"
     
-    if not config_path.exists() or not model_path.exists():
-        print(f"Skipping {exp_dir.name}: missing config or model.")
+    if not model_path.exists():
+        print(f"Skipping {exp_dir.name}: missing model.")
         return None
 
-    # Load Config
-    with open(config_path, 'r') as f:
-        import yaml
-        config = yaml.safe_load(f)
-        
-    cfg = config
-    
-    # [FIX] Enforce y_delay -> est_tick_ranges logic if missing
-    # [FIX] Enforce y_delay -> est_tick_ranges logic if missing
-    # Commented out because we want to allow Sequence Mode fallback (time_window_output)
-    if "est_tick_ranges" not in cfg:
-         pass
-         # # Check defaults
-         # base_y_delay = 5 # Default
-         # if "shared" in cfg and "data" in cfg["shared"]:
-         #     base_y_delay = cfg["shared"]["data"].get("y_delay", 5)
-         # elif "y_delay" in cfg:
-         #     base_y_delay = cfg["y_delay"]
-         # elif "01_construction" in cfg: # Check deeply
-         #     # Try to infer...
-         #     pass
-         #     
-         # # If still missing, default to [5]
-         # cfg["est_tick_ranges"] = [base_y_delay]
-         # print(f"[INFO] Derived est_tick_ranges: {cfg['est_tick_ranges']}")
-    
-    # [FIX] Handle Nested Config Mapping (Pre-computation)
-    if '01_construction' in cfg and 'input_vars' not in cfg:
-        cfg['input_vars'] = cfg['01_construction']['inputs']
-        cfg['output_vars'] = cfg['01_construction']['outputs']
-
-    # Parse Vars (Helper from main script logic needed, but simpler to repeat or assume correct)
-    # The config has 'input_vars' and 'output_vars' as lists.
-    input_vars = cfg.get("input_vars", [])
-    output_vars = cfg.get("output_vars", [])
-    # In config, it is already stored as list of lists.
-    
-    # Rebuild Test Dataset
-    # We need to know WHICH subject was the test subject for this specific fold.
-    # The folder name usually contains "Test-SXXX".
     folder_name = exp_path.name
-    import re
-    match = re.search(r"Test-(S\d+)", folder_name)
-    if match:
-        test_sub = match.group(1)
+    
+    # =========================================================================
+    # Step 1: YAML Config 로드 (Training CV loop line 1833과 동일)
+    # =========================================================================
+    # [NEW] Handle both flat and hierarchical structures
+    if folder_name.startswith("fold_"):
+        exp_name = exp_path.parent.name
+        match = re.search(r"fold_((?:m\d+_)?S\d+)", folder_name)
+        test_sub = match.group(1) if match else folder_name.replace("fold_", "")
     else:
-        print(f"Could not infer test subject from {folder_name}. Skipping.")
+        exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
+        if not exp_name_match:
+            print(f"Could not parse experiment name from {folder_name}. Skipping.")
+            return None
+        exp_name = exp_name_match.group(1)
+        
+        match = re.search(r"Test-((?:m\d+_)?S\d+)", folder_name)
+        if match:
+            test_sub = match.group(1)
+        else:
+            print(f"Could not infer test subject from {folder_name}. Skipping.")
+            return None
+    
+    original_config_path = Path(f"configs/{exp_name}.yaml")
+    
+    config_to_load = None
+    if original_config_path.exists():
+        config_to_load = original_config_path
+    else:
+         # Fallback to local config.yaml
+         local_config = exp_path / "config.yaml"
+         if local_config.exists():
+             config_to_load = local_config
+             print(f"[WARN] Global config {original_config_path} not found. Using local: {local_config}")
+         else:
+             print(f"Config file not found: {original_config_path} AND {local_config}. Skipping.")
+             return None
+    
+    with open(config_to_load, 'r') as f:
+        cfg = yaml.safe_load(f)
+    
+    print(f"\n{'='*60}")
+    print(f"[EVAL] {folder_name}")
+    print(f"[EVAL] Config: {original_config_path}")
+    
+    # test_sub is already extracted above
+    
+    # =========================================================================
+    # Step 3: Config 파싱 - Training CV loop (line 1833-1905)과 동일한 경로
+    # =========================================================================
+    # input_vars / output_vars (Training line 1833-1840)
+    curr_input_vars = cfg.get("input_vars")
+    curr_output_vars = cfg.get("output_vars")
+    if not curr_input_vars and 'shared' in cfg:
+        curr_input_vars = cfg['shared'].get('input_vars')
+    if not curr_output_vars and 'shared' in cfg:
+        curr_output_vars = cfg['shared'].get('output_vars')
+    if not curr_input_vars and '01_construction' in cfg:
+        curr_input_vars = cfg['01_construction'].get('inputs')
+    if not curr_output_vars and '01_construction' in cfg:
+        curr_output_vars = cfg['01_construction'].get('outputs')
+    
+    if not curr_input_vars or not curr_output_vars:
+        print(f"Skipping {folder_name}: Missing input/output vars in config.")
         return None
+    
+    # Tuple conversion (Training line 1932-1940)
+    def parse_vars(var_list_from_yaml):
+        if not var_list_from_yaml: return []
+        parsed = []
+        for item in var_list_from_yaml:
+            gpath = item[0]
+            vars = item[1]
+            parsed.append((gpath, vars))
+        return parsed
+    
+    c_in_vars = parse_vars(curr_input_vars)
+    c_out_vars = parse_vars(curr_output_vars)
+    
+    # subjects / conditions (Training line 1842-1846)
+    if not cfg.get('subjects') and 'shared' in cfg:
+        cfg['subjects'] = cfg['shared'].get('subjects', [])
+    if not cfg.get('conditions') and 'shared' in cfg:
+        cfg['conditions'] = cfg['shared'].get('conditions', [])
+    
+    curr_cond_names = cfg.get("conditions", [])
+    
+    # =========================================================================
+    # Step 4: Data 파라미터 - Training과 동일 (line 1848-1860)
+    # =========================================================================
+    # window_size (Training line 1849-1851)
+    curr_window = cfg.get("time_window_input")
+    if not curr_window and 'shared' in cfg and 'data' in cfg['shared']:
+        curr_window = cfg['shared']['data'].get('window_size')
+    if not curr_window:
+        curr_window = 200  # Default
+    
+    # est_tick_ranges (Training line 1853-1856, 1858-1860)
+    curr_est_tick_ranges = cfg.get("est_tick_ranges")
+    if not curr_est_tick_ranges and 'shared' in cfg and 'data' in cfg['shared']:
+        val = cfg['shared']['data'].get('est_tick_ranges')
+        if val is not None:
+            curr_est_tick_ranges = val
+        else:
+            y_delay = cfg['shared']['data'].get('y_delay', 5)
+            curr_est_tick_ranges = [y_delay] if isinstance(y_delay, int) else y_delay
+    if curr_est_tick_ranges:
+        cfg["est_tick_ranges"] = curr_est_tick_ranges
+    
+    # LPF (Training line 1868-1879)
+    curr_lpf_cutoff = cfg.get("lpf_cutoff")
+    if curr_lpf_cutoff is None and '01_construction' in cfg:
+        curr_lpf_cutoff = cfg['01_construction'].get('lpf_cutoff')
+    if curr_lpf_cutoff is None and 'shared' in cfg:
+        curr_lpf_cutoff = cfg['shared'].get('lpf_cutoff')
+    if curr_lpf_cutoff is None:
+        curr_lpf_cutoff = 0.5
         
-    # Data params
-    # Load base config to get default data path
-    base_config_path = Path("configs/base_config.yaml") 
-    if base_config_path.exists():
-        with open(base_config_path, 'r') as f:
-            import yaml
-            base_config = yaml.safe_load(f)
-            data_path = Path(base_config.get("data_path", "combined_data.h5")).resolve()
-    else:
-        # Fallback
-        data_path = Path("combined_data.h5").resolve()
-        
-    if not data_path.exists():
-         # Try relative to main script location
-         data_path = Path("combined_data.h5")
-         
-    # We only need the TEST data
-    # 1. Build Dataset (Test Only) -> fast
-    print(f"Loading Test Data for {folder_name} (Subject {test_sub})...")
+    curr_lpf_order = cfg.get("lpf_order")
+    if curr_lpf_order is None and '01_construction' in cfg:
+        curr_lpf_order = cfg['01_construction'].get('lpf_order')
+    if curr_lpf_order is None and 'shared' in cfg:
+        curr_lpf_order = cfg['shared'].get('lpf_order')
+    if curr_lpf_order is None:
+        curr_lpf_order = 4
     
-    # Must use same windowing params as training
-    # Smart Extraction
-    train_cfg = cfg.get("02_train", {})
-    data_cfg = train_cfg.get("data", {})
-    if not data_cfg and "shared" in cfg and "data" in cfg["shared"]: # Fallback to anchor
-        data_cfg = cfg["shared"]["data"]
-    if not data_cfg: data_cfg = cfg.get("data", {}) # Fallback to global data
-
-    win_in = data_cfg.get("time_window_input") or cfg.get("time_window_input", 100)
-    win_out = data_cfg.get("time_window_output") or cfg.get("time_window_output", 10)
-    stride = data_cfg.get("stride") or cfg.get("stride", 20)
-    
-    stride_eval = 1 
-    
-    # Custom Horizon
-    est_tick_ranges = data_cfg.get("est_tick_ranges") or cfg.get("est_tick_ranges", None)
-    
-    # [FIX] Heuristic: If win_out > 1, we assume Sequence Mode even if ranges is polluted
-    if win_out > 1:
-        print(f"[AUTO-FIX] win_out={win_out} > 1, forcing est_tick_ranges=None (Sequence Mode)")
-        est_tick_ranges = None
-    
-    input_vars = cfg["input_vars"]
-    output_vars = cfg["output_vars"]
-    
-    # We use build_nn_dataset directly
-    lpf_c = cfg.get("lpf_cutoff")
-    if lpf_c is None and "01_construction" in cfg:
-        lpf_c = cfg["01_construction"].get("lpf_cutoff")
-    lpf_c = lpf_c if lpf_c is not None else 0.5
-    
-    lpf_o = cfg.get("lpf_order")
-    if lpf_o is None and "01_construction" in cfg:
-        lpf_o = cfg["01_construction"].get("lpf_order")
-    lpf_o = lpf_o if lpf_o is not None else 5
-    
-    # [NEW] Extract Data Flags
+    # Data flags (Training line 1968-1971)
     data_cfg_now = cfg.get("02_train", {}).get("data", {})
     use_phys_vel = data_cfg_now.get("use_physical_velocity_model", False)
     use_gait_ph  = data_cfg_now.get("use_gait_phase", False)
     
-    X_list, Y_list = build_nn_dataset(
-        str(data_path), 
-        [test_sub], # Only test subject
-        cfg["conditions"], # Use all conditions trained on?
-        input_vars, output_vars,
-        win_in, win_out, stride_eval, # Correct signature: win_in, win_out, stride
+    # =========================================================================
+    # Step 5: train_experiment 내부와 동일한 data_cfg 파싱 (line 1335-1349)
+    # =========================================================================
+    train_cfg_section = cfg.get("02_train", {})
+    data_cfg = train_cfg_section.get("data", {})
+    if not data_cfg: data_cfg = cfg.get("data", {})
+    
+    # Training line 1341-1344: 정확한 windowing 파라미터
+    window_size = data_cfg.get("window_size") or cfg.get("window_size", 200)
+    window_output = data_cfg.get("window_output") or data_cfg.get("time_window_output") or cfg.get("window_output", 1)
+    data_stride = data_cfg.get("stride") or cfg.get("stride", 5)
+    
+    # Training line 1346-1347: est_tick_ranges
+    est_tick_ranges = data_cfg.get("est_tick_ranges") if data_cfg else cfg.get("est_tick_ranges")
+    
+    # Evaluation stride = 1 (denser than training for smooth trajectory)
+    stride_eval = 1
+    
+    print(f"[EVAL] Data: win_in={window_size}, win_out={window_output}, stride_train={data_stride}, stride_eval={stride_eval}")
+    print(f"[EVAL] est_tick_ranges={est_tick_ranges}, lpf_cutoff={curr_lpf_cutoff}, lpf_order={curr_lpf_order}")
+    
+    # =========================================================================
+    # Step 6: 데이터 로딩 (Training CV loop line 1994-2002과 동일)
+    # =========================================================================
+    print(f"[EVAL] Loading Test Data for Subject {test_sub}...")
+    
+    X_list, Y_list = main_script.build_nn_dataset_multi(
+        cfg, 
+        [test_sub],
+        curr_cond_names,
+        c_in_vars, c_out_vars,
+        window_size,       # Training과 동일한 window_size (YAML에서)
+        window_output,     # Training과 동일한 window_output (YAML에서)
+        stride_eval,       # Evaluation은 stride=1
+        subject_selection=None,
         condition_selection=CONDITION_SELECTION,
-        lpf_cutoff=lpf_c,
-        lpf_order=lpf_o,
+        lpf_cutoff=curr_lpf_cutoff,
+        lpf_order=curr_lpf_order,
         est_tick_ranges=est_tick_ranges,
         use_physical_velocity_model=use_phys_vel,
         use_gait_phase=use_gait_ph
     )
     
     if not X_list:
-        print("No test data found.")
+        print(f"[ERROR] No test data found for {test_sub}. Check prefixes and data_sources.")
         return None
-        
-    ds = LazyWindowDataset(X_list, Y_list, win_in, win_out, stride_eval, target_mode="sequence", est_tick_ranges=est_tick_ranges)
+    
+    # =========================================================================
+    # Step 7: Normalization - Training과 동일 (line 2019-2042)
+    # scaler.npz을 로드하여 Training에서 저장한 mean/scale 적용
+    # =========================================================================
+    scaler_path = exp_path / "scaler.npz"
+    if scaler_path.exists():
+        scaler = np.load(scaler_path)
+        mean = scaler['mean']
+        scale = scaler['scale']
+        print(f"[EVAL] Applying scaler from {scaler_path} (mean shape={mean.shape})")
+        for i in range(len(X_list)):
+            X_list[i] = (X_list[i] - mean) / scale
+    else:
+        print(f"[WARN] No scaler.npz found in {exp_path}! Model expects normalized input.")
+    
+    # =========================================================================
+    # Step 8: Dataset 생성 - Training line 1357-1359와 동일
+    # =========================================================================
+    ds = LazyWindowDataset(
+        X_list, Y_list, 
+        window_size, window_output, stride_eval,
+        target_mode="sequence", 
+        est_tick_ranges=est_tick_ranges
+    )
     loader = DataLoader(ds, batch_size=1024, shuffle=False, num_workers=0)
     
-    # Load Model
-    # Need to infer input_dim/output_dim from data
+    # =========================================================================
+    # Step 9: 모델 초기화 - train_experiment (line 1275-1410)과 동일
+    # =========================================================================
     input_dim = X_list[0].shape[1]
     output_dim = Y_list[0].shape[1]
     
     if est_tick_ranges:
         horizon = len(est_tick_ranges)
     else:
-        horizon = win_out
+        horizon = window_output
     
-    print(f"[DEBUG-EVAL] CFG Keys: {list(cfg.keys())}")
-    if "02_train" in cfg:
-        print(f"[DEBUG-EVAL] 02_train keys: {list(cfg['02_train'].keys())}")
-        if cfg["02_train"].get("model"):
-             print(f"[DEBUG-EVAL] 02_train.model keys: {list(cfg['02_train']['model'].keys())}")
-
-    model_cfg = cfg.get("02_train", {}).get("model")
+    # Model Config (Training line 1277-1285)
+    model_cfg = train_cfg_section.get("model")
     if not model_cfg:
-        # Fallback to data if present
-        data_cfg = cfg.get("02_train", {}).get("data")
-        if data_cfg and "channels" in data_cfg: model_cfg = data_cfg
+        data_cfg_m = train_cfg_section.get("data")
+        if data_cfg_m and "channels" in data_cfg_m: model_cfg = data_cfg_m
     if not model_cfg: model_cfg = cfg.get("model") or {}
     
-    tcn_ch = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
-    k_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 3)
-    dropout = float(model_cfg.get("dropout") or cfg.get("dropout_p", 0.1))
+    # TCN 파라미터 (Training line 1286-1310)
+    tcn_channels = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
+    kernel_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 3)
+    
+    dropout_p = model_cfg.get("dropout")
+    if dropout_p is None:
+        if "dropout" in cfg.get("data", {}): dropout_p = cfg["data"]["dropout"]
+        else: dropout_p = cfg.get("dropout_p", 0.5)
+    dropout_p = float(dropout_p)
+    
     head_dropout = model_cfg.get("head_dropout")
-    norm_type = model_cfg.get("model_norm")
+    mlp_hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", 128)
     
-    hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", 128)
+    # Normalization flags (Training line 1302-1309)
+    use_input_norm = cfg.get("data", {}).get("normalize", True)
+    if use_input_norm is None:
+        use_input_norm = cfg.get("use_input_norm", True)
     
-    print(f"[DEBUG-VALS] k_size={k_size}, hidden={hidden}, tcn_ch={tcn_ch}")
-    print(f"[DEBUG-VALS] model_cfg kernel: {model_cfg.get('kernel_size')}")
-
-    # Model Instantiation
+    model_norm_type = model_cfg.get("model_norm", None)
+    tcn_norm = model_norm_type
+    mlp_norm = model_norm_type
+    
+    print(f"[EVAL] Model: type={model_cfg.get('type', 'TCN')}, ch={tcn_channels}, k={kernel_size}")
+    print(f"[EVAL] Dropout={dropout_p}, head_dropout={head_dropout}, hidden={mlp_hidden}")
+    print(f"[EVAL] use_input_norm={use_input_norm}, norm_type={model_norm_type}")
+    print(f"[EVAL] input_dim={input_dim}, output_dim={output_dim}, horizon={horizon}")
+    
+    # Model Instantiation (Training line 1374-1410)
     model_type = model_cfg.get("type", "TCN")
-    print(f"[INFO] Initializing Model: {model_type}")
     
     common_args = dict(
         input_dim=input_dim, 
         output_dim=output_dim, 
         horizon=horizon,
-        channels=tcn_ch,
-        kernel_size=k_size,
-        dropout=dropout,
+        channels=tcn_channels,
+        kernel_size=kernel_size,
+        dropout=dropout_p,
         head_dropout=head_dropout,
-        mlp_hidden=hidden, 
-        use_input_norm=cfg.get("use_input_norm", True),
-        tcn_norm=norm_type,
-        mlp_norm=norm_type
+        mlp_hidden=mlp_hidden,
+        use_input_norm=use_input_norm,
+        tcn_norm=tcn_norm,
+        mlp_norm=mlp_norm
     )
 
     if model_type == "StanceGatedTCN":
-        gating_dim = model_cfg.get("gating_dim", 1) 
-        gating_signal = model_cfg.get("gating_signal", "contact")
-        str_mapping = {'contact': 1} # Placeholder
+        gating_dim = model_cfg.get("gating_dim", 1)
         model = StanceGatedTCN(**common_args, gating_dim=gating_dim)
-        
     elif model_type == "AttentionTCN":
         attn_type = model_cfg.get("attention_type", "temporal")
         heads = model_cfg.get("attention_heads", 4)
         model = AttentionTCN(**common_args, attention_type=attn_type, attention_heads=heads)
-        
     else:
         model = TCN_MLP(**common_args)
     
     model.to(device)
     
-    # Load Weights
+    # =========================================================================
+    # Step 10: Weights 로드 및 Inference
+    # =========================================================================
     ckpt = torch.load(model_path, map_location=device)
-    # Handle strictly=False logic same as training
     model.load_state_dict(ckpt["state_dict"] if "state_dict" in ckpt else ckpt, strict=False)
     model.eval()
     
-    # Inference
     y_preds = []
     y_trues = []
     
     with torch.no_grad():
         for xb, yb in loader:
             xb = xb.to(device)
-            out = model(xb) # (B, T, D)
+            out = model(xb)
             y_preds.append(out.cpu().numpy())
             y_trues.append(yb.cpu().numpy())
             
-    y_pred = np.concatenate(y_preds, axis=0) # (N, T, D)
-    y_true = np.concatenate(y_trues, axis=0)
+    y_pred_raw = np.concatenate(y_preds, axis=0)
+    y_true_raw = np.concatenate(y_trues, axis=0)
     
-    print(f"[DEBUG] y_pred shape: {y_pred.shape}, y_true shape: {y_true.shape}")
+    y_pred, y_true, offsets = apply_post_processing(
+        y_pred_raw, y_true_raw, X_list, Y_list, cfg,
+        window_size, window_output, stride_eval, est_tick_ranges
+    )
+
+    print(f"[EVAL] Final y_pred shape: {y_pred.shape}")
     
+    # =========================================================================
+    # Step 11: Metric 계산 (Re-calculation after averaging/filtering)
+    # =========================================================================
+    vp = y_pred.squeeze()
+    vt = y_true.squeeze()
     
-    # Flatten for overall metrics
-    # CRITICAL FIX: Align evaluation to 50ms (Tick 5, Index 4) for fair comparison.
-    # Baseline targets 50ms (est_tick_ranges=[5]).
-    # Sequence models (Horizon 5, 10, 20) predict [1..H] steps ahead.
-    # We want index 4 (5th step) from Sequence models to compare with Baseline.
-    # If using [-1], Horizon 20 is evaluated at 200ms, which is unfair.
+    # Ensure they are 1D for metric functions
+    if vp.ndim > 1: vp = vp[:, 0]
+    if vt.ndim > 1: vt = vt[:, 0]
     
-    if y_pred.ndim == 3: # (N, H, D)
-        H = y_pred.shape[1]
-        
-        # Determine index
-        # If est_tick_ranges exists, we usually respect it.
-        # But here we want to standardize.
-        
-        # If Sequence Mode (ranges is None)
-        if est_tick_ranges is None:
-            # We want 5th step (Index 4)
-            # If H < 5, use last.
-            target_idx = min(4, H-1)
-            print(f"[DEBUG] Using Sequence Index {target_idx} (Step {target_idx+1}) for Evaluation")
-            vp = y_pred[:, target_idx, 0]
-            vt = y_true[:, target_idx, 0]
-        else:
-            # Range Mode (Baseline uses [5])
-            # It only has 1 output usually, so index 0.
-            # Assuming est_tick_ranges=[5], then y_pred is (N, 1, 1) or (N, 1) if reshaped?
-            # TCN_MLP reshaped to (N, H, D). So (N, 1, 1).
-            vp = y_pred[:, 0, 0]
-            vt = y_true[:, 0, 0]
-    else:
-        # Assume (N, 1) or (N,)
-        vp = y_pred.squeeze()
-        vt = y_true.squeeze()
-        
-        
-    metrics_horizon = 50 # ms (Label purpose)
-    
-    # Calculate Metrics
     mae = np.mean(np.abs(vp - vt))
     rmse = np.sqrt(np.mean((vp - vt)**2))
     
-    # 10-Tick Metrics
-    # Lag (ms) - assuming 100Hz -> 10ms per tick
-    lag_ms = calculate_lag(vt, vp, fs=100)
+    ss_res = np.sum((vt - vp)**2)
+    ss_tot = np.sum((vt - np.mean(vt))**2)
+    r2 = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
     
-    # Smoothness (Jitter)
-    smoothness = calculate_smoothness(vp)
+    lag_ms = calculate_lag(vt, vp, fs=100, series_offsets=offsets)
+    smoothness = calculate_smoothness(vp, series_offsets=offsets)
     
-    # Return compact dictionary to save memory
+    print(f"[EVAL] Results: MAE={mae:.4f}, RMSE={rmse:.4f}, R²={r2:.4f}, Lag={lag_ms:.1f}ms")
+    
     ret = {
         "name": folder_name,
         "mae": mae,
         "rmse": rmse,
+        "r2": r2,
         "lag_ms": lag_ms,
         "smoothness": smoothness,
-        "rmse": rmse,
-        "lag_ms": lag_ms,
-        "smoothness": smoothness,
-        "folder_path": exp_dir, # Keep path to reload later
-        "est_tick_ranges": est_tick_ranges
+        "folder_path": exp_dir,
+        "est_tick_ranges": est_tick_ranges,
+        "series_offsets": offsets
     }
     
+    # [MOVED UP] offsets calculation was here
+
     if return_seqs:
-        ret["y_true_seq"] = y_true # (N, Win_Out, 1)
-        ret["y_pred_seq"] = y_pred # (N, Win_Out, 1)
+        ret["y_true_seq"] = y_true
+        ret["y_pred_seq"] = y_pred
         
     return ret
+
+def parse_vars(var_list_from_yaml):
+    """Parse nested variable list from YAML config."""
+    if not var_list_from_yaml: return []
+    parsed = []
+    for item in var_list_from_yaml:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            gpath = item[0]
+            vars = item[1]
+            parsed.append((gpath, vars))
+    return parsed
+
+def get_feature_names(cfg, input_vars):
+    """Reconstruct feature names based on config and input variables."""
+    feature_names = []
+    for gpath, vars in input_vars:
+        # Determine prefix based on group path (Mirroring main script logic)
+        gpath_lower = gpath.lower()
+        if 'back_imu' in gpath_lower:
+            prefix = "IMU"
+        elif 'robot' in gpath_lower:
+            if 'left' in gpath_lower: prefix = "Robot_L"
+            elif 'right' in gpath_lower: prefix = "Robot_R"
+            else: prefix = "Robot"
+        elif 'grf' in gpath_lower:
+            side = 'L' if 'left' in gpath_lower else 'R'
+            prefix = f"GRF_{side}"
+        elif 'kin_qdot' in gpath_lower:
+            prefix = "J_Vel"
+        elif 'kin_q' in gpath_lower:
+            prefix = "Deg"
+        else:
+            prefix = gpath.split('/')[-1]
+            
+        for v in vars:
+            # Clean up individual variable names
+            v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
+            v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
+            v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
+            feature_names.append(f"{prefix}_{v_clean}")
+            
+    # Add gait phase if enabled in config
+    if cfg.get("02_train", {}).get("data", {}).get("use_gait_phase") or cfg.get("use_gait_phase"):
+        feature_names.append("GaitPhase_L")
+        feature_names.append("GaitPhase_R")
+        
+    return feature_names
+
+def calculate_permutation_importance(model, test_loader, feature_names, device):
+    """Calculate MAE-based permutation importance."""
+    print("Collecting data for Permutation Importance analysis...")
+    X_batches = []
+    Y_batches = []
+    for xb, yb in test_loader:
+        X_batches.append(xb)
+        Y_batches.append(yb)
+        
+    if not X_batches:
+        return np.array([])
+        
+    X_tensor = torch.cat(X_batches, dim=0).to(device)
+    Y_tensor = torch.cat(Y_batches, dim=0).to(device)
+    
+    criterion = torch.nn.L1Loss() # MAE
+    model.eval()
+    
+    def get_loss(x_in, y_in):
+        with torch.no_grad():
+            batch_size = 1024
+            N = x_in.size(0)
+            running_loss = 0.0
+            for i in range(0, N, batch_size):
+                xb = x_in[i:i+batch_size]
+                yb = y_in[i:i+batch_size]
+                pred = model(xb)
+                # Reshape if necessary (Horizon handling)
+                if pred.ndim == 3 and yb.ndim == 2: yb = yb.unsqueeze(1)
+                elif pred.ndim == 2 and yb.ndim == 3: pred = pred.unsqueeze(1)
+                running_loss += criterion(pred, yb).item() * xb.size(0)
+            return running_loss / N
+
+    base_mae = get_loss(X_tensor, Y_tensor)
+    importances = []
+    
+    for i in range(X_tensor.shape[2]):
+        original_col = X_tensor[:, :, i].clone()
+        perm_idx = torch.randperm(X_tensor.size(0), device=device)
+        X_tensor[:, :, i] = X_tensor[perm_idx, :, i]
+        
+        perm_mae = get_loss(X_tensor, Y_tensor)
+        importances.append(perm_mae - base_mae)
+        
+        X_tensor[:, :, i] = original_col
+        print(f"  [{i+1}/{X_tensor.shape[2]}] {feature_names[i]}: +{importances[-1]:.6f}", end='\r')
+    
+    print()
+    return np.array(importances)
+
+def plot_feature_importance(importances, feature_names, save_path, title="Feature Importance"):
+    """Plot horizontal bar chart of feature importance."""
+    if len(importances) == 0: return
+    
+    # Sort for plotting
+    sorted_idx = np.argsort(importances)
+    
+    # Dynamic height to ensure ALL features are visible (0.3 inch per feat for better spacing)
+    fig_h = max(8, len(importances) * 0.3)
+    plt.figure(figsize=(12, fig_h)) # Slightly wider for better labels
+    
+    plt.barh(range(len(importances)), importances[sorted_idx], color='lightgreen', edgecolor='black', alpha=0.8)
+    plt.yticks(range(len(importances)), [feature_names[i] for i in sorted_idx], fontsize=10)
+    plt.xlabel("MAE Increase (Importance)", fontsize=12)
+    plt.title(title, fontsize=14, fontweight='bold')
+    plt.grid(axis='x', linestyle='--', alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(save_path, dpi=150) # Higher DPI for clarity
+    plt.close()
+    print(f"  [SAVED] Feature Importance plot: {save_path}")
 
 def main():
     exp_dirs = list_experiments()
@@ -779,42 +1253,93 @@ def plot_training_curves(exp_dir, save_dir):
     except Exception as e:
         print(f"[ERROR] Failed to plot training curves: {e}")
 
-def plot_trajectory(y_true, y_pred, title, save_path):
+def plot_trajectory(y_true, y_pred, title, save_path, series_offsets=None):
     """
     Plots trajectory comparison with Full and Zoomed views.
     y_true, y_pred: (T, 1) or (T,) or (T)
+    series_offsets: List of start indices for each trial (to insert breaks)
     """
+    # Helper to insert NaNs at boundaries for plotting
+    def insert_breaks(data, offsets):
+        if offsets is None or len(offsets) < 2: return data, np.arange(len(data))/100.0
+        
+        # We need to construct a new array with NaNs inserted between segments
+        # offsets: [0, 100, 200...] (Start indices of segments in original data)
+        # We want to insert NaN at 100, 200...
+        
+        segments = []
+        total_len = len(data)
+        
+        for i in range(len(offsets)):
+            start = offsets[i]
+            end = offsets[i+1] if i < len(offsets)-1 else total_len
+            if start >= end: continue
+            segments.append(data[start:end])
+            if i < len(offsets)-1:
+                segments.append(np.array([np.nan]))
+                
+        if not segments: return data, np.arange(len(data))/100.0
+        
+        new_data = np.concatenate(segments)
+        new_t = np.arange(len(new_data)) / 100.0 # Time is now artifactual/expanded but shows gaps ?? 
+        # Actually time should probably just be broken too? 
+        # Or we just use a single time axis and let data have NaNs.
+        # If we insert NaNs, the index shifts.
+        # Simpler: Plot each segment separately?
+        # NO, single plot call is better for performance.
+        # Just use the NaN approach.
+        return new_data, new_t
+
+    # Wait, if we change the time axis length, it might be confusing.
+    # But usually "concatenated trials" is an artificial timeline anyway.
+    # So inserting a small gap (NaN) is fine.
+    
     # Ensure 1D
     y_true = np.squeeze(y_true)
     y_pred = np.squeeze(y_pred)
+    # If still not 1D (e.g. sequence output), take the first index
+    if y_true.ndim > 1: y_true = y_true[:, 0]
+    if y_pred.ndim > 1: y_pred = y_pred[:, 0]
     
-    fs = 100.0
-    t = np.arange(len(y_true)) / fs
+    # Insert Breaks
+    y_true_plot, t_plot = insert_breaks(y_true, series_offsets)
+    y_pred_plot, _ = insert_breaks(y_pred, series_offsets) # t_plot should be same
     
     fig, axes = plt.subplots(2, 1, figsize=(12, 10))
     
     # 1. Full Duration
-    axes[0].plot(t, y_true, label='Ground Truth (Target)', alpha=0.7, color='black')
-    axes[0].plot(t, y_pred, label='Prediction', alpha=0.9, color='red', linestyle='--')
+    axes[0].plot(t_plot, y_true_plot, label='Ground Truth (Target)', alpha=0.7, color='black')
+    axes[0].plot(t_plot, y_pred_plot, label='Prediction', alpha=0.9, color='red', linestyle='--')
+    
+    # Add trial boundaries
+    fs = 100.0
+    if series_offsets is not None:
+        for offset in series_offsets:
+            if offset == 0: continue
+            boundary_t = offset / fs
+            axes[0].axvline(x=boundary_t, color='blue', linestyle=':', alpha=0.5)
+            if offset == series_offsets[1] if len(series_offsets) > 1 else -1: # Only label first boundary to avoid clutter
+                axes[0].text(boundary_t, axes[0].get_ylim()[1], 'Trial Boundary', rotation=90, color='blue', alpha=0.5, va='top')
+
     axes[0].set_title(f"{title} - Full Duration")
     axes[0].set_xlabel("Time (s)")
     axes[0].set_ylabel("Speed (m/s)")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
     
-    # 2. Zoomed (15s Window, e.g. 10s-25s)
+    # 2. Zoomed (15s Window)
     start_t, end_t = 10.0, 25.0
     # Adjust if total duration is short
-    if t[-1] < 15.0:
-        start_t, end_t = 0, t[-1]
-    elif t[-1] < 25.0:
+    if t_plot[-1] < 15.0:
+        start_t, end_t = 0, t_plot[-1]
+    elif t_plot[-1] < 25.0:
         start_t = 0
         end_t = 15.0
         
-    mask = (t >= start_t) & (t <= end_t)
+    mask = (t_plot >= start_t) & (t_plot <= end_t)
     if np.sum(mask) > 0:
-        axes[1].plot(t[mask], y_true[mask], label='Ground Truth', color='black', alpha=0.7)
-        axes[1].plot(t[mask], y_pred[mask], label='Prediction', color='red', linestyle='--', alpha=0.9)
+        axes[1].plot(t_plot[mask], y_true_plot[mask], label='Ground Truth', color='black', alpha=0.7)
+        axes[1].plot(t_plot[mask], y_pred_plot[mask], label='Prediction', color='red', linestyle='--', alpha=0.9)
         axes[1].set_title(f"Zoomed ({start_t}s - {end_t}s)")
         axes[1].set_xlabel("Time (s)")
         axes[1].set_ylabel("Speed (m/s)")
@@ -827,7 +1352,348 @@ def plot_trajectory(y_true, y_pred, title, save_path):
     plt.savefig(save_path)
     plt.close()
 
+
+def plot_detailed_condition_trajectories(exp_path, save_dir, device):
+    """
+    Generates 2x3 grid plots (Levels x Zooms) for each condition.
+    Copied/Refactored from analyze_detailed_single to be reusable.
+    """
+    print(f"[INFO] Generating Detailed Grid Plots for {exp_path.name}...")
+    import yaml, re, h5py
+    from torch.utils.data import DataLoader
+    
+    folder_name = exp_path.name
+    
+    # 1. Load Config
+    exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
+    exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
+    original_config_path = Path(f"configs/{exp_name}.yaml")
+    cfg = None
+    if original_config_path.exists():
+        with open(original_config_path, 'r') as f_cfg: cfg = yaml.safe_load(f_cfg)
+    else:
+        config_path = exp_path / "config.yaml"
+        if not config_path.exists():
+            print("  -> Config not found, skipping detailed plots.")
+            return
+        with open(config_path) as f_cfg: cfg = yaml.safe_load(f_cfg)
+
+    # 2. Parse Variables
+    def _parse_vars_local(var_list_from_yaml):
+        if not var_list_from_yaml: return []
+        parsed = []
+        for item in var_list_from_yaml:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                parsed.append((item[0], item[1]))
+        return parsed
+
+    # input_vars / output_vars
+    curr_input_vars = cfg.get("input_vars")
+    curr_output_vars = cfg.get("output_vars")
+    if not curr_input_vars and 'shared' in cfg: curr_input_vars = cfg['shared'].get('input_vars')
+    if not curr_output_vars and 'shared' in cfg: curr_output_vars = cfg['shared'].get('output_vars')
+    if not curr_input_vars and '01_construction' in cfg: curr_input_vars = cfg['01_construction'].get('inputs')
+    if not curr_output_vars and '01_construction' in cfg: curr_output_vars = cfg['01_construction'].get('outputs')
+    
+    c_in_vars = _parse_vars_local(curr_input_vars)
+    c_out_vars = _parse_vars_local(curr_output_vars)
+    
+    # 3. Data Parameters
+    train_cfg_section = cfg.get("02_train", {})
+    data_cfg = train_cfg_section.get("data", {})
+    if not data_cfg: data_cfg = cfg.get("data", {})
+    
+    window_size = data_cfg.get("window_size") or cfg.get("window_size", 200)
+    window_output = data_cfg.get("window_output") or data_cfg.get("time_window_output") or cfg.get("window_output", 1)
+    est_tick_ranges = data_cfg.get("est_tick_ranges") if data_cfg else cfg.get("est_tick_ranges")
+    
+    # LPF
+    curr_lpf_cutoff = cfg.get("lpf_cutoff")
+    if curr_lpf_cutoff is None and 'shared' in cfg: curr_lpf_cutoff = cfg['shared'].get('lpf_cutoff')
+    eval_lpf = curr_lpf_cutoff or 0.5
+    
+    curr_lpf_order = cfg.get("lpf_order")
+    if curr_lpf_order is None and 'shared' in cfg: curr_lpf_order = cfg['shared'].get('lpf_order')
+    curr_lpf_order = curr_lpf_order or 4
+
+    # 4. Identify Subject and Data Path
+    match = re.search(r"Test-((?:m\d+_)?S\d+)", folder_name)
+    test_sub = match.group(1) if match else "S001"
+    
+    prefix_found, real_sub = parse_subject_prefix(test_sub)
+    data_sources = get_data_sources_from_config(cfg)
+    if prefix_found and prefix_found in data_sources:
+        data_path = data_sources[prefix_found]['path']
+    else:
+        data_path = cfg.get("data_path", "combined_data.h5")
+        if not os.path.exists(data_path): data_path = "combined_data.h5"
+
+    if not os.path.exists(data_path):
+        print(f"  -> Data path {data_path} not found. Skipping.")
+        return
+
+    # 5. Load Model
+    model_path = exp_path / "model.pt"
+    if not model_path.exists(): return
+    
+    # Reconstruct Model (Partial duplication of load_and_evaluate logic)
+    input_dim = 0
+    # Count vars:
+    count = 0
+    for g, vs in c_in_vars: count += len(vs)
+    # Add Gait Phase?
+    use_gait_ph = cfg.get("02_train", {}).get("data", {}).get("use_gait_phase") or cfg.get("use_gait_phase")
+    if use_gait_ph: count += 2 # L/R
+    input_dim = count
+    
+    # Output dim
+    out_dim = 0
+    for g, vs in c_out_vars: out_dim += len(vs)
+    if out_dim == 0: out_dim = 1 # Fallback
+    
+    model_cfg = train_cfg_section.get("model")
+    if not model_cfg: model_cfg = data_cfg if "channels" in data_cfg else cfg.get("model", {})
+    
+    tcn_channels = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
+    kernel_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 3)
+    dropout_p = float(model_cfg.get("dropout") or cfg.get("dropout_p", 0.5))
+    head_dropout = model_cfg.get("head_dropout", dropout_p)
+    mlp_hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", 128)
+    use_input_norm = cfg.get("data", {}).get("normalize", True)
+    model_norm_type = model_cfg.get("model_norm", None)
+    
+    horizon = len(est_tick_ranges) if est_tick_ranges else window_output
+    
+    model_type = model_cfg.get("type", "TCN")
+    common_args = dict(input_dim=input_dim, output_dim=out_dim, horizon=horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, head_dropout=head_dropout, mlp_hidden=mlp_hidden, use_input_norm=use_input_norm, tcn_norm=model_norm_type, mlp_norm=model_norm_type)
+
+    if model_type == "StanceGatedTCN":
+        model = StanceGatedTCN(**common_args, gating_dim=model_cfg.get("gating_dim", 1))
+    elif model_type == "AttentionTCN":
+        model = AttentionTCN(**common_args, attention_type=model_cfg.get("attention_type", "temporal"), attention_heads=model_cfg.get("attention_heads", 4))
+    else:
+        model = TCN_MLP(**common_args)
+        
+    ckpt = torch.load(model_path, map_location=device)
+    model.load_state_dict(ckpt['state_dict'] if 'state_dict' in ckpt else ckpt, strict=False)
+    model.to(device)
+    model.eval()
+
+    # Scaler
+    scaler_path = exp_path / "scaler.npz"
+    mean, scale = None, None
+    if scaler_path.exists():
+        s_data = np.load(scaler_path)
+        mean = s_data['mean']
+        scale = s_data['scale']
+
+    # 6. Plot Loop
+    from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
+    
+    # Conditions
+    cond_cfg = cfg.get("conditions")
+    if not cond_cfg and 'shared' in cfg: cond_cfg = cfg['shared'].get("conditions")
+    if not cond_cfg: cond_cfg = []
+    
+    # Expand conditions using H5
+    actual_conds = []
+    with h5py.File(data_path, 'r') as f_check:
+        if real_sub not in f_check: return
+        avail = list(f_check[real_sub].keys())
+        for c in cond_cfg:
+            if c in avail: actual_conds.append(c)
+            elif c == 'level': actual_conds.extend([ac for ac in avail if ac.startswith('level_')])
+            else:
+                matches = [ac for ac in avail if ac.startswith(c)]
+                if matches: actual_conds.extend(matches)
+    actual_conds = list(dict.fromkeys(actual_conds))
+
+    with h5py.File(data_path, 'r') as f:
+        for cond in actual_conds:
+            if cond not in f[real_sub]: continue
+            
+            # Target Levels: lv0, lv4, lv7 (First 3 found)
+            available_lv = sorted(list(f[real_sub][cond].keys()))
+            target_lvs = available_lv[:3] # Max 3 columns
+            
+            if not target_lvs: continue
+            
+            # Figure width depends on columns
+            fig, axes = plt.subplots(4, len(target_lvs), figsize=(6*len(target_lvs), 16), squeeze=False)
+            has_data = False
+            
+            for col_idx, lv_name in enumerate(target_lvs):
+                try:
+                    # Force Single Trial extract
+                    X_list, Y_list = extract_condition_data_v2(
+                        f, real_sub, cond, c_in_vars, c_out_vars, 
+                        lpf_cutoff=eval_lpf, lpf_order=curr_lpf_order, fs=100,
+                        include_levels=[lv_name], include_trials=['trial_01'] # First trial only
+                    )
+                except Exception as e:
+                    X_list = []
+                    
+                if not X_list:
+                    for r in range(4): axes[r, col_idx].axis('off')
+                    continue
+                
+                has_data = True
+                X_arr = X_list[0]
+                Y_arr = Y_list[0]
+                
+                # [NEW] Extract Robot Angle (Pre-calib) before normalization
+                robot_seq = None
+                robot_label = "Robot(Pre)"
+                
+                # Find index of robot hip/motor angle
+                # c_in_vars is list of (group, [vars])
+                current_idx = 0
+                robot_indices = []
+                
+                for g_path, v_list in c_in_vars:
+                    is_robot_group = 'robot' in g_path.lower()
+                    for v_name in v_list:
+                        if is_robot_group and ('hip_angle' in v_name or 'motor_angle' in v_name):
+                             # Check if it matches side? 
+                             # For now, just take the first one found or try to match 'left'/'right'
+                             # If output is 'left', we prefer 'left' robot angle
+                             
+                             # Simple heuristic: if 'left' in both or 'right' in both, it's a match.
+                             # Or if we just want to show *any* robot input.
+                             robot_indices.append((current_idx, v_name))
+                        current_idx += 1
+                
+                if robot_indices:
+                    # Pick best match based on Y_arr check?
+                    # Generally configs have L and R.
+                    # This plot loop iterates columns (Levels), but rows are Zoom 1, 2, 3.
+                    # Wait, do we plot L and R separately? 
+                    # This function plots whatever Y_arr is. Y_arr might be (T, 2) [L, R] or (T, 1).
+                    # If (T, 2), we probably plot both?
+                    # Current code: t_seq = t_seq_full.squeeze(). If 2D, it effectively plots only column 0!
+                    # Line 1476: if p_seq.ndim > 1: p_seq = p_seq[:, 0]
+                    # So it only plots the FIRST output dimension.
+                    
+                    # So we should find the robot angle corresponding to the FIRST output dimension.
+                    # Usually Output 0 is Left Hip Flexion.
+                    
+                    # Heuristic: Find 'left' if available, else first.
+                    selected_idx = robot_indices[0][0] # Default
+                    for ridx, rname in robot_indices:
+                        if 'left' in rname.lower():
+                             selected_idx = ridx
+                             break
+                    
+                    robot_seq = X_arr[:, selected_idx]
+                
+                if mean is not None:
+                    try:
+                        X_arr = (X_arr - mean) / (scale + 1e-8)
+                    except ValueError: pass
+                
+                # Inference
+                ds_vis = LazyWindowDataset([X_arr], [Y_arr], window_size, window_output, 1, target_mode="sequence", est_tick_ranges=est_tick_ranges)
+                loader_vis = DataLoader(ds_vis, batch_size=512, shuffle=False)
+                
+                preds, targets = [], []
+                with torch.no_grad():
+                     for xb, yb in loader_vis:
+                         xb = xb.to(device)
+                         out = model(xb)
+                         if isinstance(out, list): out = out[0]
+                         preds.append(out.cpu().numpy())
+                         targets.append(yb.cpu().numpy())
+                
+                if not preds: continue
+                P_raw = np.concatenate(preds, axis=0)
+                T_raw = np.concatenate(targets, axis=0)
+                
+                # Apply same post-processing logic (Averaging / LPF)
+                p_seq_full, t_seq_full, _ = apply_post_processing(
+                    P_raw, T_raw, [X_arr], [Y_arr], cfg,
+                    window_size, window_output, 1, est_tick_ranges
+                )
+                
+                p_seq = p_seq_full.squeeze()
+                t_seq = t_seq_full.squeeze()
+                if p_seq.ndim > 1: p_seq = p_seq[:, 0]
+                if t_seq.ndim > 1: t_seq = t_seq[:, 0]
+                
+                fs_Hz = 100.0
+                t = np.arange(len(t_seq)) / fs_Hz
+                
+                # Row 0: Full
+                ax0 = axes[0, col_idx]
+                ax0.plot(t, t_seq, color='black', alpha=0.7, label='GT')
+                if robot_seq is not None:
+                     # Align robot_seq to current window/stride?
+                     # X_arr was used to create ds_vis.
+                     # Predictions are made using windows from X_arr.
+                     # t_seq is constructed from Y_arr using apply_post_processing logic.
+                     # Robot seq should ideally undergo same "averaging" if it was windowed, 
+                     # but here it's raw input. 
+                     # Since stride=1 and we reconstruct, checking length alignment is key.
+                     # t array is length of t_seq.
+                     # If we just plot raw X_arr, it corresponds to the *inputs*.
+                     # The output at time t comes from window ending at t (+horizon).
+                     # So there is a phase shift equal to window_size?
+                     # Actually apply_post_processing aligns Y_true to Y_pred.
+                     # Let's process robot_seq same as T_raw to be safe?
+                     # But T_raw comes from 'targets' which are Y-windows.
+                     # We don't have X-windows readily concatenated in 'preds' loop unless we collected them.
+                     
+                     # Simpler approach: X_arr is the continuous source. 
+                     # t_seq starts from window_size?
+                     # See apply_post_processing:
+                     #   y_true_list.append(trial_true_full[:len(y_pred_trial)])
+                     #   trial_true_full = Y_list[i][window_size : ...]
+                     # So t_seq corresponds to X_arr[window_size : ...] (approx).
+                     
+                     # Let's slice X_arr to match length of t_seq.
+                     # Start index is window_size.
+                     match_len = len(t)
+                     start_idx = window_size
+                     if start_idx + match_len <= len(robot_seq):
+                         r_plot = robot_seq[start_idx : start_idx + match_len]
+                         ax0.plot(t, r_plot, color='green', alpha=0.5, label=robot_label)
+                
+                ax0.plot(t, p_seq, color='red', alpha=0.9, linestyle='--', label='Pred')
+                ax0.set_title(f"{lv_name} (Full)")
+                ax0.grid(True, alpha=0.3)
+                if col_idx == 0: ax0.legend()
+                
+                # Rows 1-3: Zooms
+                windows = [(0, 15), (15, 30), (30, 45)]
+                for r, (start_t, end_t) in enumerate(windows, start=1):
+                    ax = axes[r, col_idx]
+                    real_end = min(end_t, t[-1])
+                    if start_t >= t[-1]:
+                        ax.text(0.5, 0.5, "Out of Range", ha='center')
+                        continue
+                    
+                    mask = (t >= start_t) & (t <= real_end)
+                    if np.sum(mask) > 10:
+                        ax.plot(t[mask], t_seq[mask], color='black', alpha=0.7)
+                        if robot_seq is not None and start_idx + match_len <= len(robot_seq):
+                             r_plot = robot_seq[start_idx : start_idx + match_len]
+                             # Apply same mask
+                             ax.plot(t[mask], r_plot[mask], color='green', alpha=0.5)
+                        ax.plot(t[mask], p_seq[mask], color='red', alpha=0.9, linestyle='--')
+                        ax.set_title(f"Zoom ({start_t}-{end_t}s)")
+                        ax.grid(True, alpha=0.3)
+                    else:
+                        ax.text(0.5, 0.5, "Too Short", ha='center')
+
+            if has_data:
+                plt.tight_layout()
+                safe_cond = cond.replace('/', '_')
+                fname = save_dir / f"{test_sub}_{safe_cond}.png"
+                plt.savefig(fname)
+                print(f"  [SAVED] Detail Plot: {fname}")
+            plt.close()
+
 def analyze_automated(target_dir, filter_pattern=None):
+
     if not target_dir: target_dir = "experiments"
     root_path = Path(target_dir)
     
@@ -847,12 +1713,19 @@ def analyze_automated(target_dir, filter_pattern=None):
             exp_dirs = [root_path]
         else:
             print(f"[AUTO] Searching for all subfolders in {root_path}")
-            exp_dirs = [d for d in root_path.iterdir() if d.is_dir()]
+            exp_dirs = []
+            for item in root_path.iterdir():
+                if item.is_dir():
+                    # 1. Check if direct child has model.pt
+                    if (item / "model.pt").exists():
+                        exp_dirs.append(item)
+                    else:
+                        # 2. Check if grandchildren have model.pt
+                        for sub_item in item.iterdir():
+                            if sub_item.is_dir() and (sub_item / "model.pt").exists():
+                                exp_dirs.append(sub_item)
 
-    valid_dirs = []
-    for d in exp_dirs:
-        if (d / "model.pt").exists():
-            valid_dirs.append(d)
+    valid_dirs = list(set(exp_dirs)) # Deduplicate
     
     if not valid_dirs:
         print("No valid experiments found.")
@@ -878,16 +1751,225 @@ def analyze_automated(target_dir, filter_pattern=None):
             import traceback
             traceback.print_exc()
             
-    if not results: return
+    # 2. [NEW] Create base report directory
+    base_output_dir = Path("compare_result")
+    base_output_dir.mkdir(exist_ok=True, parents=True)
     
-    # 2. Compare Plot (ALL)
-    plot_model_comparison(results)
+    # Extract metrics for summary table
+    mae_values = [r["mae"] for r in results]
+    rmse_values = [r["rmse"] for r in results]
     
-    # 3. Best Model Detailed Analysis
-    best = sorted(results, key=lambda x: x["mae"])[0]
-    print(f"\n[RESULT] Best Model: {best['name']} (MAE={best['mae']:.4f})")
-    
-    analyze_detailed_single(best["path"])
+    # 3. Process each fold independently
+    print(f"\n[INFO] Generating detailed reports for {len(results)} results...")
+    for idx, result in enumerate(results, 1):
+        fold_name = result["name"]
+        exp_path = result["path"]
+        
+        # Determine unique experiment name based on parent folder
+        exp_id = exp_path.parent.name if fold_name.startswith("fold_") else result.get("name", "unknown")
+        fold_output_dir = base_output_dir / exp_id / fold_name
+        fold_output_dir.mkdir(exist_ok=True, parents=True)
+        
+        print(f"[{idx}/{len(results)}] Processing: {exp_id} -> {fold_name}")
+        
+        try:
+            # 3a. Training curves
+            plot_training_curves(exp_path, fold_output_dir)
+            
+            # 3b. Trajectory plot
+            res_with_seqs = load_and_evaluate(exp_path, device, return_seqs=True)
+            if res_with_seqs and "y_true_seq" in res_with_seqs and "y_pred_seq" in res_with_seqs:
+                traj_plot_path = fold_output_dir / "trajectory.png"
+                plot_trajectory(
+                    res_with_seqs["y_true_seq"],
+                    res_with_seqs["y_pred_seq"],
+                    f"Trajectory: {exp_id} ({fold_name})",
+                    traj_plot_path,
+                    series_offsets=res_with_seqs.get("series_offsets")
+                )
+                print(f"  [SAVED] Trajectory plot: {traj_plot_path}")
+            
+            # 3c. [NEW] Detailed Grid Plots (Refactored)
+            plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+
+            # 5c. [NEW] Feature Importance - For EVERY fold
+            if (fold_output_dir / "feature_importance.png").exists():
+                print(f"  -> Feature Importance already exists for {fold_name}. Skipping.")
+                continue
+
+            # Requires loading model and data
+            print(f"  -> Calculating Feature Importance for {fold_name}...")
+            # We already have main_script (SpeedEstimator_TCN_MLP_experiments)
+            # Find ckpt and config
+            model_path = exp_path / "model.pt"
+            config_path = exp_path / "config.yaml"
+            with open(config_path, 'r') as f:
+                import yaml
+                cfg = yaml.safe_load(f)
+            
+            # Reconstruction Logic from load_and_evaluate
+            raw_input_vars = cfg.get("01_construction", {}).get("inputs") or cfg.get("shared", {}).get("input_vars")
+            if not raw_input_vars: 
+                raw_input_vars = [] # Fallback
+            input_vars = parse_vars(raw_input_vars)
+            
+            f_names = get_feature_names(cfg, input_vars)
+            
+            # Load Model
+            ckpt = torch.load(model_path, map_location=device)
+            # Reconstruct model architecture
+            m_type = cfg.get("model", {}).get("type", "TCN")
+            m_cfg = cfg.get("02_train", {}).get("model", {})
+            if not m_cfg: m_cfg = cfg.get("model", {})
+            
+            in_dim = len(f_names) # Corrected input dimension based on constructed names
+            out_dim = 1 # Regression default
+            horizon = len(cfg.get("02_train", {}).get("data", {}).get("est_tick_ranges", [5]))
+            
+            if m_type == "StanceGatedTCN":
+                model_c = StanceGatedTCN
+            elif m_type == "AttentionTCN":
+                model_c = AttentionTCN
+            else:
+                model_c = TCN_MLP
+                
+            model = model_c(
+                input_dim=in_dim,
+                output_dim=out_dim,
+                horizon=horizon,
+                channels=m_cfg.get("channels", [64, 64, 128]),
+                kernel_size=m_cfg.get("kernel_size", 3),
+                dropout=m_cfg.get("dropout", 0.1),
+                head_dropout=m_cfg.get("head_dropout", 0.1),
+                mlp_hidden=m_cfg.get("head_hidden", [128]),
+                use_input_norm=m_cfg.get("use_input_norm", True),
+                input_norm_type=m_cfg.get("input_norm_type", m_cfg.get("model_norm") or "layer"),
+                tcn_norm=m_cfg.get("model_norm"),
+                mlp_norm=m_cfg.get("model_norm")
+            )
+            model.load_state_dict(ckpt['state_dict'], strict=False)
+            model.to(device)
+            
+            # Use original test loader logic from main_script or similar
+            # Since load_and_evaluate already did it, we can just grab data?
+            # No, load_and_evaluate doesn't return the raw loader.
+            # Let's recreate a small loader just for this.
+            import re
+            match = re.search(r"Test-((?:m\d+_)?S\d+)", fold_name)
+            sub_name = result.get("test_sub") or (match.group(1) if match else (fold_name[5:] if fold_name.startswith("fold_") else fold_name))
+            
+            # [FIXED] Robust Data Loading using manual extraction
+            # 1. Determine Data Path (Multi-dataset support)
+            prefix_found, real_sub = parse_subject_prefix(sub_name)
+            data_sources = get_data_sources_from_config(cfg)
+            if prefix_found and prefix_found in data_sources:
+                data_path = data_sources[prefix_found]['path']
+            else:
+                data_path = cfg.get("data_path", "combined_data.h5")
+                if not os.path.exists(data_path): data_path = "combined_data.h5"
+
+            # 2. Determine Conditions
+            actual_conds = []
+            with h5py.File(data_path, 'r') as f_check:
+                if real_sub in f_check:
+                    available_conds = list(f_check[real_sub].keys())
+                else:
+                    print(f"  [WARN] Subject {real_sub} not found in {data_path}.")
+                    available_conds = []
+
+                # Use shared conditions if available
+                cond_cfg = cfg.get("conditions")
+                if not cond_cfg and "shared" in cfg: cond_cfg = cfg["shared"].get("conditions")
+                if not cond_cfg: cond_cfg = []
+
+                for c in cond_cfg:
+                    if c in available_conds:
+                        actual_conds.append(c)
+                    elif c == 'level':
+                        actual_conds.extend([ac for ac in available_conds if ac.startswith('level_')])
+                    else:
+                        matches = [ac for ac in available_conds if ac.startswith(c)]
+                        if matches: actual_conds.extend(matches)
+            actual_conds = list(dict.fromkeys(actual_conds))
+
+            # 3. Extract Data
+            print(f"  [DEBUG] Loading data from {data_path} for {real_sub} (Conditions: {len(actual_conds)})")
+            
+            # LPF Params from config
+            eval_lpf = cfg.get("shared", {}).get("lpf_cutoff", 0.5)
+            curr_lpf_order = cfg.get("shared", {}).get("lpf_order", 4)
+
+            X_imp_list = []
+            Y_imp_list = []
+            
+            with h5py.File(data_path, 'r') as f_imp:
+                for cond in actual_conds:
+                     if cond not in f_imp[real_sub]: continue
+                     try:
+                         # Ensure extract_condition_data_v2 is available
+                         from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
+                         x_list, y_list = extract_condition_data_v2(
+                            f_imp, real_sub, cond, 
+                            [(item[0], item[1]) for item in input_vars], 
+                            [(item[0], item[1]) for item in parse_vars(cfg.get("shared", {}).get("output_vars"))],
+                            lpf_cutoff=eval_lpf,
+                            lpf_order=curr_lpf_order,
+                            fs=100
+                         )
+                         X_imp_list.extend(x_list)
+                         Y_imp_list.extend(y_list)
+                     except Exception as e:
+                         print(f"  [WARN] Skipping {cond}: {e}")
+            
+            if not X_imp_list:
+                print("  [WARN] No data loaded for importance. Skipping.")
+                continue
+
+            X_test = np.concatenate(X_imp_list, axis=0) # (N, T, D)
+            Y_test = np.concatenate(Y_imp_list, axis=0)
+
+            # 4. Apply Scaler
+            scaler_path = exp_path / "scaler.npz"
+            if scaler_path.exists():
+                s_data = np.load(scaler_path)
+                m = s_data['mean']
+                s = s_data['scale'] if 'scale' in s_data else s_data.get('std', 1.0)
+                # X_test is (N, T, D). Broadcasting works if m is (D,)
+                X_test = (X_test - m) / (s + 1e-8)
+            else:
+                print("  [WARN] No scaler found. Using raw data.")
+
+            imp_ds = LazyWindowDataset(
+                [X_test], [Y_test], 
+                cfg.get("shared", {}).get("data", {}).get("window_size", 200),
+                horizon, cfg.get("shared", {}).get("data", {}).get("stride_inf", 1),
+                target_mode="sequence", est_tick_ranges=cfg.get("02_train", {}).get("data", {}).get("est_tick_ranges", [5])
+            )
+            imp_loader = DataLoader(imp_ds, batch_size=1024, shuffle=False, num_workers=0)
+            
+            # Determine Loss Function for Importance
+            # Default to MSE if not specified, but try to match training loss
+            train_cfg = cfg.get("02_train", {}).get("train", {})
+            loss_name = train_cfg.get("loss", "mse").lower()
+            huber_delta = float(train_cfg.get("huber_delta", 1.0))
+            
+            if loss_name == "huber":
+                criterion = torch.nn.HuberLoss(delta=huber_delta, reduction='sum')
+                print(f"  [IMP] Using Huber Loss (delta={huber_delta}) for Importance")
+            elif loss_name in ["mae", "l1"]:
+                criterion = torch.nn.L1Loss(reduction='sum')
+                print(f"  [IMP] Using L1 Loss (MAE) for Importance")
+            else:
+                criterion = torch.nn.MSELoss(reduction='sum')
+                print(f"  [IMP] Using MSE Loss for Importance")
+
+            imps = calculate_permutation_importance(model, imp_loader, device=device, criterion=criterion, batch_size=1024)
+            plot_feature_importance(imps, f_names, fold_output_dir / "feature_importance.png", title=f"Importance ({loss_name}): {fold_name}")
+            
+        except Exception as e:
+            print(f"  [ERROR] Failed to generate plots for {fold_name}: {e}")
+            import traceback
+            traceback.print_exc()
     
 def plot_model_comparison(results):
     names = [r["name"] for r in results]
@@ -929,117 +2011,206 @@ def analyze_detailed_single(exp_path):
     import matplotlib.pyplot as plt
     import numpy as np
     import os
+    import h5py
+    from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
     
     # 1. Load Model & Data
-    # We need access to the model object, which load_and_evaluate doesn't return (it returns metrics).
-    # So we copy the loading logic or modify load_and_evaluate.
-    # Let's verify load_and_evaluate returns. It returns dict.
-    
-    # Quick fix: Load everything manually here to be safe and clean.
+    # load_and_evaluate already has the correct Training-consistent logic
     res = load_and_evaluate(exp_path, device, return_seqs=True)
     if not res: return
     
-    # Load Model (Again, sorry for duplication but safer)
-    model_path = exp_path / "model.pt"
-    config_path = exp_path / "config.yaml"
-    with open(config_path) as f: cfg = yaml.safe_load(f)
-    
-    # [FIX] Enforce y_delay
-    # Commented out to allow Sequence Mode fallback
-    if "est_tick_ranges" not in cfg:
-        pass
-        # cfg["est_tick_ranges"] = [cfg.get("y_delay", 5)]
-        
-    # Build Dataset
-    # We need the TEST loader
-    # Parse Names
-    inputs = cfg.get("input_vars") or cfg["01_construction"]["inputs"]
-    outputs = cfg.get("output_vars") or cfg["01_construction"]["outputs"] # Fixed key
-    c_in_vars = parse_vars(inputs)
-    c_out_vars = parse_vars(outputs)
-    
-    folder_name = exp_path.name
+    # [REFACTORED] Training과 동일한 config 해석 (load_and_evaluate와 동일한 경로)
     import re
-    match = re.search(r"Test-(S\d+)", folder_name)
+    folder_name = exp_path.name
+    exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
+    exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
+    
+    original_config_path = Path(f"configs/{exp_name}.yaml")
+    if original_config_path.exists():
+        with open(original_config_path, 'r') as f_cfg:
+            cfg = yaml.safe_load(f_cfg)
+    else:
+        # Fallback to per-experiment config.yaml
+        config_path = exp_path / "config.yaml"
+        with open(config_path) as f_cfg: cfg = yaml.safe_load(f_cfg)
+    
+    # Config 파싱 - Training과 동일 (load_and_evaluate line 참조)
+    curr_input_vars = cfg.get("input_vars")
+    curr_output_vars = cfg.get("output_vars")
+    if not curr_input_vars and 'shared' in cfg:
+        curr_input_vars = cfg['shared'].get('input_vars')
+    if not curr_output_vars and 'shared' in cfg:
+        curr_output_vars = cfg['shared'].get('output_vars')
+    if not curr_input_vars and '01_construction' in cfg:
+        curr_input_vars = cfg['01_construction'].get('inputs')
+    if not curr_output_vars and '01_construction' in cfg:
+        curr_output_vars = cfg['01_construction'].get('outputs')
+    
+    def _parse_vars_local(var_list_from_yaml):
+        if not var_list_from_yaml: return []
+        return [(item[0], item[1]) for item in var_list_from_yaml]
+    
+    c_in_vars = _parse_vars_local(curr_input_vars)
+    c_out_vars = _parse_vars_local(curr_output_vars)
+    
+    if not cfg.get('subjects') and 'shared' in cfg:
+        cfg['subjects'] = cfg['shared'].get('subjects', [])
+    if not cfg.get('conditions') and 'shared' in cfg:
+        cfg['conditions'] = cfg['shared'].get('conditions', [])
+    
+    # est_tick_ranges (Training line 1853-1860)
+    curr_est_tick_ranges = cfg.get("est_tick_ranges")
+    if not curr_est_tick_ranges and 'shared' in cfg and 'data' in cfg['shared']:
+        val = cfg['shared']['data'].get('est_tick_ranges')
+        if val is not None:
+            curr_est_tick_ranges = val
+        else:
+            y_delay = cfg['shared']['data'].get('y_delay', 5)
+            curr_est_tick_ranges = [y_delay] if isinstance(y_delay, int) else y_delay
+    if curr_est_tick_ranges:
+        cfg["est_tick_ranges"] = curr_est_tick_ranges
+    
+    # Windowing (Training line 1335-1349과 동일)
+    train_cfg_section = cfg.get("02_train", {})
+    data_cfg = train_cfg_section.get("data", {})
+    if not data_cfg: data_cfg = cfg.get("data", {})
+    
+    window_size = data_cfg.get("window_size") or cfg.get("window_size", 200)
+    window_output = data_cfg.get("window_output") or data_cfg.get("time_window_output") or cfg.get("window_output", 1)
+    data_stride = data_cfg.get("stride") or cfg.get("stride", 5)
+    est_tick_ranges = data_cfg.get("est_tick_ranges") if data_cfg else cfg.get("est_tick_ranges")
+    
+    # Test subject
+    match = re.search(r"Test-((?:m\d+_)?S\d+)", folder_name)
     test_sub = match.group(1) if match else "S001"
     
-    # Data Path
-    data_path = cfg.get("data_path", "combined_data.h5")
-    if not os.path.exists(data_path): data_path = "combined_data.h5"
+    # LPF (Training line 1868-1879)
+    curr_lpf_cutoff = cfg.get("lpf_cutoff")
+    if curr_lpf_cutoff is None and 'shared' in cfg:
+        curr_lpf_cutoff = cfg['shared'].get('lpf_cutoff')
+    if curr_lpf_cutoff is None:
+        curr_lpf_cutoff = 0.5
+    eval_lpf = curr_lpf_cutoff
     
-    # [LOGIC] Input LPF is disabled in code, Output LPF is active.
-    # We must pass the config's lpf_cutoff to filter the targets during evaluation.
-    eval_lpf = cfg.get("lpf_cutoff")
-    if eval_lpf is None and "01_construction" in cfg:
-        eval_lpf = cfg["01_construction"].get("lpf_cutoff")
-    if eval_lpf is None: eval_lpf = 0.5
+    curr_lpf_order = cfg.get("lpf_order")
+    if curr_lpf_order is None and 'shared' in cfg:
+        curr_lpf_order = cfg['shared'].get('lpf_order')
+    if curr_lpf_order is None:
+        curr_lpf_order = 4
     
-    # 2. Build Dataset (Raw first)
-    X, Y = build_nn_dataset(
-        data_path, [test_sub], cfg["conditions"], c_in_vars, c_out_vars, 
-        cfg.get("time_window_input", 100), 10, cfg.get("stride", 20),
-        condition_selection=CONDITION_SELECTION, lpf_cutoff=eval_lpf, est_tick_ranges=cfg.get("est_tick_ranges", None)
+    # [NEW] Multi-dataset path handling for condition check
+
+
+    prefix_found, real_sub = parse_subject_prefix(test_sub)
+    data_sources = get_data_sources_from_config(cfg)
+    
+    if prefix_found and prefix_found in data_sources:
+        data_path = data_sources[prefix_found]['path']
+    else:
+        data_path = cfg.get("data_path", "combined_data.h5")
+        if not os.path.exists(data_path): data_path = "combined_data.h5"
+    
+    # 2. Build Dataset (per-condition)
+    actual_conds = []
+    with h5py.File(data_path, 'r') as f_check:
+        if real_sub in f_check:
+            available_conds = list(f_check[real_sub].keys())
+        else:
+            print(f"[WARN] Subject {real_sub} not found in {data_path}.")
+            available_conds = []
+
+        for c in cfg["conditions"]:
+            if c in available_conds:
+                actual_conds.append(c)
+            elif c == 'level':
+                actual_conds.extend([ac for ac in available_conds if ac.startswith('level_')])
+            else:
+                matches = [ac for ac in available_conds if ac.startswith(c)]
+                if matches: actual_conds.extend(matches)
+    
+    actual_conds = list(dict.fromkeys(actual_conds))
+    
+    print(f"[EVAL-Detail] win_in={window_size}, win_out={window_output}, stride={data_stride}, est_tick_ranges={est_tick_ranges}")
+    X, Y = build_nn_dataset_multi(
+        cfg, [test_sub], actual_conds, c_in_vars, c_out_vars, 
+        window_size, window_output, data_stride,
+        condition_selection=CONDITION_SELECTION, lpf_cutoff=eval_lpf, 
+        lpf_order=curr_lpf_order,
+        est_tick_ranges=est_tick_ranges
     )
     
-    # 3. Apply Scaler (Crucial for correct inference)
-    # Check for scaler.npz in likely locations
+    if not X or len(X) == 0:
+        print(f"[ERROR] build_nn_dataset returned empty X for {test_sub}. Check data availability.")
+        return
+    
+    # 3. Apply Scaler (Training line 2040-2042과 동일)
     scaler_path = exp_path / "scaler.npz"
     if not scaler_path.exists():
-        # Check if config points to one
         if "scaler_path" in cfg:
             p = Path(cfg["scaler_path"])
             if p.exists(): scaler_path = p
-        # Check inside experiment "runs_tcn" or similar if needed, but usually strictly saved in exp dir now?
-        # If not found, check parent?
     
     if scaler_path.exists():
         print(f"[INFO] Loading scaler from {scaler_path}")
         scaler = np.load(scaler_path)
         mean = scaler['mean']
         scale = scaler['scale']
-        
-        # Apply normalization: (X - mean) / scale
-        # X is list of arrays (T, D)
-        # mean/scale are (D,)
         print("[INFO] Applying scaler to test data...")
         for i in range(len(X)):
-            X[i] = (X[i] - mean) / (scale + 1e-8) # Avoid div/0
+            X[i] = (X[i] - mean) / scale
     else:
         print("[WARN] No scaler found! Inference might be garbage if model expects scaled data.")
 
     input_dim = X[0].shape[1]
     
-    train_sec = cfg.get("02_train", {})
-    model_cfg = train_sec.get("model")
+    # Model 초기화 (Training line 1277-1410과 동일)
+    model_cfg = train_cfg_section.get("model")
     if not model_cfg:
-        # Fallback to data if present (common in baseline.yaml)
-        data_cfg = train_sec.get("data")
-        if data_cfg and "channels" in data_cfg: 
-            model_cfg = data_cfg
+        data_cfg_m = train_cfg_section.get("data")
+        if data_cfg_m and "channels" in data_cfg_m: 
+            model_cfg = data_cfg_m
     if not model_cfg: 
         model_cfg = cfg.get("model", {})
-    tcn_ch = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
-    k_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 3)
-    dropout = float(model_cfg.get("dropout") or cfg.get("dropout_p", 0.1))
+    
+    tcn_channels = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
+    kernel_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 3)
+    
+    dropout_p = model_cfg.get("dropout")
+    if dropout_p is None:
+        dropout_p = cfg.get("dropout_p", 0.5)
+    dropout_p = float(dropout_p)
+    
     head_dropout = model_cfg.get("head_dropout")
-    norm_type = model_cfg.get("model_norm")
-    hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", 128)
+    mlp_hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", 128)
+    
+    use_input_norm = cfg.get("data", {}).get("normalize", True)
+    if use_input_norm is None:
+        use_input_norm = cfg.get("use_input_norm", True)
+    
+    model_norm_type = model_cfg.get("model_norm", None)
+    
+    if est_tick_ranges:
+        horizon = len(est_tick_ranges)
+    else:
+        horizon = window_output
 
     model = TCN_MLP(
         input_dim=input_dim,
         output_dim=Y[0].shape[1],
-        horizon=len(cfg["est_tick_ranges"]) if cfg.get("est_tick_ranges") else 10,
-        channels=tcn_ch,
-        kernel_size=k_size,
-        dropout=dropout,
+        horizon=horizon,
+        channels=tcn_channels,
+        kernel_size=kernel_size,
+        dropout=dropout_p,
         head_dropout=head_dropout,
-        mlp_hidden=hidden,
-        use_input_norm=cfg.get("use_input_norm", True),
-        tcn_norm="layer", mlp_norm="layer"
+        mlp_hidden=mlp_hidden,
+        use_input_norm=use_input_norm,
+        tcn_norm=model_norm_type, 
+        mlp_norm=model_norm_type
     ).to(device)
     
+    model_path = exp_path / "model.pt"
     ckpt = torch.load(model_path, map_location=device)
-    model.load_state_dict(ckpt['state_dict'], strict=False)
+    model.load_state_dict(ckpt['state_dict'] if 'state_dict' in ckpt else ckpt, strict=False)
     model.eval()
     
     # ---------------------------------------------------------
@@ -1048,152 +2219,96 @@ def analyze_detailed_single(exp_path):
     print("Running Trajectory Analysis (2x3 Grid per Condition)...")
     plot_dir = Path(f"compare_result/{folder_name}")
     plot_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # [NEW] Plot Training Curves (Overfitting Check)
     exp_dir_path = Path("experiments") / folder_name
     print(f"Checking for train logs in {exp_dir_path}...")
     plot_training_curves(exp_dir_path, plot_dir)
-    
-    test_conditions = cfg["conditions"]
-    
-    # Target Levels for Columns 0, 1, 2
-    target_levels_map = {'lv0': 0, 'lv4': 1, 'lv7': 2}
-    
-    # We need manual file handle since build_nn_dataset doesn't expose `extract` function's file handle
-    # But extract_condition_data_v2 usually takes an open H5 handle 'f'
-    # We can perform the extraction loop here.
-    
-    import h5py
-    from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
-    
-    with h5py.File(data_path, 'r') as f:
-        for cond in test_conditions:
-            # Prepare Figure: 4 Rows (Full, Zoom 0-15, Zoom 15-30, Zoom 30-45), 3 Cols (lv0, lv4, lv7)
-            fig, axes = plt.subplots(4, 3, figsize=(18, 16))
-            
-            # Check availability
-            if cond not in f[test_sub]:
-                plt.close()
-                continue
-                
-            has_data = False
-            
-            for lv_name, col_idx in target_levels_map.items():
-                # Extract Single Trial (trial_01)
-                try:
-                    X_list, Y_list = extract_condition_data_v2(
-                        f, test_sub, cond, c_in_vars, c_out_vars, 
-                        lpf_cutoff=eval_lpf, lpf_order=5, fs=100,
-                        include_levels=[lv_name], include_trials=['trial_01'] # Force Single Trial
-                    )
-                except Exception as e:
-                    # Level might not exist
-                    X_list = []
-                    
-                if not X_list:
-                    # Hide axes if no data
-                    for r in range(4):
-                        axes[r, col_idx].axis('off')
-                    continue
-                
-                has_data = True
-                X_arr = X_list[0]
-                Y_arr = Y_list[0] # Target (Filtered per extract config)
-                
-                # Normalize X
-                if scaler_path.exists():
-                     X_arr = (X_arr - mean) / (scale + 1e-8)
-                
-                # Run sliding window / batch
-                ds_vis = LazyWindowDataset([X_arr], [Y_arr], cfg.get("time_window_input", 100), 10, 1, target_mode="sequence", est_tick_ranges=cfg.get("est_tick_ranges", None))
-                loader_vis = DataLoader(ds_vis, batch_size=512, shuffle=False)
-                
-                preds, targets = [], []
-                with torch.no_grad():
-                     for xb, yb in loader_vis:
-                         xb = xb.to(device)
-                         out = model(xb)
-                         preds.append(out.cpu().numpy())
-                         targets.append(yb.cpu().numpy())
-                
-                if not preds: continue
-                
-                P_all = np.concatenate(preds, axis=0)
-                T_all = np.concatenate(targets, axis=0)
-                
-                if P_all.ndim == 3:
-                     p_seq = P_all[:, 0, 0]
-                     t_seq = T_all[:, 0, 0]
-                else:
-                     p_seq = P_all.squeeze()
-                     t_seq = T_all.squeeze()
-                
-                # Plot
-                fs = 100.0
-                t = np.arange(len(t_seq)) / fs
-                
-                # Row 0: Full
-                ax0 = axes[0, col_idx]
-                ax0.plot(t, t_seq, color='black', alpha=0.7, label='GT')
-                ax0.plot(t, p_seq, color='red', alpha=0.9, linestyle='--', label='Pred')
-                ax0.set_title(f"{lv_name} (Full)")
-                ax0.set_xlabel("Time (s)")
-                ax0.set_ylabel("Speed (m/s)")
-                ax0.grid(True, alpha=0.3)
-                if col_idx == 0: ax0.legend()
-                
-                # Rows 1-3: Zooms
-                windows = [(0, 15), (15, 30), (30, 45)]
-                for r, (start_t, end_t) in enumerate(windows, start=1):
-                    ax = axes[r, col_idx]
-                    
-                    # Adjust end if too short
-                    real_end = min(end_t, t[-1])
-                    if start_t >= t[-1]:
-                        ax.text(0.5, 0.5, "Out of Range", ha='center')
-                        continue
 
-                    mask = (t >= start_t) & (t <= real_end)
-                    if np.sum(mask) > 10: # Min samples
-                        ax.plot(t[mask], t_seq[mask], color='black', alpha=0.7)
-                        ax.plot(t[mask], p_seq[mask], color='red', alpha=0.9, linestyle='--')
-                        ax.set_title(f"{lv_name} Zoom ({start_t}-{end_t}s)")
-                        ax.set_xlabel("Time (s)")
-                        ax.set_ylabel("Speed (m/s)")
-                        ax.grid(True, alpha=0.3)
-                    else:
-                        ax.text(0.5, 0.5, "Too Short / No Data", ha='center')
-                    
-            if has_data:
-                plt.tight_layout()
-                safe_cond = cond.replace('/', '_')
-                fname = plot_dir / f"{test_sub}_{safe_cond}.png"
-                plt.savefig(fname)
-                print(f"Saved {fname}")
-            plt.close()
+    # [REFACTORED] Use shared function
+    plot_detailed_condition_trajectories(exp_path, plot_dir, device)
     
     # ---------------------------------------------------------
+    # Feature Importance Plot
+    # ---------------------------------------------------------
+    print("Preparing Feature Importance Data...")
+    
     feature_names = generate_feature_names(c_in_vars)
     if len(feature_names) != input_dim:
         feature_names = [f"F{i}" for i in range(input_dim)]
-        
+
+    # Load ALL data for importance
+    print(f"Loading data for Permutation Importance (Subject: {real_sub})...")
+    # Load ALL data for importance using manual extraction (same as trajectory loop)
+    # This avoids issues with build_nn_dataset_multi config parsing
+    print(f"Loading data for Permutation Importance (Subject: {real_sub})...")
+    X_imp_list = []
+    Y_imp_list = []
+    
+    with h5py.File(data_path, 'r') as f_imp:
+        for cond in actual_conds:
+             if cond not in f_imp[real_sub]: continue
+             
+             # Extract ALL trials/levels for this condition
+             # We use default arguments for include_levels/trials to get everything
+             try:
+                 x_list, y_list = extract_condition_data_v2(
+                    f_imp, real_sub, cond, c_in_vars, c_out_vars,
+                    lpf_cutoff=eval_lpf,
+                    lpf_order=curr_lpf_order,
+                    fs=100
+                 )
+                 # extract_condition_data_v2 returns list of trials
+                 X_imp_list.extend(x_list)
+                 Y_imp_list.extend(y_list)
+             except Exception as e:
+                 print(f"Skipping {cond} due to error: {e}")
+                 
+    if not X_imp_list:
+        print("[WARN] No data loaded for feature importance. Skipping.")
+        return 
+
+    X_imp = np.concatenate(X_imp_list, axis=0) # (N, T, D)
+    Y_imp = np.concatenate(Y_imp_list, axis=0)
+
+    # Normalize
+    if scaler_path.exists():
+         X_imp = (X_imp - mean) / scale
+         
     # Run Importance
+    criterion = torch.nn.MSELoss()
     print("Running Permutation Importance...")
-    ds = LazyWindowDataset(X, Y, cfg.get("time_window_input", 100), 10, 20, target_mode="sequence", est_tick_ranges=cfg["est_tick_ranges"])
-    loader = DataLoader(ds, batch_size=2048, shuffle=False)
+    try:
+        ds = LazyWindowDataset([X_imp], [Y_imp], cfg.get("time_window_input", 100), 10, 20, target_mode="sequence", est_tick_ranges=curr_est_tick_ranges)
+        loader = DataLoader(ds, batch_size=2048, shuffle=False)
+        importances = calculate_permutation_importance(model, loader, device, criterion)
+    except Exception as e:
+        print(f"Importance calc failed: {e}")
+        return
     
-    importances = calculate_permutation_importance(model, loader, device)
+    # Plot Importance - Show ALL features
+    indices = np.argsort(importances)[::-1]  # All features, sorted by importance
     
-    # Plot Importance
-    indices = np.argsort(importances)[::-1][:20]
+    # Dynamic figure height based on number of features
+    num_features = len(indices)
+    fig_height = max(8, num_features * 0.3)  # At least 8 inches, grow with features
     
-    plt.figure(figsize=(12, 6))
-    plt.bar(range(len(indices)), importances[indices])
-    plt.xticks(range(len(indices)), [feature_names[i] for i in indices], rotation=45, ha='right')
-    plt.title(f"Feature Importance ({folder_name})")
+    plt.figure(figsize=(14, fig_height))
+    plt.barh(range(len(indices)), importances[indices])
+    plt.yticks(range(len(indices)), [feature_names[i] for i in indices])
+    plt.xlabel("Importance Score (MSE Increase)")
+    # folder_name is already defined at top of function
+    # folder_name = exp_path.name 
+    plt.title(f"Feature Importance - All {num_features} Features ({folder_name})")
     plt.tight_layout()
-    plt.savefig(f"compare_result/{folder_name}_importance.png")
-    print(f"Saved compare_result/{folder_name}_importance.png")
+    
+    # Ensure compare_result/folder_name exists
+    save_dir = plot_dir # plot_dir is compare_result/exp_name/exp_name
+    # actually plot_dir is created at start of function: plot_dir = Path("compare_result") / exp_dir.name / exp_dir.name
+    
+    plt.savefig(plot_dir / "feature_importance.png", dpi=150)
+    print(f"Saved {plot_dir}/feature_importance.png ({num_features} features)")
+    print(f"Saved compare_result/{folder_name}_importance.png ({num_features} features)")
 
 def generate_feature_names(c_in_vars):
     names = []
@@ -1207,30 +2322,99 @@ def generate_feature_names(c_in_vars):
         for v in vars: names.append(f"{prefix}_{v}")
     return names
 
-def calculate_permutation_importance(model, loader, device):
-    X_batches, Y_batches = [], []
-    for xb, yb in loader:
-        X_batches.append(xb)
-        Y_batches.append(yb)
-    X = torch.cat(X_batches).to(device)
-    Y = torch.cat(Y_batches).to(device)
+def calculate_permutation_importance(model, loader, device, criterion, batch_size=2048):
+    """
+    Calculate Permutation Feature Importance with Batched Inference to Prevent OOM.
+    Returns: np.array of importance scores (Loss increase)
+    """
+    model.eval()
     
-    criterion = torch.nn.MSELoss()
+    # 1. Calculate Baseline Loss
+    # criterion is passed from outside
+    total_loss = 0.0
+    total_samples = 0
+    
+    # Store data on CPU to avoid VRAM overload, only move batch to GPU
+    # Actually, if dataset is huge, we can't even store X/Y in RAM easily?
+    # BUT, loader usually yields from RAM.
+    # To shuffle a feature column, we need the full column?
+    # YES. So we must collect all X. 
+    # If X is too large for RAM, we have a problem. 
+    # Assuming X fits in System RAM (64GB), but maybe not GPU VRAM (12GB).
+    
+    # Collect all data to CPU Tensor
+    # Collect all data to CPU Tensor
+    X_list, Y_list = [], []
+    try:
+        for i, (xb, yb) in enumerate(loader):
+            X_list.append(xb)
+            Y_list.append(yb)
+    except Exception as e:
+        print(f"    [ERROR] Data loading failed: {e}")
+        return np.array([])
+    
+    if not X_list: 
+        print("    [WARN] No data in loader!")
+        return np.array([])
+    
+    X_cpu = torch.cat(X_list, dim=0) # (N, T, D)
+    Y_cpu = torch.cat(Y_list, dim=0) # (N, T, D) or (N, D)
+
+    
+    del X_list, Y_list
+    
+    N, T, D = X_cpu.shape
+    
+    # Baseline Loop
+    model.eval()
     with torch.no_grad():
-        base = criterion(model(X), Y).item()
+        for i in range(0, N, batch_size):
+            xb = X_cpu[i:i+batch_size].to(device)
+            yb = Y_cpu[i:i+batch_size].to(device)
+            pred = model(xb)
+            
+            # Align shapes
+            if pred.ndim == 2 and yb.ndim == 3 and yb.shape[1] == 1: yb = yb.squeeze(1)
+            elif pred.ndim == 3 and yb.ndim == 2 and pred.shape[1] == 1: pred = pred.squeeze(1)
+            
+            total_loss += criterion(pred, yb).item()
+            
+    base_loss = total_loss / N
     
-    imps = []
-    for i in range(X.shape[2]):
-        orig = X[:, :, i].clone()
-        idx = torch.randperm(X.size(0), device=device)
-        X[:, :, i] = X[idx, :, i]
-        with torch.no_grad():
-            new_loss = criterion(model(X), Y).item()
-        imps.append(new_loss - base)
-        X[:, :, i] = orig # Restore
-        print(f"Feat {i}: {imps[-1]:.6f}", end='\r')
-    print("")
-    return np.array(imps)
+    # Permutation Loop
+    importances = []
+    print(f"  Calcuating Importance for {D} features...")
+    
+    for d in range(D):
+        print(f"    Feature {d+1}/{D}: ", end="", flush=True)
+        # Permute in-place to avoid 9GB clone
+        perm_idx = torch.randperm(N)
+        original_col = X_cpu[:, :, d].clone()
+        
+        perm_total_loss = 0.0
+        try:
+            X_cpu[:, :, d] = X_cpu[perm_idx, :, d]
+            
+            with torch.no_grad():
+                for i in range(0, N, batch_size):
+                    xb = X_cpu[i:i+batch_size].to(device)
+                    yb = Y_cpu[i:i+batch_size].to(device)
+                    pred = model(xb)
+                    
+                    if pred.ndim == 2 and yb.ndim == 3 and yb.shape[1] == 1: yb = yb.squeeze(1)
+                    elif pred.ndim == 3 and yb.ndim == 2 and pred.shape[1] == 1: pred = pred.squeeze(1)
+                    
+                    perm_total_loss += criterion(pred, yb).item()
+        finally:
+            # Restore original data
+            X_cpu[:, :, d] = original_col
+        
+        perm_loss = perm_total_loss / N
+        importance = perm_loss - base_loss
+        importances.append(importance)
+        print(f"Importance = {importance:.6f}")
+        
+    return np.array(importances)
 
 def parse_vars(var_list):
     # Helper to ensure [ (grp, [vars]) ] structure
@@ -1241,9 +2425,132 @@ def parse_vars(var_list):
     # Handle flat list if necessary? Default to assume correct structure from config
     return var_list
 
+
+def get_category(name):
+    name = name.lower()
+    if "baseline" in name:
+        if "noangular" in name: return "Ablation (Input)"
+        if "noimu" in name: return "Ablation (Input)"
+        if "modelsame" in name: return "Architecture"
+        return "Baseline"
+    if "ablation" in name or "no_" in name: return "Ablation (Input)"
+    if "stride" in name or "lpf" in name: return "Hyperparameters"
+    if "instance_norm" in name: return "Architecture"
+    if "grf" in name or "imu" in name or "pos" in name: return "Ablation (Input)"
+    return "Other"
+
+def analyze_ablation_report():
+    print("Starting Ablation Analysis Report...")
+    # device is global in this script
+    
+    # Check if compare_result exists
+    output_dir = Path("compare_result")
+    output_dir.mkdir(exist_ok=True)
+        
+    # 1. Find all experiments
+    exp_dirs = list_experiments("experiments")
+    if not exp_dirs:
+        print("No experiments found in 'experiments/' directory.")
+        return
+
+    print(f"Found {len(exp_dirs)} potential experiment folders.")
+    
+    results = []
+    
+    # 2. Evaluate Loop
+    for i, exp_dir in enumerate(exp_dirs):
+        print(f"[{i+1}/{len(exp_dirs)}] Evaluating {exp_dir.name}...")
+        try:
+            # return_seqs=False to save memory/time
+            res = load_and_evaluate(exp_dir, device, return_seqs=False)
+            if res:
+                results.append(res)
+        except Exception as e:
+            print(f"  [ERROR] Failed to evaluate {exp_dir.name}: {e}")
+            
+    if not results:
+        print("No valid results collected.")
+        return
+
+    df = pd.DataFrame(results)
+    
+    # 3. Processing and Aggregation
+    def get_group_name(folder_name):
+        return folder_name.split("_Test-")[0]
+
+    df['group'] = df['name'].apply(get_group_name)
+    df['category'] = df['group'].apply(get_category)
+    
+    # Aggregate by Group (Mean metrics)
+    group_df = df.groupby('group')[['mae', 'rmse', 'r2', 'lag_ms']].mean().reset_index()
+    
+    # Identify Baseline for Delta calculation
+    baseline_rows = group_df[group_df['group'] == 'baseline']
+    if len(baseline_rows) > 0:
+        base_mae = baseline_rows.iloc[0]['mae']
+        print(f"\nBaseline (baseline) found: MAE={base_mae:.4f}")
+    else:
+        # Try finding closest match
+        candidates = group_df[group_df['group'].str.startswith('baseline')]
+        if len(candidates) > 0:
+            base_row = candidates.sort_values('mae').iloc[0]
+            base_mae = base_row['mae']
+            print(f"\nUsing '{base_row['group']}' as baseline (MAE={base_mae:.4f})")
+        else:
+            print("\nNo baseline found. Delta will be 0.")
+            base_mae = 0.0
+            
+    group_df['mae_delta'] = group_df['mae'] - base_mae
+    group_df['mae_pct_change'] = (group_df['mae_delta'] / base_mae) * 100 if base_mae > 0 else 0.0
+    
+    # Sort for better visibility (Ascending MAE)
+    group_df = group_df.sort_values('mae', ascending=True)
+    
+    # Print Table
+    print("\n" + "="*100)
+    print(f"{'Experiment Group':<40} | {'MAE':<8} | {'Delta':<8} | {'% Chg':<8} | {'Lag(ms)':<8}")
+    print("-" * 100)
+    for _, row in group_df.iterrows():
+        print(f"{row['group']:<40} | {row['mae']:.4f}   | {row['mae_delta']:+.4f}   | {row['mae_pct_change']:+.1f}%    | {row['lag_ms']:.1f}")
+    print("="*100 + "\n")
+    
+    # Save CSV
+    out_csv = output_dir / "final_ablation_summary.csv"
+    group_df.to_csv(out_csv, index=False)
+    print(f"Saved Summary CSV to: {out_csv}")
+    
+    # 4. Visualization
+    # Plot 1: Absolute MAE Bar Chart
+    plt.figure(figsize=(12, max(6, len(group_df)*0.4)))
+    sns.barplot(data=group_df, x="mae", y="group", hue="group", dodge=False, palette="viridis")
+    plt.axvline(base_mae, color='red', linestyle='--', label=f'Baseline ({base_mae:.4f})')
+    plt.title("Model Performance Comparison (MAE)")
+    plt.xlabel("MAE (m/s) [Lower is Better]")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_dir / "final_comparison_mae.png")
+    
+    # Plot 2: Delta MAE (Diverging Bar Chart)
+    plt.figure(figsize=(12, max(6, len(group_df)*0.4)))
+    
+    colors = ['green' if x < 0 else 'red' for x in group_df['mae_delta']]
+    
+    sns.barplot(data=group_df, x="mae_delta", y="group", hue="group", dodge=False, palette=colors, legend=False)
+    plt.axvline(0, color='black', linewidth=1)
+    plt.title(f"Ablation Impact (Relative to Baseline MAE: {base_mae:.4f})")
+    plt.xlabel("Change in MAE (m/s) [Positive = Worse, Negative = Better]")
+    plt.tight_layout()
+    plt.savefig(output_dir / "final_ablation_delta.png")
+    
+    print("Saved plots to compare_result/")
+
 if __name__ == "__main__":
     args = get_args()
-    if args.auto:
-        analyze_automated(args.target_dir, filter_pattern=args.filter)
+    if args.ablation:
+        analyze_ablation_report()
+    elif args.auto:
+        analyze_automated(args.target_dir, args.filter)
+        # [NEW] Automatically run ablation report after auto-analysis
+        analyze_ablation_report()
     else:
         main()

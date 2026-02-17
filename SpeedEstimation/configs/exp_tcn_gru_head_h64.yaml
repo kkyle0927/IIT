@@ -1,0 +1,11 @@
+# =============================================================================
+# TCN + GRU Head (hidden=64) - Stateful Head 실험 (더 큰 GRU)
+# baseline 대비 변경: shared.model.type → "TCN_GRU", gru_hidden → 64
+# =============================================================================
+
+shared:
+  model:
+    type: "TCN_GRU"
+    gru_hidden: 64
+
+exp_name: "exp_tcn_gru_head_h64"

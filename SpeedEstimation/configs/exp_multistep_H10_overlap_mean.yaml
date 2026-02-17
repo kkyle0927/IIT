@@ -1,0 +1,21 @@
+# =============================================================================
+# Overlap Ensemble: Mean (학습은 H10과 동일, 추론 시 산술 평균 융합)
+# baseline 대비 변경: est_tick_ranges → [1..10], overlap_ensemble 추가
+# =============================================================================
+
+shared:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+02_train:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+03_eval:
+  overlap_ensemble:
+    enable: true
+    method: "mean"
+
+exp_name: "exp_multistep_H10_overlap_mean"

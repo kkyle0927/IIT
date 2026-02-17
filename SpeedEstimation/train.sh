@@ -30,7 +30,7 @@
 #SBATCH -n 1                              # Number of tasks (processes)
 #SBATCH --gres=gpu:3                      # Default (won't apply if overridden via command line)
 #SBATCH --cpus-per-task=16
-#SBATCH --mem=45G                         # Default (15*3)
+#SBATCH --mem=45G                         # Default (15*2)
 #SBATCH -t 48:00:00
 #SBATCH -o logs/%x_%j.out
 #SBATCH -e logs/%x_%j.err
@@ -39,7 +39,7 @@
 # [INTERACTIVE SUBMISSION WRAPPER]
 # SLURM 잡 ID가 없으면(=사용자가 터미널에서 직접 실행하면) 입력을 받고 sbatch로 제출합니다.
 # =========================================================================================
-if [ -z "$SLURM_JOB_ID" ]; then
+if [ -z "$SLURM_JOB_ID" ] && [ -z "$NON_INTERACTIVE" ]; then
     echo "========================================================"
     echo "  SpeedEstimator Training Job Submission"
     echo "========================================================"
@@ -74,6 +74,13 @@ if [ -z "$SLURM_JOB_ID" ]; then
     exit 0
 fi
 
+# [NEW] Default values for non-interactive mode
+if [ -n "$NON_INTERACTIVE" ]; then
+    GPU_COUNT=${GPU_COUNT:-3}
+    MEM_LIMIT_GB=$((GPU_COUNT * 15))
+    echo "[NON-INTERACTIVE] Overriding defaults: GPU_COUNT=${GPU_COUNT}, MEM=${MEM_LIMIT_GB}G"
+fi
+
 # ================= ENVIRONMENT SETUP =================
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate IIT
@@ -94,10 +101,16 @@ pip install psutil pyyaml > /dev/null 2>&1
 
 # ================= PRE-FLIGHT CHECKS =================
 echo "[TRAIN.SH] Running LPF Check..."
-python check_lpf_effect.py --config configs/baseline.yaml
-if [ $? -ne 0 ]; then
-    echo "LPF Check Failed!"
-    exit 1
+# Find any YAML file in configs/ to use for the check
+CONFIG_FILE=$(ls configs/*.yaml 2>/dev/null | head -n 1)
+if [ -n "$CONFIG_FILE" ]; then
+    python check_lpf_effect.py --config "$CONFIG_FILE"
+    if [ $? -ne 0 ]; then
+        echo "LPF Check Failed!"
+        exit 1
+    fi
+else
+    echo "[WARN] No config files found in configs/ to run LPF check. Skipping."
 fi
 
 python - <<EOF
@@ -164,12 +177,16 @@ def main():
     print(f"[SCHEDULER] Starting queue ({len(valid_configs)} items).")
     
     running = {} # gid -> Popen
+    log_fds = {} # gid -> file object
     
     while not q.empty() or running:
         # Check finished jobs
         done = [g for g, p in running.items() if p.poll() is not None]
         for g in done:
             print(f"[SCHEDULER] GPU {g} job finished.")
+            if g in log_fds:
+                log_fds[g].close()
+                del log_fds[g]
             del running[g]
         
         # Launch new jobs if slots available
@@ -189,17 +206,18 @@ def main():
                     log = f"logs/{os.path.basename(cfg).replace('.yaml', '.log')}"
                     os.makedirs("logs", exist_ok=True)
                     
-                    with open(log, "w") as f:
-                        # [FIX] Enforce Memory Limit
-                        p = subprocess.Popen(
-                            ["python", "SpeedEstimator_TCN_MLP_experiments.py", "--config", cfg],
-                            env=env,
-                            stdout=f,
-                            stderr=subprocess.STDOUT,
-                            preexec_fn=lambda: set_limits(ram_limit)
-                        )
+                    f = open(log, "w")
+                    # [FIX] Enforce Memory Limit
+                    p = subprocess.Popen(
+                        ["python", "SpeedEstimator_TCN_MLP_experiments.py", "--config", cfg],
+                        env=env,
+                        stdout=f,
+                        stderr=subprocess.STDOUT,
+                        preexec_fn=lambda: set_limits(ram_limit)
+                    )
                     
                     running[fid] = p
+                    log_fds[fid] = f
                     
                     if len(running) >= MAX_ALLOWED_GPUS: break
                     

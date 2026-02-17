@@ -1,0 +1,18 @@
+# =============================================================================
+# Multi-Step H=10 + Smoothness Loss λ=0.01 (약한 규제)
+# baseline 대비 변경: est_tick_ranges → [1..10], smoothness_loss_weight → 0.01
+# =============================================================================
+
+shared:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+02_train:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+  train:
+    smoothness_loss_weight: 0.01
+
+exp_name: "exp_multistep_H10_smooth_lam001"

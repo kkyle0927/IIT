@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+Exp_IMU_Orientation_DryRun,0.09096447,0.14170003,0.84610605,-59.523809523809526,0.09096447,0.0

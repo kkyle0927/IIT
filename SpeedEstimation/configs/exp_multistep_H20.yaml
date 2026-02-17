@@ -1,0 +1,17 @@
+# =============================================================================
+# Multi-Step H=20: t+1 ~ t+20 동시 예측 (장기 제약, jitter↓ vs 응답성↓ 트레이드오프)
+# baseline 대비 변경: shared.data.est_tick_ranges, time_window_output
+#                     02_train.data.est_tick_ranges, time_window_output
+# =============================================================================
+
+shared:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    time_window_output: 20
+
+02_train:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+    time_window_output: 20
+
+exp_name: "exp_multistep_H20"

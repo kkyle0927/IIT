@@ -1,0 +1,23 @@
+# Task: Update TCN Model for Receptive Field and Stability
+
+- [x] Explore existing codebase (`baseline.yaml`, `SpeedEstimator_TCN_MLP_experiments.py`, `compare_results.py`, `train.sh`) <!-- id: 0 -->
+- [x] Create Implementation Plan <!-- id: 1 -->
+- [x] Modify `configs/baseline.yaml` <!-- id: 2 -->
+    - [x] Update `channels` to `[32, 32, 64, 64, 128, 128]`
+    - [x] Update `kernel_size` to `5`
+    - [x] Update `dropout` to `0.2`
+    - [x] Update `wd` to `0.001`
+    - [x] Update `loss` to `huber` and add `huber_delta`
+- [x] Modify `SpeedEstimator_TCN_MLP_experiments.py` <!-- id: 3 -->
+    - [x] Implement Huber loss logic with configurable delta
+    - [x] **[NEW]** Disable auto-batch-reduction; raise explicit OOM error
+- [x] Modify `compare_results.py` <!-- id: 4 -->
+    - [x] Ensure dynamic model creation in `load_and_evaluate`
+    - [x] **[NEW]** Implement Feature Importance for ALL input features (Batched & Robust)
+- [x] Suggest `train.sh` updates for memory management <!-- id: 5 -->
+- [x] Verify changes <!-- id: 6 -->
+- [x] Verify changes <!-- id: 6 -->
+- [x] Optimize and re-run Feature Importance for all folds <!-- id: 7 -->
+    - [x] Identify bottleneck in `calculate_permutation_importance` (Tensor cloning)
+    - [x] Implement in-place column permutation to save RAM and time
+    - [x] Restart analysis script

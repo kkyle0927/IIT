@@ -1,0 +1,188 @@
+# =============================================================================
+# [CRITICAL NOTICE - 수정 금지 / DO NOT MODIFY]
+# * 이 파일은 [GOLDEN BASELINE] 설정 파일입니다.
+# * 어떤 이유로든 이 파일(baseline.yaml)의 내용을 수정해야 한다면,
+#   반드시 수정하기 전에 사용자에게 한국어(Korean)로 변경하려는 내용과
+#   이유를 설명하고 명시적인 허락을 받아야 합니다.
+# * 변형 실험은 generate_yaml.py를 통해 별도의 YAML 파일을 생성하여 진행합니다.
+# =============================================================================
+# BASELINE CONFIGURATION - Multi-Dataset Integration
+# =============================================================================
+
+# =============================================================================
+# SHARED CONFIGURATIONS (전역 설정)
+# =============================================================================
+shared:
+  # ---------------------------------------------------------------------------
+  # [1] 데이터 소스 정의 - 다중 HDF5 파일 통합
+  # ---------------------------------------------------------------------------
+  # 각 데이터셋은 접두사로 구분됩니다 (m1_ = milestone1, m2_ = milestone2)
+  data_sources:
+    milestone1:
+      path: "./combined_data_milestone1.h5"
+      prefix: "m1_"
+      exclude_subjects: ["S001", "S002", "S003"]  # mocap/forceplate 없는 피험자 제외
+    milestone2:
+      path: "./combined_data.h5"
+      prefix: "m2_"
+      exclude_subjects: []
+
+  # ---------------------------------------------------------------------------
+  # [2] 피험자 목록 (통합된 16명)
+  # ---------------------------------------------------------------------------
+  # milestone1: S004-S011 (8명), milestone2: S001-S008 (8명)
+  subjects: &SUBJECTS
+    # milestone1 피험자 (S004-S011)
+    - "m1_S004"
+    - "m1_S005"
+    - "m1_S006"
+    - "m1_S007"
+    - "m1_S008"
+    - "m1_S009"
+    - "m1_S010"
+    - "m1_S011"
+    # milestone2 피험자 (S001-S008)
+    - "m2_S001"
+    - "m2_S002"
+    - "m2_S003"
+    - "m2_S004"
+    - "m2_S005"
+    - "m2_S006"
+    - "m2_S007"
+    - "m2_S008"
+
+  # ---------------------------------------------------------------------------
+  # [3] 조건 (Conditions) - 모든 데이터셋의 조건 명시
+  # ---------------------------------------------------------------------------
+  conditions: &CONDITIONS
+    # milestone1 conditions
+    - "level_08mps"
+    - "level_12mps"
+    - "level_16mps"
+    # milestone2 conditions
+    - "level_075mps"
+    - "level_100mps"
+    - "level_125mps"
+    - "accel_sine"
+    - "decline_5deg"
+    - "incline_10deg"
+    - "stopandgo"
+
+  # ---------------------------------------------------------------------------
+  # [4] 입력 변수 정의 (30개 특성)
+  # ---------------------------------------------------------------------------
+  # 형식: ["그룹경로", ["변수1", "변수2", ...]]
+  # _dot 접미사: 수치미분으로 각속도 계산
+  # _ddot 접미사: 2차 수치미분으로 각가속도 계산
+  input_vars: &INPUT_VARS
+    # Back IMU (6개)
+    - ["robot/back_imu", ["accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"]]
+    # Robot Hip Joint Angle (2개)
+    - ["robot/left", ["hip_angle"]]
+    - ["robot/right", ["hip_angle"]]
+
+  # ---------------------------------------------------------------------------
+  # [5] 출력 변수 정의
+  # ---------------------------------------------------------------------------
+  output_vars: &OUTPUT_VARS
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r"]]
+
+
+  # ---------------------------------------------------------------------------
+  # [7] 데이터 윈도우 설정
+  # ---------------------------------------------------------------------------
+  data: &DATA_CONFIG
+    window_size: 200       # 2.0초 윈도우 (100Hz * 2s)
+    stride: 5              # 50ms 간격으로 윈도우 이동
+    stride_inf: 1          # 추론 시 1틱 간격
+    y_delay: 0             # 현재 시점 예측 (No delay)
+    est_tick_ranges: [0]   # 현재 시점
+    normalize: true        # 입력 정규화 활성화
+    time_window_output: 1  # 단일 스칼라 출력
+    use_complementary_filter_euler: false # 상보 필터(Euler Angle) 사용 여부 (기본 false)
+
+  # ---------------------------------------------------------------------------
+  # [8] 모델 구조 정의
+  # ---------------------------------------------------------------------------
+  model: &NN_MODEL
+    type: "TCN"
+    channels: [32, 64, 64, 128]  # Reduced layers to prevent overfitting
+    kernel_size: 5
+    dropout: 0.5  # Increased from 0.2
+    use_norm: true
+    head_hidden: [64]           # MLP 헤드 크기 증가
+    head_dropout: 0.5
+    model_norm: "layer"
+    # Advanced Options
+    gating_signal: null
+    attention_type: null
+    attention_heads: 0
+
+# =============================================================================
+# 02. TRAINING CONFIGURATION (학습 설정)
+# =============================================================================
+02_train:
+  data:
+    <<: *DATA_CONFIG
+    normalize_type: "standard"
+
+  model: *NN_MODEL
+
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+
+  train:
+    task_type: "regression"
+    epochs: 30
+    lr: 0.001
+    wd: 0.01  # Increased from 0.001
+    amp: true
+    device: "cuda"
+    save_dir: "./runs_tcn"
+    
+    # Early Stopping
+    early_stop_patience: 10
+    early_stop_min_delta: 1e-04
+    early_stop_warmup: 10
+    
+    # Cross Validation
+    k_fold: 4
+    
+    # Scheduler
+    cos_T0: 10
+    cos_Tmult: 1
+    eta_min: 0.00001
+
+# =============================================================================
+# 03. EVALUATION CONFIGURATION (평가 설정)
+# =============================================================================
+03_eval:
+  # ---------------------------------------------------------------------------
+  # Subject Split - LOSO 방식
+  # ---------------------------------------------------------------------------
+  split:
+    mode: "loso"      # Leave-One-Subject-Out
+    level: "subject"
+    seed: 42
+    ratio: [0.7, 0.15, 0.15]
+    manual:
+      val: ["m2_S007"]    # Validation: 1명
+      test: ["m2_S008"]   # Test: 1명
+      # 나머지 14명은 자동으로 Training
+    save_to: null
+    loso_subjects: ["m1_S004", "m2_S008", "m1_S011"]
+
+  data: *DATA_CONFIG
+
+  train:
+    device: "cuda"
+
+  scaler_path: "./runs_tcn/scaler.npz"
+
+# =============================================================================
+# GLOBAL SETTINGS (전역 설정 - 루트 레벨)
+# =============================================================================
+exp_name: "baseline"
+cv_mode: "loso"
+subjects: *SUBJECTS

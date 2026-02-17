@@ -1,0 +1,148 @@
+02_train:
+  data:
+    est_tick_ranges: &id001
+    - 0
+    normalize: true
+    normalize_type: standard
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_complementary_filter_euler: false
+    window_size: 200
+    y_delay: 0
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model: &id004
+    attention_heads: 0
+    attention_type: null
+    channels: &id006
+    - 32
+    - 64
+    - 64
+    - 128
+    dropout: 0.5
+    gating_signal: null
+    head_dropout: 0.5
+    head_hidden:
+    - 64
+    kernel_size: 5
+    model_norm: layer
+    type: TCN
+    use_norm: true
+  train:
+    amp: true
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 1e-04
+    early_stop_patience: 10
+    early_stop_warmup: 10
+    epochs: 30
+    eta_min: 1.0e-05
+    k_fold: 4
+    lr: 0.001
+    save_dir: ./runs_tcn
+    task_type: regression
+    wd: 0.01
+03_eval:
+  data: &id003
+    est_tick_ranges: *id001
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_complementary_filter_euler: false
+    window_size: 200
+    y_delay: 0
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m1_S004
+    - m2_S008
+    - m1_S011
+    manual:
+      test:
+      - m2_S008
+      val:
+      - m2_S007
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id002
+- level_08mps
+- level_12mps
+- level_16mps
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data:
+  use_complementary_filter_euler: false
+  window_size: 400
+data_path: ./combined_data.h5
+est_tick_ranges:
+- 0
+exp_name: exp_win_400
+shared:
+  conditions: *id002
+  data: *id003
+  data_sources:
+    milestone1:
+      exclude_subjects:
+      - S001
+      - S002
+      - S003
+      path: ./combined_data_milestone1.h5
+      prefix: m1_
+    milestone2:
+      exclude_subjects: []
+      path: ./combined_data.h5
+      prefix: m2_
+  input_vars:
+  - - robot/back_imu
+    - - accel_x
+      - accel_y
+      - accel_z
+      - gyro_x
+      - gyro_y
+      - gyro_z
+  - - robot/left
+    - - hip_angle
+  - - robot/right
+    - - hip_angle
+  model: *id004
+  output_vars:
+  - - mocap/kin_q
+    - - hip_flexion_l
+      - hip_flexion_r
+  subjects: &id005
+  - m1_S004
+  - m1_S005
+  - m1_S006
+  - m1_S007
+  - m1_S008
+  - m1_S009
+  - m1_S010
+  - m1_S011
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+subjects: *id005
+tcn_channels: *id006

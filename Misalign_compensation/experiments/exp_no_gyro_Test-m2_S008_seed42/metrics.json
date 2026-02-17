@@ -1,0 +1,289 @@
+{
+    "test_huber": 11.184031759448324,
+    "test_mae": 11.49624252319336,
+    "test_rmse": 12.80768871307373,
+    "n_params": 221356,
+    "model_size_mb": 0.8444,
+    "host_latency_ms": 1.8278,
+    "host_max_freq_hz": 547.1,
+    "config": {
+        "shared": {
+            "data_sources": {
+                "milestone1": {
+                    "path": "./combined_data_milestone1.h5",
+                    "prefix": "m1_",
+                    "exclude_subjects": [
+                        "S001",
+                        "S002",
+                        "S003"
+                    ]
+                },
+                "milestone2": {
+                    "path": "./combined_data.h5",
+                    "prefix": "m2_",
+                    "exclude_subjects": []
+                }
+            },
+            "subjects": [
+                "m1_S004",
+                "m1_S005",
+                "m1_S006",
+                "m1_S007",
+                "m1_S008",
+                "m1_S009",
+                "m1_S010",
+                "m1_S011",
+                "m2_S001",
+                "m2_S002",
+                "m2_S003",
+                "m2_S004",
+                "m2_S005",
+                "m2_S006",
+                "m2_S007",
+                "m2_S008"
+            ],
+            "conditions": [
+                "level_08mps",
+                "level_12mps",
+                "level_16mps",
+                "level_075mps",
+                "level_100mps",
+                "level_125mps",
+                "accel_sine",
+                "decline_5deg",
+                "incline_10deg",
+                "stopandgo"
+            ],
+            "input_vars": [
+                [
+                    "robot/back_imu",
+                    [
+                        "accel_x",
+                        "accel_y",
+                        "accel_z",
+                        "gyro_x",
+                        "gyro_y",
+                        "gyro_z"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "hip_angle"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "hip_angle"
+                    ]
+                ]
+            ],
+            "output_vars": [
+                [
+                    "mocap/kin_q",
+                    [
+                        "hip_flexion_l",
+                        "hip_flexion_r"
+                    ]
+                ]
+            ],
+            "data": {
+                "window_size": 200,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": false
+            },
+            "model": {
+                "type": "TCN",
+                "channels": [
+                    32,
+                    64,
+                    64,
+                    128
+                ],
+                "kernel_size": 5,
+                "dropout": 0.5,
+                "use_norm": true,
+                "head_hidden": [
+                    64
+                ],
+                "head_dropout": 0.5,
+                "model_norm": "layer",
+                "gating_signal": null,
+                "attention_type": null,
+                "attention_heads": 0
+            }
+        },
+        "02_train": {
+            "data": {
+                "window_size": 200,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": false,
+                "normalize_type": "standard"
+            },
+            "model": {
+                "type": "TCN",
+                "channels": [
+                    32,
+                    64,
+                    64,
+                    128
+                ],
+                "kernel_size": 5,
+                "dropout": 0.5,
+                "use_norm": true,
+                "head_hidden": [
+                    64
+                ],
+                "head_dropout": 0.5,
+                "model_norm": "layer",
+                "gating_signal": null,
+                "attention_type": null,
+                "attention_heads": 0
+            },
+            "loader": {
+                "batch_size": 128,
+                "val_batch_size": 256
+            },
+            "train": {
+                "task_type": "regression",
+                "epochs": 30,
+                "lr": 0.001,
+                "wd": 0.01,
+                "amp": true,
+                "device": "cuda",
+                "save_dir": "./runs_tcn",
+                "early_stop_patience": 10,
+                "early_stop_min_delta": "1e-04",
+                "early_stop_warmup": 10,
+                "k_fold": 4,
+                "cos_T0": 10,
+                "cos_Tmult": 1,
+                "eta_min": 1e-05
+            }
+        },
+        "03_eval": {
+            "split": {
+                "mode": "loso",
+                "level": "subject",
+                "seed": 42,
+                "ratio": [
+                    0.7,
+                    0.15,
+                    0.15
+                ],
+                "manual": {
+                    "val": [
+                        "m2_S007"
+                    ],
+                    "test": [
+                        "m2_S008"
+                    ]
+                },
+                "save_to": null,
+                "loso_subjects": [
+                    "m1_S004",
+                    "m2_S008",
+                    "m1_S011"
+                ]
+            },
+            "data": {
+                "window_size": 200,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": false
+            },
+            "train": {
+                "device": "cuda"
+            },
+            "scaler_path": "./runs_tcn/scaler.npz"
+        },
+        "exp_name": "exp_no_gyro",
+        "cv_mode": "loso",
+        "subjects": [
+            "m1_S004",
+            "m1_S005",
+            "m1_S006",
+            "m1_S007",
+            "m1_S008",
+            "m1_S009",
+            "m1_S010",
+            "m1_S011",
+            "m2_S001",
+            "m2_S002",
+            "m2_S003",
+            "m2_S004",
+            "m2_S005",
+            "m2_S006",
+            "m2_S007",
+            "m2_S008"
+        ],
+        "input_vars": [
+            [
+                "robot/back_imu",
+                [
+                    "accel_x",
+                    "accel_y",
+                    "accel_z"
+                ]
+            ],
+            [
+                "robot/left",
+                [
+                    "hip_angle"
+                ]
+            ],
+            [
+                "robot/right",
+                [
+                    "hip_angle"
+                ]
+            ]
+        ],
+        "data": {
+            "use_complementary_filter_euler": false
+        },
+        "data_path": "./combined_data.h5",
+        "conditions": [
+            "level_08mps",
+            "level_12mps",
+            "level_16mps",
+            "level_075mps",
+            "level_100mps",
+            "level_125mps",
+            "accel_sine",
+            "decline_5deg",
+            "incline_10deg",
+            "stopandgo"
+        ],
+        "est_tick_ranges": [
+            0
+        ],
+        "tcn_channels": [
+            32,
+            64,
+            64,
+            128
+        ]
+    }
+}

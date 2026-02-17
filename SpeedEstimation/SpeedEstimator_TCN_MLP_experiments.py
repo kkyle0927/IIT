@@ -10,6 +10,10 @@
 
 
 import os
+import gc
+import copy
+import pandas as pd
+import seaborn as sns
 from typing import Optional, List
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
@@ -63,9 +67,11 @@ def get_custom_losses(config, device, feature_names=None, scaler_mean=None, scal
     w_smooth = float(train_cfg.get("smoothness_loss_weight", 0.0))
     if w_smooth > 0:
         def smoothness_fn(pred):
-            # Total Variation: mean((x_t - x_{t-1})^2)
-            diff = pred[:, :, 1:] - pred[:, :, :-1]
-            return torch.mean(diff ** 2)
+            # Multi-step: diff along time/horizon axis (dim=1)
+            if pred.dim() == 3 and pred.shape[1] > 1:
+                diff = pred[:, 1:, :] - pred[:, :-1, :]
+                return torch.mean(diff ** 2)
+            return torch.tensor(0.0, device=pred.device)
         
         losses["smoothness"] = {"fn": smoothness_fn, "weight": w_smooth}
 
@@ -152,6 +158,21 @@ stride = 10
 
 def make_subject_selection(include_list):
     return {'include': include_list, 'exclude': []}
+
+def parse_vars(var_list_from_yaml):
+    """
+    Converts list-based YAML vars [[path, [vars]], ...] to tuple-based list.
+    """
+    if not var_list_from_yaml:
+        return []
+    parsed = []
+    for item in var_list_from_yaml:
+        # item is [gpath, [list_of_vars]]
+        if isinstance(item, (list, tuple)) and len(item) >= 2:
+            gpath = item[0]
+            vars = item[1]
+            parsed.append((gpath, vars))
+    return parsed
 
 CONDITION_SELECTION = {'include': None, 'exclude': []}
 
@@ -309,6 +330,25 @@ def butter_lowpass_filter(data, cutoff, fs, order=4):
     else:
         y = filtfilt(b, a, data, axis=0)
     return y
+
+def butter_highpass_filter(data, cutoff, fs, order=4):
+    from scipy.signal import butter, filtfilt
+    nyq = 0.5 * fs
+    normal_cutoff = cutoff / nyq
+    b, a = butter(order, normal_cutoff, btype='high', analog=False)
+    if data.ndim == 1:
+        y = filtfilt(b, a, data)
+    else:
+        y = filtfilt(b, a, data, axis=0)
+    return y
+
+def get_data_from_group(g, path):
+    parts = path.split('/')
+    curr = g
+    for p in parts:
+        if p in curr: curr = curr[p]
+        else: return None
+    return curr[:]
 
 class LiveTrainingPlotter:
     def __init__(self):
@@ -475,7 +515,8 @@ def extract_condition_data_v2(
     lpf_cutoff=None, lpf_order=4, fs=100,
     include_levels=None, include_trials=None,
     use_physical_velocity_model=False,
-    use_gait_phase=False
+    use_gait_phase=False,
+    input_lpf_cutoff=None, input_lpf_order=4
 ):
     """
     input_vars, output_vars: list of (group_path, [var_names...])
@@ -536,15 +577,6 @@ def extract_condition_data_v2(
             
             # (A) Standard Load Inputs (Explicit)
             valid_trial = True
-            
-            # Helper to get base data
-            def get_data_from_group(g, path):
-                parts = path.split('/')
-                curr = g
-                for p in parts:
-                    if p in curr: curr = curr[p]
-                    else: return None
-                return curr[:]
 
             for gpath, vars in input_vars:
                 # gpath is e.g. 'robot/back_imu' or 'mocap/kin_q'
@@ -562,148 +594,179 @@ def extract_condition_data_v2(
                     valid_trial = False
                     break
                 
+                
                 # Load Data Columns
                 block_cols = []
+                # [NEW] Group-level Derived Cache
+                derived_cache = {}
+                
+                # [NEW] Load Treadmill Acceleration (for frame of reference correction)
+                a_belt_global = 0.0
+                v_belt_data = get_data_from_group(trial_group, "treadmill/left/speed_leftbelt")
+                if v_belt_data is not None:
+                    # v_belt_data is usually (T, 1) or (T,)
+                    v_belt_flat = v_belt_data.flatten()
+                    a_belt_global = np.gradient(v_belt_flat, axis=0) * fs
+                
                 for v_name in vars:
-                    # 1. Try Direct Load
+                    col_data = None
+                    base_name = None
+                    is_accel = False
+                    
+                    # 1. Direct Load
                     if v_name in grp:
                         col_data = grp[v_name][:]
+                        if input_lpf_cutoff is not None:
+                            col_data = butter_lowpass_filter(col_data, input_lpf_cutoff, fs, input_lpf_order)
                     
-                    # 2. Try Derived Logic (Velocity/Acceleration/Contact)
+                    # 2. Derived Logic (Velocity/Acceleration/Contact)
                     elif v_name.endswith('_dot') or v_name.endswith('_ddot'):
-                        is_accel = v_name.endswith('_ddot')
-                        base_name = v_name[:-5] if is_accel else v_name[:-4]
+                        if v_name.endswith('_ddot'):
+                            base_name = v_name[:-5]
+                            is_accel = True
+                        else:
+                            base_name = v_name[:-4]
+                            is_accel = False
                         
                         if base_name in grp:
                             # Load Base Position
                             base_data = grp[base_name][:]
-                            
-                            # Differentiation (fs given in arg, default 100)
-                            # 1st Deriv
                             d1 = np.gradient(base_data, axis=0) * fs
-                            
                             if is_accel:
-                                # 2nd Deriv
-                                d2 = np.gradient(d1, axis=0) * fs
-                                target_data = d2
+                                target_data = np.gradient(d1, axis=0) * fs
                             else:
                                 target_data = d1
                                 
-                            # Apply LPF (User requested 30Hz for derivatives)
-                            # Using 30Hz cutoff for these derivatives specifically
                             target_data = butter_lowpass_filter(target_data, cutoff=30.0, fs=fs, order=4)
                             col_data = target_data
                             
-                            # [NEW] Physical Velocity Mod
-                            if use_physical_velocity_model and 'hip' in v_name and 'flexion' in v_name and not is_accel:
-                                # V = L * theta_dot * cos(theta)
-                                # Load Leg Length
-                                L = 0.9
-                                if sub in f:
-                                     # Try various paths
-                                     if "leg_length" in f[sub].attrs: L = f[sub].attrs["leg_length"]
-                                     elif "sub_info" in f[sub] and "leg_length" in f[sub]["sub_info"].attrs:
-                                          L = f[sub]["sub_info"].attrs["leg_length"]
-                                          
-                                theta_rad = base_data # base_data is cleaned/valid
-                                # Ensure radians? Mocap might be deg? 
-                                # Usually defaults to Rad. Check magnitude.
-                                # If > 10, likely Deg. If < 2, likely Rad.
-                                if np.mean(np.abs(theta_rad)) > 10:
-                                     theta_rad = np.deg2rad(theta_rad)
-                                     
-                                theta_dot = col_data
-                                if np.mean(np.abs(theta_dot)) > 50: # Heuristic for Deg/s
-                                     theta_dot = np.deg2rad(theta_dot) # Convert for Physics formula?
-                                     # But if we output feature, NN handles scale.
-                                     # Formula V = L * w * cos(th). V is m/s. 
-                                     # w must be rad/s.
-                                     pass
-                                     
-                                # Apply formula
-                                v_phys = L * theta_dot * np.cos(theta_rad)
-                                col_data = v_phys
-                                # print(f"[DEBUG] Applied Physical Model (L={L:.2f})")
-                                
+                            if use_physical_velocity_model and not is_accel and 'hip' in v_name and 'flexion' in v_name:
+                                L = 0.9 # Default
+                                if sub in f and "leg_length" in f[sub].attrs: L = f[sub].attrs["leg_length"]
+                                elif sub in f and "sub_info" in f[sub] and "leg_length" in f[sub]["sub_info"].attrs: L = f[sub]["sub_info"].attrs["leg_length"]
+                                col_data = L * target_data * np.cos(base_data)
                         else:
-                             print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Base {base_name} not found for {v_name}")
-                             valid_trial = False
-                             break
+                             print(f"[WARN] Base data {base_name} not found for {v_name}")
+                             valid_trial = False; break
 
+                    # [NEW] Fallback for Milestone 1: hip_angle -> motor_angle
+                    elif 'hip_angle' in v_name:
+                        alt_name = v_name.replace('hip_angle', 'motor_angle')
+                        if alt_name in grp:
+                            col_data = grp[alt_name][:]
+                        else:
+                            print(f"[DEBUG-FALLBACK] {alt_name} NOT found in grp.")
+
+                    # 3. Derive Contact from GRF Z
                     elif v_name == 'contact':
-                         # [NEW] Derive contact from GRF Vertical Force (z)
-                         # Logic: If 'z' exists in this group, use threshold
                          if 'z' in grp:
-                             fz = grp['z'][:]
-                             col_data = get_ground_contact(fz, threshold=20.0).reshape(-1, 1)
+                             col_data = get_ground_contact(grp['z'][:], threshold=20.0).reshape(-1, 1)
                          else:
-                             print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: GRF Z not found for contact derivation")
-                             valid_trial = False
-                             break
+                             print(f"[DEBUG] GRF Z not found for contact")
+                             valid_trial = False; break
                              
+                    # 4. Gait Phase (Derived)
                     elif gpath == "derived" and "gait_phase" in v_name:
-                         # [NEW] Gait Phase Logic
-                         # Load contact relation
                          side = 'left' if '_L' in v_name else 'right'
-                         z_path = f"forceplate/grf/{side}/z"
-                         z_data = get_data_from_group(trial_group, z_path)
+                         z_data = get_data_from_group(trial_group, f"forceplate/grf/{side}/z")
                          if z_data is not None:
                              cont = get_ground_contact(z_data)
-                             # Calculate Phase
-                             # Simple 1-period ramp
                              pad = np.pad(cont.flatten(), (1,0), constant_values=0)
-                             diff = np.diff(pad)
-                             hs = np.where(diff == 1)[0]
+                             hs = np.where(np.diff(pad) == 1)[0]
                              ph = np.zeros_like(cont)
                              for k in range(len(hs)-1):
                                  s, e = hs[k], hs[k+1]
                                  ph[s:e] = np.linspace(0, 1, e-s)
-                             if len(hs)>0: ph[hs[-1]:] = 1.0 # Tail
+                             if len(hs)>0: ph[hs[-1]:] = 1.0
                              col_data = ph[:, None]
                          else:
-                             # Fallback 0
-                             print(f"[WARN] No Z force for Gait Phase {v_name}")
                              col_data = np.zeros((get_data_from_group(trial_group, "robot/left/hip_angle").shape[0], 1))
+                    
+                    # 5. Advanced IMU Features (Orientation & Integrated Velocity)
+                    elif gpath == "robot/back_imu" and v_name in ["roll", "pitch", "yaw", "vel_forward"]:
+                        try:
+                            if v_name in derived_cache:
+                                col_data = derived_cache[v_name]
+                            else:
+                                raw_ax = grp['accel_x'][:]
+                                raw_ay = grp['accel_y'][:]
+                                raw_az = grp['accel_z'][:]
+                                raw_gx = grp['gyro_x'][:]
+                                raw_gy = grp['gyro_y'][:]
+                                raw_gz = grp['gyro_z'][:]
+                                
+                                if sub.startswith("m1_"): raw_ax = -raw_ax
+                                elif sub.startswith("m2_"): raw_az = -raw_az
 
-                    elif use_physical_velocity_model and (v_name.endswith('_dot') or v_name.endswith('_ddot')) and 'hip' in v_name and 'flexion' in v_name:
-                        # [NEW] Physical Velocity Model
-                        # V = L * theta_dot * cos(theta)
-                        # 1. We have theta_dot (col_data)
-                        # 2. Need theta (base_name) loaded above
-                        # 3. Need Leg Length
-                        
-                        # Load Leg Length
-                        if sub in f and "leg_length" in f[sub].attrs:
-                            L = f[sub].attrs["leg_length"]
-                        elif sub in f and "sub_info" in f[sub] and "leg_length" in f[sub]["sub_info"].attrs: # Generic path check
-                            L = f[sub]["sub_info"].attrs["leg_length"]
-                        else:
-                            L = 0.9 # Default 0.9m
-                        
-                        # Load Theta
-                        is_accel = v_name.endswith('_ddot')
-                        base_name = v_name[:-5] if is_accel else v_name[:-4]
-                        
-                        # We calculated d1 or d2.
-                        # theta is base_data (loaded in previous elif block 596)
-                        # BUT python scoping... 'base_data' is updated inside that elif.
-                        # We are in a generic 'elif'. 
-                        # We should MERGE logic.
-                        # Actually, lines 590-617 handle _dot.
-                        # We need to INTERCEPT that logic.
-                        # I will NOT add a new elif, but modify the existing one via replacement.
-                        pass # Handled in separate chunk?
-                        
+                                n = len(raw_ax)
+                                dt = 1.0 / fs
+                                alpha = 0.98
+                                rs, ps, ys = np.zeros(n), np.zeros(n), np.zeros(n)
+                                curr_r, curr_p, curr_y = 0.0, 0.0, 0.0
+                                for i in range(n):
+                                    r_a = np.arctan2(raw_ay[i], raw_az[i])
+                                    p_a = np.arctan2(-raw_ax[i], np.sqrt(raw_ay[i]**2 + raw_az[i]**2))
+                                    curr_r = alpha*(curr_r + raw_gx[i]*dt) + (1-alpha)*r_a
+                                    curr_p = alpha*(curr_p + raw_gy[i]*dt) + (1-alpha)*p_a
+                                    curr_y += raw_gz[i] * dt
+                                    rs[i], ps[i], ys[i] = curr_r, curr_p, curr_y
+                                
+                                # Frame of Reference Correction: a_total = a_body_inertial + a_belt
+                                # This transforms the feature into the treadmill surface frame.
+                                a_lin = raw_ax + 9.81 * np.sin(ps)
+                                if isinstance(a_belt_global, np.ndarray) and len(a_belt_global) == n:
+                                    a_lin = a_lin + a_belt_global
+                                
+                                vel_f = butter_highpass_filter(np.cumsum(a_lin)*dt, 0.1, fs, 2)
+                                
+                                derived_cache["roll"], derived_cache["pitch"], derived_cache["yaw"], derived_cache["vel_forward"] = rs, ps, ys, vel_f
+                                col_data = derived_cache[v_name]
+                        except Exception as e:
+                            print(f"[ERROR] IMU Feature Error: {e}")
+                            valid_trial = False; break
+
                     else:
-                         print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Dataset {v_name} not found in {gpath}")
-                         valid_trial = False
-                         break
+                        print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Dataset {v_name} not found in {gpath}")
+                        valid_trial = False; break
 
-                    if col_data.ndim == 1: col_data = col_data[:, None]
-                    block_cols.append(col_data)
+                    # -------------------------------------------------------------------------
+                    # [NEW] Data Correction: Hardcoded Sign Flipping based on User Request
+                    # -------------------------------------------------------------------------
+                    if col_data is not None:
+                         # 1. Milestone 1 Corrections (prefix "m1_")
+                        if sub.startswith("m1_"):
+                            # GRF Left X
+                            if "grf" in gpath and "left" in gpath and v_name == "x":
+                                col_data = -col_data
+                            # GRF Right X
+                            elif "grf" in gpath and "right" in gpath and v_name == "x":
+                                col_data = -col_data
+                            # Knee Angle L & L_dot
+                            elif "knee_angle_l" in v_name:
+                                col_data = -col_data
+                            # Knee Angle R & R_dot
+                            elif "knee_angle_r" in v_name:
+                                col_data = -col_data
+
+                        # 2. Milestone 2 Corrections (prefix "m2_")
+                        elif sub.startswith("m2_"):
+                            # GRF Left Z
+                            if "grf" in gpath and "left" in gpath and v_name == "z":
+                                col_data = -col_data
+                            # GRF Right Z
+                            elif "grf" in gpath and "right" in gpath and v_name == "z":
+                                col_data = -col_data
+
+                    # Append to block columns
+                    if col_data is not None:
+                        if col_data.ndim == 1: col_data = col_data[:, None]
+                        block_cols.append(col_data)
+                    else:
+                        valid_trial = False
+                        break
                 
                 if not valid_trial: break
-                arr = np.concatenate(block_cols, axis=1)
+                arr = np.concatenate(block_cols, axis=1).astype(np.float32)
                     
                 # [FIX] GRF Normalization (Requested by User)
                 # "forceplate" AND "grf" in path -> divide by body weight
@@ -806,48 +869,46 @@ def extract_condition_data_v2(
 
             if not curr_trial_in:
                  continue
-            in_arr_trial = np.hstack(curr_trial_in)
 
-            # -------------------------------------------------------------------------
-            # 2. Output
-            # -------------------------------------------------------------------------
-            curr_trial_out = []
+            # --- Synchronization (Handle slight length mismatches between sensor groups) ---
+            # 1. Collect all potential arrays (inputs and outputs) to find global min length
+            all_objs = curr_trial_in.copy()
             
+            # Identify output arrays first
+            extracted_outs = []
+            valid_out = True
             for gpath, vars in output_vars:
-                # Navigate Group
                 grp = trial_group
                 parts = gpath.split('/')
-                valid_out = True
+                found_grp = True
                 for p in parts:
                     if p in grp: grp = grp[p]
-                    else:
-                        print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing output group {gpath}")
-                        valid_out = False
-                        break
-                if not valid_out: break
+                    else: found_grp = False; break
+                if not found_grp: valid_out = False; break
                 
                 for v in vars:
-                    if v not in grp:
-                        print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing output var {v}")
-                        valid_out = False
-                        break
+                    if v not in grp: valid_out = False; break
                     d = grp[v][:]
-                    d = np.nan_to_num(d)
+                    d = np.nan_to_num(d).reshape(-1, 1)
                     if lpf_cutoff is not None:
-                        # print(f"[DEBUG] Applying LPF {lpf_cutoff}Hz to output {v}")
                         d = butter_lowpass_filter(d, lpf_cutoff, fs, lpf_order)
-                    curr_trial_out.append(d.reshape(-1, 1))
+                    extracted_outs.append(d)
             
-            if not valid_out: continue
-            if not curr_trial_out: continue
+            if not valid_out or not extracted_outs:
+                continue
+                
+            # 2. Find common minimum length
+            all_objs.extend(extracted_outs)
+            min_len_trial = min([a.shape[0] for a in all_objs])
             
-            out_arr_trial = np.hstack(curr_trial_out)
+            # 3. Trim and Stack
+            in_arr_trial = np.hstack([a[:min_len_trial] for a in curr_trial_in])
+            out_arr_trial = np.hstack([a[:min_len_trial] for a in extracted_outs])
             
-            # Length check
-            min_len = min(in_arr_trial.shape[0], out_arr_trial.shape[0])
-            in_list_all.append(in_arr_trial[:min_len])
-            out_list_all.append(out_arr_trial[:min_len])
-            
+            # Valid trial found
+            in_list_all.append(in_arr_trial)
+            out_list_all.append(out_arr_trial)
+
     if not in_list_all:
         return [], []
         
@@ -865,7 +926,9 @@ def build_nn_dataset(
     lpf_order=4,
     est_tick_ranges=None,
     use_physical_velocity_model=False,
-    use_gait_phase=False
+    use_gait_phase=False,
+    input_lpf_cutoff=None,
+    input_lpf_order=4
 ):
     X_list = []
     Y_list = []
@@ -907,7 +970,9 @@ def build_nn_dataset(
                     f, sub, cond, input_vars, output_vars,
                     lpf_cutoff=lpf_cutoff, lpf_order=lpf_order,
                     use_physical_velocity_model=use_physical_velocity_model,
-                    use_gait_phase=use_gait_phase
+                    use_gait_phase=use_gait_phase,
+                    input_lpf_cutoff=input_lpf_cutoff,
+                    input_lpf_order=input_lpf_order
                 )
                 
                 if not X_trials:
@@ -937,6 +1002,124 @@ def build_nn_dataset(
     
     # Return LIST of arrays, not stacked array
     return X_list, Y_list
+
+def build_nn_dataset_multi(
+    config,
+    sub_names, cond_names,
+    input_vars, output_vars,
+    time_window_input, time_window_output, stride,
+    subject_selection=None,
+    condition_selection=None,
+    lpf_cutoff=None,
+    lpf_order=None,
+    est_tick_ranges=None,
+    use_physical_velocity_model=False,
+    use_gait_phase=False,
+    input_lpf_cutoff=None,
+    input_lpf_order=4
+):
+    # Determine data sources
+    data_sources = {}
+
+    if 'shared' in config and 'data_sources' in config['shared']:
+        for ds_name, ds_config in config['shared']['data_sources'].items():
+            prefix = ds_config.get('prefix', '')
+            path = ds_config.get('path', '')
+            exclude = ds_config.get('exclude_subjects', [])
+            if path:
+                 data_sources[prefix] = {'path': path, 'exclude_subjects': exclude}
+    
+    # Fallback to single path in config
+    if not data_sources:
+        data_path = config.get('data_path')
+        if not data_path:
+             # Try nested
+             if '01_construction' in config: data_path = config['01_construction'].get('src_h5')
+             if not data_path and 'shared' in config: data_path = config['shared'].get('src_h5')
+             if not data_path: data_path = './combined_data.h5'
+             
+        data_sources = {'': {'path': data_path, 'exclude_subjects': []}} # Empty prefix for default
+        
+    X_all = []
+    Y_all = []
+    
+    print(f"[DATA] Loading Multi-Source: keys={list(data_sources.keys())}")
+    
+    for prefix, src_cfg in data_sources.items():
+        path = src_cfg['path']
+        src_exclude = src_cfg.get('exclude_subjects', [])
+        
+        # 1. Filter & Strip 'sub_names'
+        # sub_names are like ['m1_S011', 'm2_S001', ...]
+        # We only keep those matching the current prefix.
+        current_source_subs = []
+        if sub_names:
+            for s in sub_names:
+                if prefix and s.startswith(prefix):
+                    # Match prefix -> Strip and Keep
+                    stripped = s[len(prefix):]
+                    current_source_subs.append(stripped)
+                elif not prefix:
+                    # No prefix source (Legacy or Single H5)
+                    # We try to keep all, provided they don't look like they belong to another prefix?
+                    # Or simpler: Just keep all. If they aren't in H5, build_nn_dataset skips them.
+                    current_source_subs.append(s)
+        
+        if not current_source_subs:
+            continue
+            
+        # 2. Filter & Strip 'subject_selection'
+        # subject_selection has 'include' and 'exclude' lists of full names.
+        curr_sub_select = {}
+        if subject_selection:
+            # Handle Include
+            if 'include' in subject_selection:
+                inc_list = []
+                for s in subject_selection['include']:
+                    if prefix and s.startswith(prefix): inc_list.append(s[len(prefix):])
+                    elif not prefix: inc_list.append(s)
+                curr_sub_select['include'] = inc_list
+            
+            # Handle Exclude
+            # Combine Global Exclude (from subject_selection) AND Source-Specific Exclude
+            ex_list = []
+            if 'exclude' in subject_selection:
+                for s in subject_selection['exclude']:
+                    if prefix and s.startswith(prefix): ex_list.append(s[len(prefix):])
+                    elif not prefix: ex_list.append(s)
+            
+            # Add Source Excludes (assuming they match keys in H5 directly? or full names?)
+            # Config usually has exclude_subjects: ['S004'] for that source.
+            if src_exclude:
+                ex_list.extend(src_exclude)
+                
+            curr_sub_select['exclude'] = ex_list
+
+        
+        print(f"  -> Source '{prefix}': {path} | Subs: {len(current_source_subs)}")
+            
+        # Call build_nn_dataset
+        X_src, Y_src = build_nn_dataset(
+            path, current_source_subs, cond_names,
+            input_vars, output_vars,
+            time_window_input, time_window_output, stride,
+            subject_selection=curr_sub_select,
+            condition_selection=condition_selection,
+            lpf_cutoff=lpf_cutoff,
+            lpf_order=lpf_order,
+            est_tick_ranges=est_tick_ranges,
+            use_physical_velocity_model=use_physical_velocity_model,
+            use_gait_phase=use_gait_phase,
+            input_lpf_cutoff=input_lpf_cutoff,
+            input_lpf_order=input_lpf_order
+        )
+        
+        if X_src:
+            print(f"     Loaded {len(X_src)} trials")
+            X_all.extend(X_src)
+            Y_all.extend(Y_src)
+            
+    return X_all, Y_all
 
 def plot_model_summary(results):
     """
@@ -1093,6 +1276,9 @@ class TemporalBlock(nn.Module):
         elif norm_type == 'layer':
             self.bn1 = nn.GroupNorm(1, out_ch)
             self.bn2 = nn.GroupNorm(1, out_ch)
+        elif norm_type == 'instance':
+            self.bn1 = nn.InstanceNorm1d(out_ch)
+            self.bn2 = nn.InstanceNorm1d(out_ch)
         else:
             self.bn1 = nn.Identity()
             self.bn2 = nn.Identity()
@@ -1140,12 +1326,18 @@ class TCN_MLP(nn.Module):
                  dropout=0.1, head_dropout=None, mlp_hidden=128,
                  use_input_norm=False, 
                  tcn_norm=None, 
-                 mlp_norm=None):
+                 mlp_norm=None, **kwargs):
         super().__init__()
         
         self.use_input_norm = use_input_norm
         if use_input_norm:
-            self.input_norm = nn.LayerNorm(input_dim)
+            norm_type = kwargs.get('input_norm_type', 'layer')
+            if norm_type == 'instance':
+                # InstanceNorm1d expects (B, C, T). 
+                # Our input is (B, T, D). We will transpose in forward or use LayerNorm if 1D.
+                self.input_norm = nn.InstanceNorm1d(input_dim)
+            else:
+                self.input_norm = nn.LayerNorm(input_dim)
             
         # TCN Encoder
         self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout, norm_type=tcn_norm)
@@ -1193,7 +1385,13 @@ class TCN_MLP(nn.Module):
             x = x.unsqueeze(1)
         
         if self.use_input_norm:
-            x = self.input_norm(x)
+            if isinstance(self.input_norm, nn.InstanceNorm1d):
+                # x: (B, T, D) -> (B, D, T) for InstanceNorm1d
+                x = x.transpose(1, 2)
+                x = self.input_norm(x)
+                x = x.transpose(1, 2)
+            else:
+                x = self.input_norm(x)
             
         # TCN Encoder
         ctx = self.enc(x) # (B, C)
@@ -1322,6 +1520,41 @@ class AttentionTCN(TCN_MLP):
         return out
 
 # -------------------------------------------------------------------------------------------------
+# [NEW] TCN + GRU Head (Stateful Head for Recursive Experiments)
+# -------------------------------------------------------------------------------------------------
+class TCN_GRU_Head(TCN_MLP):
+    """TCN encoder + GRU head (replaces MLP head)."""
+    def __init__(self, *args, gru_hidden=32, **kwargs):
+        super().__init__(*args, **kwargs)
+        enc_out = self.enc.out_ch
+        self.gru = nn.GRU(enc_out, gru_hidden, batch_first=True)
+        self.head_out = nn.Linear(gru_hidden, self.horizon * self.output_dim)
+        # Remove MLP head layers (replaced by GRU)
+        self.head_base = nn.Identity()
+        self._gru_hidden = gru_hidden
+
+    def forward(self, x):
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+        if self.use_input_norm:
+            if isinstance(self.input_norm, nn.InstanceNorm1d):
+                x = x.transpose(1, 2)
+                x = self.input_norm(x)
+                x = x.transpose(1, 2)
+            else:
+                x = self.input_norm(x)
+        # Get full TCN sequence output (not just last step)
+        x_t = x.transpose(1, 2)  # (B, D, T)
+        enc_seq = self.enc.network(x_t)  # (B, C, T)
+        enc_seq = enc_seq.transpose(1, 2)  # (B, T, C)
+        gru_out, _ = self.gru(enc_seq)  # (B, T, gru_hidden)
+        ctx = gru_out[:, -1, :]  # Last step: (B, gru_hidden)
+        out = self.head_out(ctx)  # (B, H*out)
+        if self.horizon > 1:
+            out = out.view(-1, self.horizon, self.output_dim)
+        return out
+
+# -------------------------------------------------------------------------------------------------
 # Training Function (Accepts Config)
 # -------------------------------------------------------------------------------------------------
 
@@ -1404,6 +1637,14 @@ def train_experiment(
              
     if not model_cfg:
         model_cfg = config.get("model") or {}
+    
+    # [NEW] Merge overrides from shared.model (experiment YAMLs override shared.model
+    # but YAML anchors create separate copies in 02_train.model, so we must merge)
+    shared_model = config.get("shared", {}).get("model", {})
+    if shared_model:
+        for k, v in shared_model.items():
+            if k not in model_cfg or model_cfg[k] != v:
+                model_cfg[k] = v
 
     batch_size = loader_cfg.get("batch_size") or config.get("batch_size")
     val_batch_size = loader_cfg.get("val_batch_size") or config.get("val_batch_size") or batch_size
@@ -1428,6 +1669,7 @@ def train_experiment(
     model_norm_type = model_cfg.get("model_norm", None)
     tcn_norm = model_norm_type
     mlp_norm = model_norm_type
+    input_norm_type = model_cfg.get("input_norm_type", model_norm_type or "layer")
     
     # Model Architecture Params
     # Model Architecture Params
@@ -1443,7 +1685,8 @@ def train_experiment(
     eta_min = config.get("eta_min", 1e-5)
     
     # Loss
-    huber_delta = config.get("huber_delta", 0.5)
+    train_cfg_inner = config.get("02_train", {}).get("train", {})
+    huber_delta = float(train_cfg_inner.get("huber_delta") or config.get("huber_delta", 0.5))
     
     # Reproducibility
     torch.manual_seed(seed)
@@ -1456,6 +1699,13 @@ def train_experiment(
     train_cfg = config.get("02_train", {})
     data_cfg = train_cfg.get("data", {})
     if not data_cfg: data_cfg = config.get("data", {}) # Fallback to root data if legacy
+    
+    # [NEW] Merge overrides from shared.data (same anchor duplication issue as model)
+    shared_data = config.get("shared", {}).get("data", {})
+    if shared_data:
+        for k, v in shared_data.items():
+            if k not in data_cfg or data_cfg[k] != v:
+                data_cfg[k] = v
     
     print(f"[DEBUG-R] data_cfg keys: {list(data_cfg.keys())}")
     
@@ -1479,12 +1729,25 @@ def train_experiment(
     val_ds   = LazyWindowDataset(X_val,   Y_val,   window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=False)
     test_ds  = LazyWindowDataset(X_test,  Y_test,  window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=False)
     
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader   = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, num_workers=0)
-    test_loader  = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, num_workers=0)
+    if platform.system() == 'Linux':
+        num_workers = 0 # Revert to 0 to avoid Virtual Memory Overhead (15GB limit)
+    else:
+        num_workers = 0
+            
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader   = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers)
+    test_loader  = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers)
     
     # input_dim from first series
     input_dim = X_train[0].shape[1]
+    
+    # [NEW] AR Feedback: augment input with previous prediction channel
+    ar_cfg = model_cfg.get("ar_feedback", {})
+    ar_enable = ar_cfg.get("enable", False)
+    if ar_enable:
+        ar_k = ar_cfg.get("k", 1)
+        print(f"[INFO] AR Feedback enabled: +{ar_k} channel(s) to input")
+        input_dim += ar_k  # Extra channel for prev_pred
     
     if est_tick_ranges:
         horizon = len(est_tick_ranges)
@@ -1506,21 +1769,25 @@ def train_experiment(
         head_dropout=head_dropout,
         mlp_hidden=mlp_hidden,
         use_input_norm=use_input_norm,
+        input_norm_type=input_norm_type,
         tcn_norm=tcn_norm,
         mlp_norm=mlp_norm
     )
     
     if model_type == "StanceGatedTCN":
-        # Extract specific args
-        gating_dim = model_cfg.get("gating_dim", 1) # Not used?
+        gating_dim = model_cfg.get("gating_dim", 1)
         gating_signal = model_cfg.get("gating_signal", "contact")
-        # We pass extra args via kwargs if supported, or explicit
         model = StanceGatedTCN(**common_args, gating_dim=gating_dim)
         
     elif model_type == "AttentionTCN":
         attn_type = model_cfg.get("attention_type", "temporal")
         heads = model_cfg.get("attention_heads", 4)
         model = AttentionTCN(**common_args, attention_type=attn_type, attention_heads=heads)
+    
+    elif model_type == "TCN_GRU":
+        gru_h = model_cfg.get("gru_hidden", 32)
+        print(f"[INFO] TCN_GRU Head: hidden={gru_h}")
+        model = TCN_GRU_Head(**common_args, gru_hidden=gru_h)
         
     else:
         # Default TCN_MLP
@@ -1579,6 +1846,7 @@ def train_experiment(
         print(f"[Loss] Active Custom Losses: {list(custom_losses.keys())}")
 
     best_val = float("inf")
+    val_loss = float("inf")
     patience_cnt = 0
     
     # [FIX] Better Early Stopping Logic
@@ -1593,64 +1861,96 @@ def train_experiment(
         
         # Inner Loop: Batches
         # leave=False keeps the log clean by clearing completed epochs
+        # [NEW] AR Feedback: teacher forcing ratio for this epoch
+        tf_ratio = 1.0
+        if ar_enable:
+            sched = ar_cfg.get("teacher_forcing_schedule", {})
+            if sched:
+                tf_start = sched.get("start", 1.0)
+                tf_end = sched.get("end", 0.0)
+                tf_ratio = tf_start + (tf_end - tf_start) * (epoch - 1) / max(1, epochs - 1)
+            else:
+                tf_ratio = ar_cfg.get("teacher_forcing", 1.0)
+        
         pbar = tqdm(enumerate(train_loader, start=1), total=len(train_loader), desc=f"Epoch {epoch}", leave=False, file=sys.stdout)
         for bi, (xb, yb) in pbar:
             xb, yb = xb.to(device), yb.to(device)
+            
+            # [NEW] AR Feedback: append prev_pred channel
+            if ar_enable:
+                B, T_in, D = xb.shape
+                if random.random() < tf_ratio:
+                    # Teacher forcing: use ground truth (last output value = y at t-1)
+                    # Approximate: use the output LPF target value at the last input timestep
+                    prev_val = yb[:, 0:1, :] if yb.dim() == 3 else yb[:, :1].unsqueeze(1)
+                    prev_channel = prev_val.expand(B, T_in, 1)
+                else:
+                    prev_channel = torch.zeros(B, T_in, 1, device=device)
+                xb = torch.cat([xb, prev_channel], dim=-1)
+            
             optimizer.zero_grad(set_to_none=True)
-            pred = model(xb)
             
-            # [FIX] Robust Shape Alignment
-            # yb might be (B, 1, D) if horizon=1, pred is (B, D)
-            if pred.dim() == 2 and yb.dim() == 3 and yb.shape[1] == 1:
-                yb = yb.squeeze(1)
-            elif pred.dim() == 3 and yb.dim() == 2 and pred.shape[1] == 1:
-                pred = pred.squeeze(1)
-            
-            # Loss Calculation
-            if use_weighted_loss:
-                # Loss is (B, H, D) because reduction='none'
-                raw_loss = criterion(pred, yb)
-                # Apply weights
-                weighted_loss = raw_loss * loss_weights
-                loss = weighted_loss.mean()
-            else:
-                loss = criterion(pred, yb)
+            # [FIX] OOM Handling
+            try:
+                pred = model(xb)
                 
-            # Apply Custom Losses
-            if custom_losses:
-                for name, loss_item in custom_losses.items():
-                    fn = loss_item['fn']
-                    weight = loss_item['weight']
+                # [FIX] Robust Shape Alignment
+                # yb might be (B, 1, D) if horizon=1, pred is (B, D)
+                if pred.dim() == 2 and yb.dim() == 3 and yb.shape[1] == 1:
+                    yb = yb.squeeze(1)
+                elif pred.dim() == 3 and yb.dim() == 2 and pred.shape[1] == 1:
+                    pred = pred.squeeze(1)
+                
+                # Loss Calculation
+                if use_weighted_loss:
+                    # Loss is (B, H, D) because reduction='none'
+                    raw_loss = criterion(pred, yb)
+                    # Apply weights
+                    weighted_loss = raw_loss * loss_weights
+                    loss = weighted_loss.mean()
+                else:
+                    loss = criterion(pred, yb)
                     
-                    # Check signature needed
-                    # Smoothness needs 'pred'
-                    # Kinematic needs 'xb', 'pred'
-                    # Simple dispatch based on name or args?
-                    # Simplify: pass raw args, loss fn decides or we wrap?
-                    # Losses.py specific wrapper is cleaner, but for now:
-                    if name == 'smoothness':
-                        loss += weight * fn(pred)
-                    elif name == 'kinematic':
-                        loss += weight * fn(xb, pred)
-                    elif name == 'freq_penalty':
-                        # Freq loss needs (pred, target)
-                        loss += weight * fn(pred, yb)
-            
-            loss.backward()
-            optimizer.step()
+                # Apply Custom Losses
+                if custom_losses:
+                    for name, loss_item in custom_losses.items():
+                        fn = loss_item['fn']
+                        weight = loss_item['weight']
+                        
+                        if name == 'smoothness':
+                            loss += weight * fn(pred)
+                        elif name == 'kinematic':
+                            loss += weight * fn(xb, pred)
+                        elif name == 'freq_penalty':
+                            loss += weight * fn(pred, yb)
+                
+                loss.backward()
+                optimizer.step()
+                
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    raise RuntimeError(
+                        f"Memory Insufficient (OOM): Batch size {batch_size} is too large. "
+                        "Please reduce batch_size in config."
+                    ) from e
+                raise e
             running += loss.item()
             n_batches += 1
             
             # Update pbar description with current loss
             avg = running / max(1, n_batches)
-            pbar.set_postfix({'loss': f'{avg:.4f}'})
+            pbar.set_postfix({
+                'loss': f'{avg:.4f}',
+                'val': f'{val_loss:.4f}' if val_loss != float('inf') else 'N/A'
+            })
         
         train_loss = running / max(1, n_batches)
         
         model.eval()
         val_running = 0.0
+        val_pbar = tqdm(val_loader, desc=f"  [VAL]", leave=False, file=sys.stdout)
         with torch.no_grad():
-            for xb, yb in val_loader:
+            for xb, yb in val_pbar:
                 xb, yb = xb.to(device), yb.to(device)
                 pred = model(xb)
                 
@@ -1662,6 +1962,7 @@ def train_experiment(
                     loss = criterion(pred, yb)
                     
                 val_running += loss.item()
+                val_pbar.set_postfix({'v_loss': f'{val_running/max(1, len(val_loader)):.4f}'})
         val_loss = val_running / max(1, len(val_loader))
         
         if scheduler:
@@ -1703,6 +2004,11 @@ def train_experiment(
             if patience_cnt >= patience:
                 print("  --> Early Stopping (No improvement)")
                 break
+        
+        # [NEW] Memory Cleanup after Epoch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         
         # [NEW] Train Loss Target Stop (Prevent Overfitting)
         if train_loss_target > 0 and train_loss < train_loss_target:
@@ -1762,6 +2068,22 @@ def train_experiment(
     input_window = config.get("time_window_input", 100) # Fixed: X_train is list
     res_metrics = calculate_model_resources(model, input_dim, input_window, device)
     
+    # [NEW] Multi-Step per-horizon metrics
+    multistep_detail = {}
+    if est_tick_ranges and len(est_tick_ranges) > 1 and P.ndim == 3:
+        for h_idx, h_val in enumerate(est_tick_ranges):
+            h_pred = P[:, h_idx, :]
+            h_true = T[:, h_idx, :]
+            h_err = h_pred - h_true
+            multistep_detail[f"H{h_val}_mae"] = float(np.mean(np.abs(h_err)))
+            multistep_detail[f"H{h_val}_rmse"] = float(np.sqrt(np.mean(h_err**2)))
+        # Override primary metrics with t+5 index for baseline compatibility
+        if 5 in est_tick_ranges:
+            idx5 = est_tick_ranges.index(5)
+            h5_err = P[:, idx5, :] - T[:, idx5, :]
+            test_mae = float(np.mean(np.abs(h5_err)))
+            test_rmse = float(np.sqrt(np.mean(h5_err**2)))
+    
     # Metrics Dictionary
     metrics_result = {
         "test_huber": test_loss,
@@ -1778,6 +2100,10 @@ def train_experiment(
         "config": config
     }
     
+    # Nest multi-step detail inside metrics (safe extension)
+    if multistep_detail:
+        metrics_result["multistep_detail"] = multistep_detail
+    
     logger.save_metrics(metrics_result)
     
     # Save Confusion Matrix if needed (but this is regression)
@@ -1787,6 +2113,338 @@ def train_experiment(
     return metrics_result, ckpt_path
 
 
+
+# -------------------------------------------------------------------------------------------------
+# Distribution Analysis (User Request)
+# -------------------------------------------------------------------------------------------------
+
+
+# -------------------------------------------------------------------------------------------------
+# H5 Inspection Tool (Integrated)
+# -------------------------------------------------------------------------------------------------
+def inspect_h5_structure(file_path):
+    if not os.path.exists(file_path):
+        print(f"[ERROR] File not found: {file_path}")
+        return
+
+    print(f"\n[INFO] Inspecting file: {file_path}")
+    with h5py.File(file_path, 'r') as f:
+        subjects = list(f.keys())
+        if not subjects:
+            print("  No subjects found.")
+            return
+        
+        # Take the first subject
+        sub_key = subjects[0]
+        sub_group = f[sub_key]
+        print(f"  Subject: {sub_key}")
+        
+        conditions = list(sub_group.keys())
+        if not conditions:
+            print("    No conditions found.")
+            return
+            
+        cond_key = conditions[0]
+        cond_item = sub_group[cond_key]
+        print(f"    Condition: {cond_key} (Type: {type(cond_item)})")
+        
+        if not isinstance(cond_item, h5py.Group):
+            print(f"    Item {cond_key} is not a group.")
+            return
+
+        levels = list(cond_item.keys())
+        if not levels:
+            print("      No levels found.")
+            return
+            
+        lv_key = levels[0]
+        lv_item = cond_item[lv_key]
+        print(f"      Level: {lv_key} (Type: {type(lv_item)})")
+        
+        if not isinstance(lv_item, h5py.Group):
+            print(f"      Item {lv_key} is not a group.")
+            return
+            
+        trials = list(lv_item.keys())
+        if not trials:
+            print("        No trials found.")
+            return
+            
+        trial_key = trials[0]
+        trial_group = lv_item[trial_key]
+        print(f"        Trial: {trial_key}")
+        
+        def print_tree(name, obj):
+            if isinstance(obj, h5py.Group):
+                print("  " * (name.count('/') + 4) + f"Group: {name.split('/')[-1]}")
+            else:
+                print("  " * (name.count('/') + 4) + f"Dataset: {name.split('/')[-1]} (shape: {obj.shape})")
+
+        print("        [Sample Trial Structure]")
+        trial_group.visititems(print_tree)
+
+# -------------------------------------------------------------------------------------------------
+# Distribution Analysis (User Request)
+# -------------------------------------------------------------------------------------------------
+
+def load_all_subject_data(config):
+    """
+    Load data for ALL subjects across ALL data sources defined in config.
+    Returns a dictionary: { subject_name: { feature_name: data_array } }
+    """
+    # ... (rest of the function remains same, just inserting above) ...
+    data_sources = {}
+    if 'shared' in config and 'data_sources' in config['shared']:
+        for ds_name, ds_config in config['shared']['data_sources'].items():
+            prefix = ds_config.get('prefix', '')
+            path = ds_config.get('path', '')
+            exclude = ds_config.get('exclude_subjects', [])
+            if path:
+                 data_sources[prefix] = {'path': path, 'exclude_subjects': exclude}
+    
+    if not data_sources:
+        data_path = config.get('data_path', './combined_data.h5')
+        data_sources = {'': {'path': data_path, 'exclude_subjects': []}}
+
+    # ...
+
+    input_vars = []
+    if 'shared' in config and 'input_vars' in config['shared']:
+        input_vars = config['shared']['input_vars']
+    elif '01_construction' in config and 'inputs' in config['01_construction']:
+        input_vars = config['01_construction']['inputs']
+    
+    # Also include output vars for check? (Optional, user asked for inputs)
+    # output_vars = config['shared']['output_vars']
+    
+    # Parse input vars into a list of (group, var) tuples for easier checking
+    # But wait, we need to handle _dot and _ddot logic. 
+    # Let's map: group -> list of var_names
+    target_map = {}
+    for grp, vars in input_vars:
+        if grp not in target_map: target_map[grp] = []
+        target_map[grp].extend(vars)
+        
+    all_data = {} 
+    
+    total_feats = sum(len(v) for v in target_map.values())
+    print(f"[DIST-ANALYSIS] Loading data from {len(data_sources)} sources for {total_feats} features across {len(target_map)} groups...")
+    
+    for prefix, src_cfg in data_sources.items():
+        h5_path = src_cfg.get('path')
+        exclude_subs = src_cfg.get('exclude_subjects', [])
+        
+        if not os.path.exists(h5_path):
+            print(f"[WARN] Data file not found: {h5_path}")
+            continue
+            
+        with h5py.File(h5_path, 'r') as f:
+            for sub_key in f.keys():
+                if sub_key in exclude_subs: continue
+                
+                full_sub_name = f"{prefix}{sub_key}"
+                
+                conditions = [k for k in f[sub_key].keys() if isinstance(f[sub_key][k], h5py.Group)]
+                sub_feat_data = {} # key: "group/var" -> list of arrays
+                
+                for cond in conditions:
+                    if cond in ['subject_info', 'derived']: continue
+                    cond_group = f[sub_key][cond]
+                    
+                    # Iterate Levels
+                    for lv_name in cond_group.keys():
+                        lv_group = cond_group[lv_name]
+                        if not isinstance(lv_group, h5py.Group): continue
+                        
+                        # Iterate Trials
+                        for trial_name in lv_group.keys():
+                            trial_group = lv_group[trial_name]
+                            if not isinstance(trial_group, h5py.Group): continue
+                            
+                            for grp_name, target_vars in target_map.items():
+                                # Navigate to group inside trial
+                                curr = trial_group
+                                for p in grp_name.split('/'):
+                                    if p in curr: curr = curr[p]
+                                    else: curr = None; break
+                                    
+                                if curr:
+                                    data_grp = curr
+                                    
+                                    # [NEW] Load Treadmill Acceleration for Analysis
+                                    a_belt_analysis = 0.0
+                                    v_belt_a = get_data_from_group(trial_group, "treadmill/left/speed_leftbelt")
+                                    if v_belt_a is not None:
+                                        a_belt_analysis = np.gradient(v_belt_a.flatten(), axis=0) * 100
+                                    
+                                    for feat in target_vars:
+                                        val = None
+                                        
+                                        # 1. Direct Load
+                                        if feat in data_grp:
+                                            val = data_grp[feat][:]
+                                        
+                                        # [NEW] Fallback for Milestone 1: hip_angle -> motor_angle
+                                        elif 'hip_angle' in feat:
+                                            alt_name = feat.replace('hip_angle', 'motor_angle')
+                                            if alt_name in data_grp:
+                                                val = data_grp[alt_name][:]
+                                            
+                                        # 2. Advanced IMU Features
+                                        elif grp_name == "robot/back_imu" and feat in ["roll", "pitch", "yaw", "vel_forward"]:
+                                            try:
+                                                raw_ax = data_grp['accel_x'][:]
+                                                raw_ay = data_grp['accel_y'][:]
+                                                raw_az = data_grp['accel_z'][:]
+                                                raw_gx = data_grp['gyro_x'][:]
+                                                raw_gy = data_grp['gyro_y'][:]
+                                                raw_gz = data_grp['gyro_z'][:]
+                                                if full_sub_name.startswith("m1_"): raw_ax = -raw_ax
+                                                elif full_sub_name.startswith("m2_"): raw_az = -raw_az
+                                                n = len(raw_ax); dt = 0.01; alpha = 0.98
+                                                rs, ps, ys = np.zeros(n), np.zeros(n), np.zeros(n)
+                                                cr, cp, cy = 0.0, 0.0, 0.0
+                                                for i in range(n):
+                                                    ra = np.arctan2(raw_ay[i], raw_az[i])
+                                                    pa = np.arctan2(-raw_ax[i], np.sqrt(raw_ay[i]**2+raw_az[i]**2))
+                                                    cr = alpha*(cr+raw_gx[i]*dt)+(1-alpha)*ra
+                                                    cp = alpha*(cp+raw_gy[i]*dt)+(1-alpha)*pa
+                                                    cy += raw_gz[i] * dt
+                                                    rs[i], ps[i], ys[i] = cr, cp, cy
+                                                
+                                                if feat == "vel_forward":
+                                                    alin = raw_ax + 9.81 * np.sin(ps)
+                                                    if isinstance(a_belt_analysis, np.ndarray) and len(a_belt_analysis) == n:
+                                                        alin = alin + a_belt_analysis
+                                                    val = butter_highpass_filter(np.cumsum(alin)*dt, 0.1, 100, 2)
+                                                elif feat == "roll": val = rs
+                                                elif feat == "pitch": val = ps
+                                                elif feat == "yaw": val = ys
+                                            except: val = None
+
+                                        # 3. Derived (_dot / _ddot)
+                                        if val is None and (feat.endswith('_dot') or feat.endswith('_ddot')):
+                                            if feat.endswith('_ddot'):
+                                                base = feat[:-5]
+                                                is_accel = True
+                                            else:
+                                                base = feat[:-4]
+                                                is_accel = False
+                                            
+                                            if base in data_grp:
+                                                base_val = data_grp[base][:]
+                                                # 1st deriv
+                                                val = np.gradient(base_val, axis=0) * 100 # fs=100 assume
+                                                if feat.endswith('_ddot'):
+                                                    val = np.gradient(val, axis=0) * 100
+                                                    
+                                        # -------------------------------------------------------------------------
+                                        # [FIX] Apply Data Correction (Sign Flipping & GRF Norm) to Analysis Data
+                                        # To ensure distribution analysis matches training preprocessing.
+                                        # -------------------------------------------------------------------------
+                                        if val is not None:
+                                            # 1. Sign Flipping
+                                            if full_sub_name.startswith("m1_"):
+                                                if "forceplate/grf" in grp_name and feat == "x": val = -val
+                                                elif "knee_angle_l" in feat or "knee_angle_r" in feat: val = -val
+                                            elif full_sub_name.startswith("m2_"):
+                                                if "forceplate/grf" in grp_name and feat == "z": val = -val
+
+                                            # 2. GRF Normalization (Divide by Body Weight)
+                                            if "forceplate" in grp_name.lower() and "grf" in grp_name.lower():
+                                                mass = 70.0 # Default
+                                                if sub_key in f and "mass" in f[sub_key].attrs:
+                                                    mass = f[sub_key].attrs["mass"]
+                                                bw = mass * 9.81
+                                                val = val / bw
+
+                                        if val is not None:
+                                            full_key = f"{grp_name}/{feat}"
+                                            if full_key not in sub_feat_data: sub_feat_data[full_key] = []
+                                            sub_feat_data[full_key].append(val)
+                
+                # Concatenate
+                if sub_feat_data:
+                    all_data[full_sub_name] = {}
+                    for key, val_list in sub_feat_data.items():
+                        if val_list:
+                            all_data[full_sub_name][key] = np.concatenate(val_list)
+
+    return all_data
+
+def analyze_data_distribution(config, output_dir):
+    print("\n" + "="*60)
+    print("  Running Data Distribution Analysis (Outlier Detection)")
+    print("="*60)
+    
+    all_data = load_all_subject_data(config)
+    if not all_data:
+        print("[WARN] No data loaded for distribution analysis.")
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+    features = sorted(list(set(k for sub_data in all_data.values() for k in sub_data.keys())))
+    stats_summary = []
+    
+    for feature in features:
+        plot_data = []
+        for sub, data in all_data.items():
+            if feature in data:
+                vals = data[feature]
+                # Downsample for plotting
+                if len(vals) > 5000:
+                    vals_plot = np.random.choice(vals, 5000, replace=False)
+                else:
+                    vals_plot = vals
+                
+                for v in vals_plot:
+                    plot_data.append({'Subject': sub, 'Value': v})
+                
+                stats_summary.append({
+                    'Feature': feature, 'Subject': sub,
+                    'Mean': np.mean(vals), 'Std': np.std(vals)
+                })
+        
+        if not plot_data: continue
+            
+        df_feat = pd.DataFrame(plot_data)
+        
+        # Violin Plot
+        plt.figure(figsize=(12, 6))
+        sns.violinplot(data=df_feat, x='Subject', y='Value', hue='Subject', legend=False)
+        plt.xticks(rotation=45, ha='right')
+        plt.title(f'Distribution: {feature}')
+        plt.tight_layout()
+        safe_fname = feature.replace('/', '_')
+        plt.savefig(os.path.join(output_dir, f'dist_violin_{safe_fname}.png'))
+        plt.close()
+
+    # Save Stats & Check Outliers
+    df_stats = pd.DataFrame(stats_summary)
+    df_stats.to_csv(os.path.join(output_dir, 'subject_stats.csv'), index=False)
+    
+    print(f"[INFO] Distribution plots saved to {output_dir}")
+    print("[INFO] Checking for outliers (Mean Shift > 2-Sigma)...")
+    
+    for feature in features:
+        feat_stats = df_stats[df_stats['Feature'] == feature]
+        overall_mean = feat_stats['Mean'].mean()
+        overall_std = feat_stats['Mean'].std()
+        
+        threshold = 2 * overall_std
+        outliers = feat_stats[np.abs(feat_stats['Mean'] - overall_mean) > threshold]
+        
+        if not outliers.empty:
+            print(f"  [ALARM] {feature}: Detect {len(outliers)} outliers")
+            for _, row in outliers.iterrows():
+                z = (row['Mean'] - overall_mean) / (overall_std + 1e-9)
+                print(f"    - {row['Subject']}: Z={z:.2f} (Mean={row['Mean']:.4f})")
+                
+    # [MEMORY] Explicit Cleanup
+    del all_data
+    del df_stats
+    gc.collect()
+    print("="*60 + "\n")
 
 # -------------------------------------------------------------------------------------------------
 # Main Execution
@@ -1799,7 +2457,13 @@ if __name__ == "__main__":
     parser.add_argument("--rank", type=int, default=0, help="Rank of the current process")
     parser.add_argument("--total_nodes", type=int, default=1, help="Total number of nodes/GPUs")
     parser.add_argument("--config", type=str, default=None, help="Specific config file to run")
+    parser.add_argument("--inspect", type=str, default=None, help="Path to H5 file to inspect structure")
     args = parser.parse_args()
+
+    # [NEW] Inspect Mode
+    if args.inspect:
+        inspect_h5_structure(args.inspect)
+        sys.exit(0)
 
     # Load Configs
     config_dir = Path("configs")
@@ -1813,11 +2477,11 @@ if __name__ == "__main__":
     # 1.5 Load BASE CONFIG if 'base_config.yaml' exists and merge
     # (Typically base_config is default, args.config overrides it)
     # Check if 'exp_name' is missing, implying it might be a partial config
-    base_config_path_str = "configs/base_config.yaml"
+    base_config_path_str = "configs/baseline.yaml"
     base_config = {} # Initialize an empty base_config
     
     # Check if base_config.yaml exists and if the current config is not base_config itself
-    if os.path.exists(base_config_path_str) and (args.config is None or Path(args.config).name != "base_config.yaml"):
+    if os.path.exists(base_config_path_str) and (args.config is None or Path(args.config).name != "baseline.yaml"):
         print(f"Loading base config from {base_config_path_str}...")
         with open(base_config_path_str, 'r') as bf:
             base_config = yaml.safe_load(bf)
@@ -1842,9 +2506,17 @@ if __name__ == "__main__":
             with open(yf, 'r') as f:
                 cfg = yaml.safe_load(f)
                 
-            # Merge with defaults
-            merged = base_config.copy()
-            merged.update(cfg)
+            # Merge with defaults (RECURSIVELY)
+            def recursive_update(target, update):
+                for k, v in update.items():
+                    if isinstance(v, dict) and k in target and isinstance(target[k], dict):
+                        recursive_update(target[k], v)
+                    else:
+                        target[k] = v
+            
+            merged = copy.deepcopy(base_config)
+            recursive_update(merged, cfg)
+
             
             # Fix: Do not inherit exp_name from base_config blindly.
             # If cfg doesn't have it, use filename.
@@ -1861,11 +2533,25 @@ if __name__ == "__main__":
     experiments_to_run = [e for i, e in enumerate(experiments_to_run) if i % args.total_nodes == args.rank]
     
     print(f"\n[PARALLEL] Rank {args.rank}/{args.total_nodes} - Process {len(experiments_to_run)}/{total_exps} experiments.")
+    
+    # [USER REQUEST] Run Distribution Analysis at the very beginning
+    # Use the first valid config (or base_config) to find data sources
+    if args.rank == 0:
+        analysis_config = base_config
+        if not analysis_config and experiments_to_run:
+            analysis_config = experiments_to_run[0][1]
+            
+        if analysis_config:
+            # We assume output dir based on first config or generic
+            dist_output_dir = "compare_result/distribution_analysis"
+            analyze_data_distribution(analysis_config, dist_output_dir)
             
     # Remove Global Dataset Load - Move to Experiment Loop
     # We need to rebuild dataset for EACH experiment because input_vars/output_vars might change!
     
-    live_plotter = LiveTrainingPlotter()
+    # [FIX] Disable Live Plotter in Headless/Cluster Env to save memory/avoid backend issues
+    # live_plotter = LiveTrainingPlotter()
+    live_plotter = None
     
     results = [] # Reset results list
     seeds = [42]
@@ -1876,7 +2562,7 @@ if __name__ == "__main__":
         for sd in seeds:
             full_name = f"{exp_name}_seed{sd}"
             print(f"\n>>> Start Experiment: {full_name}")
-            live_plotter.start_session(exp_name, sd)
+            # live_plotter.start_session(exp_name, sd)
             
             # Directory Setup
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1887,296 +2573,253 @@ if __name__ == "__main__":
             # But we moved global vars to base_config, so cfg SHOULD have them.
             
             
-    # [FIX] Handle Nested Config Mapping (New Format -> Root Keys for compatibility)
-    if '01_construction' in cfg:
-        # Data Path
-        if 'data_path' not in cfg:
-            cfg['data_path'] = cfg['01_construction'].get('src_h5') or cfg['shared'].get('src_h5')
-            
-        # Subjects & Conditions
-        if 'subjects' not in cfg:
-            cfg['subjects'] = cfg['01_construction'].get('include_subjects', [])
-            
-        if 'conditions' not in cfg:
-            cfg['conditions'] = cfg['01_construction'].get('include_conditions', [])
-            
-    # CV Mode Default
-    if 'cv_mode' not in cfg:
-        # Check 02_train
-        if '02_train' in cfg:
-            cfg['cv_mode'] = cfg['02_train'].get('split', {}).get('mode', 'loso')
-        else:
-            cfg['cv_mode'] = 'loso'
+            # [FIX] Handle Nested Config Mapping (New Format -> Root Keys for compatibility)
+            if '01_construction' in cfg:
+                # Data Path
+                if 'data_path' not in cfg:
+                    cfg['data_path'] = cfg['01_construction'].get('src_h5') or cfg['shared'].get('src_h5')
+                    
+                # Subjects & Conditions
+                if 'subjects' not in cfg:
+                    cfg['subjects'] = cfg['01_construction'].get('include_subjects', [])
+                    
+                if 'conditions' not in cfg:
+                    cfg['conditions'] = cfg['01_construction'].get('include_conditions', [])
+                    
+            # CV Mode Default
+            if 'cv_mode' not in cfg:
+                # Check 02_train
+                if '02_train' in cfg:
+                    cfg['cv_mode'] = cfg['02_train'].get('split', {}).get('mode', 'loso')
+                else:
+                    cfg['cv_mode'] = 'loso'
 
-    # Retrieve data_path safely
-    # [FIX] Handle Nested Config Mapping (Pre-computation)
-    if 'data_path' not in cfg:
-        src = None
-        if '01_construction' in cfg: src = cfg['01_construction'].get('src_h5')
-        if not src and 'shared' in cfg: src = cfg['shared'].get('src_h5')
-        if not src: src = "./combined_data.h5" # Default fallback
-        cfg['data_path'] = src
+            # Retrieve data_path safely
+            # [FIX] Handle Nested Config Mapping (Pre-computation)
+            if 'data_path' not in cfg:
+                src = None
+                if '01_construction' in cfg: src = cfg['01_construction'].get('src_h5')
+                if not src and 'shared' in cfg: src = cfg['shared'].get('src_h5')
+                if not src: src = "./combined_data.h5" # Default fallback
+                cfg['data_path'] = src
 
-    if '01_construction' in cfg:
-        # Subjects & Conditions
-        if 'subjects' not in cfg:
-            cfg['subjects'] = cfg['01_construction'].get('include_subjects', [])
-        if 'conditions' not in cfg:
-            cfg['conditions'] = cfg['01_construction'].get('include_conditions', [])
-            
-    if 'subjects' not in cfg: cfg['subjects'] = [] # Or handle dynamic loading
-    if 'conditions' not in cfg: cfg['conditions'] = []
-            
-    if 'cv_mode' not in cfg and '02_train' in cfg:
-        cfg['cv_mode'] = cfg['02_train'].get('split', {}).get('mode', 'loso')
-    elif 'cv_mode' not in cfg:
-        cfg['cv_mode'] = 'loso'
+            if '01_construction' in cfg:
+                # Subjects & Conditions
+                if 'subjects' not in cfg:
+                    cfg['subjects'] = cfg['01_construction'].get('include_subjects', [])
+                if 'conditions' not in cfg:
+                    cfg['conditions'] = cfg['01_construction'].get('include_conditions', [])
+                    
+            if 'subjects' not in cfg: cfg['subjects'] = [] # Or handle dynamic loading
+            if 'conditions' not in cfg: cfg['conditions'] = []
+                    
+            if 'cv_mode' not in cfg and '02_train' in cfg:
+                cfg['cv_mode'] = cfg['02_train'].get('split', {}).get('mode', 'loso')
+            elif 'cv_mode' not in cfg:
+                cfg['cv_mode'] = 'loso'
 
-    # Retrieve data_path safely
-    current_data_path = cfg.get("data_path")
-    if not current_data_path and base_config:
-        current_data_path = base_config.get("data_path")
-        
-    if not current_data_path:
-        raise ValueError("data_path not found in config or base_config")
-        
-    print(f"Data Path: {current_data_path}")
-    
-    curr_input_vars = cfg.get("input_vars") or (base_config.get("input_vars") if base_config else None)
-    curr_output_vars = cfg.get("output_vars") or (base_config.get("output_vars") if base_config else None)
-    
-    # [FIX] Fallback to shared section
-    if not curr_input_vars and 'shared' in cfg:
-        curr_input_vars = cfg['shared'].get('input_vars')
-    if not curr_output_vars and 'shared' in cfg:
-        curr_output_vars = cfg['shared'].get('output_vars')
-    
-    # [FIX] Ensure subjects and conditions are populated from shared
-    if not cfg.get('subjects') and 'shared' in cfg:
-        cfg['subjects'] = cfg['shared'].get('subjects', [])
-    if not cfg.get('conditions') and 'shared' in cfg:
-        cfg['conditions'] = cfg['shared'].get('conditions', [])
+            # Retrieve data_path safely
+            current_data_path = cfg.get("data_path")
+            if not current_data_path and base_config:
+                current_data_path = base_config.get("data_path")
+                
+            if not current_data_path:
+                raise ValueError("data_path not found in config or base_config")
+                
+            # print(f"Data Path: {current_data_path}")
+            
+            curr_input_vars = cfg.get("input_vars") or (base_config.get("input_vars") if base_config else None)
+            curr_output_vars = cfg.get("output_vars") or (base_config.get("output_vars") if base_config else None)
+            
+            # [FIX] Fallback to shared section
+            if not curr_input_vars and 'shared' in cfg:
+                curr_input_vars = cfg['shared'].get('input_vars')
+            if not curr_output_vars and 'shared' in cfg:
+                curr_output_vars = cfg['shared'].get('output_vars')
+            
+            # [FIX] Ensure subjects and conditions are populated from shared
+            if not cfg.get('subjects') and 'shared' in cfg:
+                cfg['subjects'] = cfg['shared'].get('subjects', [])
+            if not cfg.get('conditions') and 'shared' in cfg:
+                cfg['conditions'] = cfg['shared'].get('conditions', [])
 
-    # Subj / Window
-    curr_window = cfg.get("time_window_input") or (base_config.get("time_window_input") if base_config else None)
-    if not curr_window and 'shared' in cfg and 'data' in cfg['shared']:
-        curr_window = cfg['shared']['data'].get('window_size')
-        
-    curr_est_tick_ranges = cfg.get("est_tick_ranges") or (base_config.get("est_tick_ranges") if base_config else None)
-    if not curr_est_tick_ranges and 'shared' in cfg and 'data' in cfg['shared']:
-        val = cfg['shared']['data'].get('y_delay', 5) # Default 5 if missing?
-        curr_est_tick_ranges = [val] if isinstance(val, int) else val
-        
-    # [FIX] Inject back into cfg so train_experiment sees it
-    if curr_est_tick_ranges:
-        cfg["est_tick_ranges"] = curr_est_tick_ranges
-    # If missing in root, check 01_construction
-    if not curr_input_vars and '01_construction' in cfg:
-        curr_input_vars = cfg['01_construction'].get('inputs')
-    if not curr_output_vars and '01_construction' in cfg:
-        curr_output_vars = cfg['01_construction'].get('outputs')
+            # Subj / Window
+            curr_window = cfg.get("time_window_input") or (base_config.get("time_window_input") if base_config else None)
+            if not curr_window and 'shared' in cfg and 'data' in cfg['shared']:
+                curr_window = cfg['shared']['data'].get('window_size')
+                
+            curr_est_tick_ranges = cfg.get("est_tick_ranges") or (base_config.get("est_tick_ranges") if base_config else None)
+            if not curr_est_tick_ranges and 'shared' in cfg and 'data' in cfg['shared']:
+                val = cfg['shared']['data'].get('y_delay', 5) # Default 5 if missing?
+                curr_est_tick_ranges = [val] if isinstance(val, int) else val
+                
+            # [FIX] Inject back into cfg so train_experiment sees it
+            if curr_est_tick_ranges:
+                cfg["est_tick_ranges"] = curr_est_tick_ranges
+            # If missing in root, check 01_construction
+            if not curr_input_vars and '01_construction' in cfg:
+                curr_input_vars = cfg['01_construction'].get('inputs')
+            if not curr_output_vars and '01_construction' in cfg:
+                curr_output_vars = cfg['01_construction'].get('outputs')
+                    
+            # LPF
+            curr_lpf_cutoff = cfg.get("lpf_cutoff")
+            if curr_lpf_cutoff is None and '01_construction' in cfg:
+                curr_lpf_cutoff = cfg['01_construction'].get('lpf_cutoff')
+            if curr_lpf_cutoff is None:
+                curr_lpf_cutoff = base_config.get("lpf_cutoff", 0.5) if base_config else 0.5
+                
+            curr_lpf_order = cfg.get("lpf_order")
+            if curr_lpf_order is None and '01_construction' in cfg:
+                curr_lpf_order = cfg['01_construction'].get('lpf_order')
+            if curr_lpf_order is None:
+                curr_lpf_order = base_config.get("lpf_order", 5) if base_config else 5
             
-    # LPF
-    # LPF
-    curr_lpf_cutoff = cfg.get("lpf_cutoff")
-    if curr_lpf_cutoff is None and '01_construction' in cfg:
-        curr_lpf_cutoff = cfg['01_construction'].get('lpf_cutoff')
-    if curr_lpf_cutoff is None:
-        curr_lpf_cutoff = base_config.get("lpf_cutoff", 0.5) if base_config else 0.5
-        
-    curr_lpf_order = cfg.get("lpf_order")
-    if curr_lpf_order is None and '01_construction' in cfg:
-        curr_lpf_order = cfg['01_construction'].get('lpf_order')
-    if curr_lpf_order is None:
-        curr_lpf_order = base_config.get("lpf_order", 5) if base_config else 5
+            # [NEW] Input LPF
+            curr_input_lpf_cutoff = cfg.get("input_lpf_cutoff_hz")
+            if curr_input_lpf_cutoff is None and 'shared' in cfg:
+                curr_input_lpf_cutoff = cfg['shared'].get('input_lpf_cutoff_hz')
+            if curr_input_lpf_cutoff is None and '02_train' in cfg and 'data' in cfg['02_train']:
+                curr_input_lpf_cutoff = cfg['02_train']['data'].get('input_lpf_cutoff_hz')
             
-    # Dataset Universe (Full list of subs/conds available to read)
-    curr_sub_names = cfg.get("subjects") or (base_config.get("subjects") if base_config else None)
-    curr_cond_names = cfg.get("conditions") or (base_config.get("conditions") if base_config else None)
+            curr_input_lpf_order = cfg.get("input_lpf_order", 4)
+            if 'shared' in cfg and cfg['shared'].get('input_lpf_order'):
+                curr_input_lpf_order = cfg['shared'].get('input_lpf_order')
+            elif '02_train' in cfg and 'data' in cfg['02_train'] and cfg['02_train']['data'].get('input_lpf_order'):
+                curr_input_lpf_order = cfg['02_train']['data'].get('input_lpf_order')
+                    
+            # Dataset Universe (Full list of subs/conds available to read)
+            curr_sub_names = cfg.get("subjects") or (base_config.get("subjects") if base_config else None)
+            curr_cond_names = cfg.get("conditions") or (base_config.get("conditions") if base_config else None)
+                    
+            # --- TCN Dynamic Config ---
+            if "tcn_channels" in cfg:
+                curr_tcn_channels = cfg["tcn_channels"]
+            elif "02_train" in cfg and cfg["02_train"].get("model") and "channels" in cfg["02_train"]["model"]:
+                curr_tcn_channels = cfg["02_train"]["model"]["channels"]
+            elif "02_train" in cfg and "data" in cfg["02_train"] and "channels" in cfg["02_train"]["data"]:
+                 curr_tcn_channels = cfg["02_train"]["data"]["channels"]
+            elif "shared" in cfg and cfg["shared"].get("model") and "channels" in cfg["shared"]["model"]:
+                curr_tcn_channels = cfg["shared"]["model"]["channels"]
+            else:
+                n_layers = cfg.get("tcn_layers", base_config.get("tcn_layers", 3) if base_config else 3)
+                n_hidden = cfg.get("tcn_hidden", base_config.get("tcn_hidden", 64) if base_config else 64)
+                curr_tcn_channels = [n_hidden] * n_layers
             
-    # --- TCN Dynamic Config ---
-    # Construct channels list from layers/hidden
-    if "tcn_channels" in cfg:
-        curr_tcn_channels = cfg["tcn_channels"]
-    # [FIX] Check for nested model config in 02_train or shared
-    # [FIX] Check for nested model config in 02_train or shared
-    elif "02_train" in cfg and cfg["02_train"].get("model") and "channels" in cfg["02_train"]["model"]:
-        curr_tcn_channels = cfg["02_train"]["model"]["channels"]
-    # [NEW] Check if it's in 02_train['data'] (Anchor case)
-    elif "02_train" in cfg and "data" in cfg["02_train"] and "channels" in cfg["02_train"]["data"]:
-         curr_tcn_channels = cfg["02_train"]["data"]["channels"]
-    elif "shared" in cfg and cfg["shared"].get("model") and "channels" in cfg["shared"]["model"]:
-        curr_tcn_channels = cfg["shared"]["model"]["channels"]
-    else:
-        n_layers = cfg.get("tcn_layers", base_config.get("tcn_layers", 3) if base_config else 3)
-        n_hidden = cfg.get("tcn_hidden", base_config.get("tcn_hidden", 64) if base_config else 64)
-        curr_tcn_channels = [n_hidden] * n_layers
-    
-    # Inject into config for model init
-    cfg["tcn_channels"] = curr_tcn_channels
-    print(f"[INFO] Configured TCN: layers={len(curr_tcn_channels)}, hidden={curr_tcn_channels[0]}")
-    
-    # --- CV Logic: Forced LOSO ---
-    cv_mode = cfg.get('cv_mode', 'loso')
-    if cv_mode != "loso":
-        print(f"[WARN] cv_mode='{cv_mode}' detected, but this script now enforces 'loso'. Proceeding with LOSO.")
+            cfg["tcn_channels"] = curr_tcn_channels
+            
+            # CV Logic: Forced LOSO
+            sub_runs = []
+            all_subs = sorted(list(set(curr_sub_names))) if curr_sub_names else []
+            loso_filter = cfg.get("03_eval", {}).get("split", {}).get("loso_subjects")
+            if not loso_filter: loso_filter = cfg.get("loso_subjects")
+                
+            for i in range(len(all_subs)):
+                test_sub = all_subs[i]
+                if loso_filter and test_sub not in loso_filter: continue
+                val_sub = all_subs[i-1] 
+                train_subs = [s for s in all_subs if s != test_sub and s != val_sub]
+                sub_runs.append({
+                    "name": f"{exp_name}_Test-{test_sub}",
+                    "train": train_subs, "val": [val_sub], "test": [test_sub]
+                })
 
+            c_in_vars = parse_vars(curr_input_vars)
+            c_out_vars = parse_vars(curr_output_vars)
+            
+            print(f"\n[INFO] Starting Cross-Validation Loops: {len(sub_runs)} folds (Config: {exp_name})")
+            
+            for run_meta in sub_runs:
+                final_exp_name = run_meta["name"]
+                full_name_seed = f"{final_exp_name}_seed{sd}"
+                print(f"\n>>> Start Experiment: {full_name_seed}")
+                
+                # Load Datasets
+                data_cfg_now = cfg.get("02_train", {}).get("data", {})
+                use_phys_vel = data_cfg_now.get("use_physical_velocity_model", False)
+                use_gait_ph  = data_cfg_now.get("use_gait_phase", False)
+                
+                X_train, Y_train = build_nn_dataset_multi(
+                    cfg, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
+                    curr_window, time_window_output, stride,
+                    subject_selection=make_subject_selection(run_meta["train"]),
+                    condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order,
+                    est_tick_ranges=cfg.get("est_tick_ranges"),
+                    use_physical_velocity_model=use_phys_vel, use_gait_phase=use_gait_ph,
+                    input_lpf_cutoff=curr_input_lpf_cutoff, input_lpf_order=curr_input_lpf_order
+                )
+                X_val, Y_val = build_nn_dataset_multi(
+                    cfg, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
+                    curr_window, time_window_output, stride,
+                    subject_selection=make_subject_selection(run_meta["val"]),
+                    condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order,
+                    est_tick_ranges=cfg.get("est_tick_ranges"),
+                    use_physical_velocity_model=use_phys_vel, use_gait_phase=use_gait_ph,
+                    input_lpf_cutoff=curr_input_lpf_cutoff, input_lpf_order=curr_input_lpf_order
+                )
+                X_test, Y_test = build_nn_dataset_multi(
+                    cfg, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
+                    curr_window, time_window_output, stride,
+                    subject_selection=make_subject_selection(run_meta["test"]),
+                    condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order,
+                    est_tick_ranges=cfg.get("est_tick_ranges"),
+                    use_physical_velocity_model=use_phys_vel, use_gait_phase=use_gait_ph,
+                    input_lpf_cutoff=curr_input_lpf_cutoff, input_lpf_order=curr_input_lpf_order
+                )
 
-    sub_runs = []
-    all_subs = sorted(list(set(curr_sub_names))) if curr_sub_names else []
-    print(f"[CV-MODE] LOSO selected. Total subjects: {len(all_subs)}")
-            
-    for i in range(len(all_subs)):
-        test_sub = all_subs[i]
-        if test_sub != 'S004': continue # [TEMP] Force S004 only for debugging
-        # Val sub: use previous subject (cyclic)
-        val_sub = all_subs[i-1] 
-        train_subs = [s for s in all_subs if s != test_sub and s != val_sub]
-        
-        run_name = f"{exp_name}_Test-{test_sub}"
-        sub_runs.append({
-            "name": run_name,
-            "train": train_subs,
-            "val": [val_sub],
-            "test": [test_sub]
-        })
+                if len(X_train) == 0:
+                    print(f"[ERROR] No training data for {full_name_seed}.")
+                    continue
+                    
+                local_save_dir = f"experiments/{full_name_seed}"
+                os.makedirs(local_save_dir, exist_ok=True)
+                    
+                # Normalization
+                use_norm = cfg.get("use_input_norm", True)
+                if not use_norm and '02_train' in cfg:
+                     use_norm = cfg['02_train'].get('model',{}).get('use_norm', True)
+                     
+                if use_norm:
+                    print("[INFO] Computing GLOBAL mean/std for Input Normalization...")
+                    all_train = np.concatenate(X_train, axis=0)
+                    mean = np.mean(all_train, axis=0)
+                    std = np.std(all_train, axis=0)
+                    scale = std
+                    scale[scale < 1e-8] = 1.0
+                    np.savez(os.path.join(local_save_dir, "scaler.npz"), mean=mean, scale=scale)
+                    
+                    # [MEMORY] Clear all_train immediately
+                    del all_train
+                    gc.collect()
 
-    # Tuple conversion
-    def parse_vars(var_list_from_yaml):
-        parsed = []
-        for item in var_list_from_yaml:
-            # item is [gpath, [list_of_vars]]
-            gpath = item[0]
-            vars = item[1]
-            parsed.append((gpath, vars))
-        return parsed
+                    for i in range(len(X_train)): X_train[i] = (X_train[i] - mean) / scale
+                    for i in range(len(X_val)): X_val[i] = (X_val[i] - mean) / scale
+                    for i in range(len(X_test)): X_test[i] = (X_test[i] - mean) / scale
+                else:
+                    normalize_type = cfg.get("02_train", {}).get("data", {}).get("normalize_type", "global")
+                    if normalize_type == "subject":
+                        print("[INFO] Applying SUBJECT-WISE Normalization...")
+                        for data_list in [X_train, X_val, X_test]:
+                            for i in range(len(data_list)):
+                                m, s = np.mean(data_list[i], axis=0), np.std(data_list[i], axis=0) + 1e-8
+                                data_list[i] = (data_list[i] - m) / s
 
-    c_in_vars = parse_vars(curr_input_vars)
-    c_out_vars = parse_vars(curr_output_vars)
-    
-    # --- Visualization Check (Once per Config) ---
-    visualization_enabled = False # Default to False to prevent error
-    if visualization_enabled:
-        viz_save_path = f"visualizations/{exp_name}_structure.png"
-        pass
-        
-    print(f"\n[INFO] Starting Cross-Validation Loops: {len(sub_runs)} folds")
-    
-    for run_meta in sub_runs:
-        final_exp_name = run_meta["name"]
-        c_train_subs = run_meta["train"]
-        c_val_subs = run_meta["val"]
-        c_test_subs = run_meta["test"]
-        
-        full_name_seed = f"{final_exp_name}_seed{sd}"
-        print(f"\n>>> Start Experiment: {full_name_seed}")
-        print(f"  Train: {c_train_subs}")
-        print(f"  Val:   {c_val_subs}")
-        print(f"  Test:  {c_test_subs}")
-        
-        # Load Datasets
-        c_est_tick_ranges = cfg.get("est_tick_ranges", None)
-        
-        # [NEW] Extract Data Flags
-        data_cfg_now = cfg.get("02_train", {}).get("data", {})
-        use_phys_vel = data_cfg_now.get("use_physical_velocity_model", False)
-        use_gait_ph  = data_cfg_now.get("use_gait_phase", False)
-        
-        if use_phys_vel: print(f"  -> Physical Velocity Model Enabled")
-        if use_gait_ph:  print(f"  -> Gait Phase Input Enabled")
+                feat_names_simple = [f"{gp}/{v}" for gp, vs in c_in_vars for v in vs]
+                
+                metrics, ckpt_path = train_experiment(
+                    X_train, Y_train, X_val, Y_val, X_test, Y_test,
+                    cfg, seed=sd, save_dir=local_save_dir, live_plotter=None,
+                    scaler_mean=mean if use_norm else None, scaler_std=scale if use_norm else None,
+                    feature_names=feat_names_simple
+                )
+                
+                # [MEMORY] Clear big lists and collect garbage after fold
+                del X_train, Y_train, X_val, Y_val, X_test, Y_test
+                gc.collect()
+                if torch.cuda.is_available(): torch.cuda.empty_cache()
 
-        X_train, Y_train = build_nn_dataset(
-            current_data_path, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
-            curr_window, time_window_output, stride,
-            subject_selection=make_subject_selection(c_train_subs),
-            condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order,
-            est_tick_ranges=c_est_tick_ranges,
-            use_physical_velocity_model=use_phys_vel,
-            use_gait_phase=use_gait_ph
-        )
-        X_val, Y_val = build_nn_dataset(
-            current_data_path, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
-            curr_window, time_window_output, stride,
-            subject_selection=make_subject_selection(c_val_subs),
-            condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order,
-            est_tick_ranges=c_est_tick_ranges,
-            use_physical_velocity_model=use_phys_vel,
-            use_gait_phase=use_gait_ph
-        )
-        X_test, Y_test = build_nn_dataset(
-            current_data_path, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
-            curr_window, time_window_output, stride,
-            subject_selection=make_subject_selection(c_test_subs),
-            condition_selection=CONDITION_SELECTION, lpf_cutoff=curr_lpf_cutoff, lpf_order=curr_lpf_order,
-            est_tick_ranges=c_est_tick_ranges,
-            use_physical_velocity_model=use_phys_vel,
-            use_gait_phase=use_gait_ph
-        )
-
-        if len(X_train) == 0:
-            print(f"[ERROR] No training data for {full_name_seed}. Check selections.")
-            continue
-            
-        save_dir = f"experiments/{full_name_seed}"
-        os.makedirs(save_dir, exist_ok=True)
-            
-        # ---------------------------------------------------------
-        # [FIX] Normalization Logic
-        # ---------------------------------------------------------
-        # Check config
-        use_norm = cfg.get("use_input_norm", True) # Default true if not specified
-        if not use_norm and '02_train' in cfg:
-             use_norm = cfg['02_train'].get('model',{}).get('use_norm', True) # Legacy check
-             
-        if use_norm:
-            print("[INFO] Computing GLOBAL mean/std for Input Normalization...")
-            # Pytorch style: (C, T)? No, our data is (T, D).
-            # We want mean/std per Feature (D).
-            
-            # Concatenate all training trials to compute stats
-            all_train = np.concatenate(X_train, axis=0) # (Total_T, D)
-            mean = np.mean(all_train, axis=0)
-            std = np.std(all_train, axis=0)
-            scale = std
-            
-            # Avoid div/0
-            scale[scale < 1e-8] = 1.0
-            
-            # Save scaler
-            scaler_path = os.path.join(save_dir, "scaler.npz")
-            np.savez(scaler_path, mean=mean, scale=scale)
-            print(f"  -> Scaler saved to {scaler_path}")
-            
-            # Apply to ALL splits (In-place)
-            print("  -> Applying normalization to Train/Val/Test...")
-            for i in range(len(X_train)): X_train[i] = (X_train[i] - mean) / scale
-            for i in range(len(X_val)): X_val[i] = (X_val[i] - mean) / scale
-            for i in range(len(X_test)): X_test[i] = (X_test[i] - mean) / scale
-            
-        else:
-            print("[INFO] Skipping Input Normalization (use_input_norm=False)")
-        print(f"Data Series Count: Train={len(X_train)}, Val={len(X_val)}, Test={len(X_test)}")
-        
-        save_dir = f"experiments/{full_name_seed}"
-        live_plotter.start_session(final_exp_name, sd)
-        
-        # [NEW] Construct simple feature names list for Kinematic Loss Mapping
-        # We flatten the c_in_vars list which is [(path, [vars]), ...]
-        feat_names_simple = []
-        for gpath, vars in c_in_vars:
-            for v in vars:
-                feat_names_simple.append(f"{gpath}/{v}")
-        
-        metrics, ckpt_path = train_experiment(
-            X_train, Y_train, X_val, Y_val, X_test, Y_test,
-            cfg, seed=sd, save_dir=save_dir, live_plotter=live_plotter,
-            scaler_mean=mean if use_norm else None,
-            scaler_std=scale if use_norm else None,
-            feature_names=feat_names_simple
-        )
-        
-        print(f"[RESULT] {full_name_seed} | test_loss={metrics.get('test_mse', 0):.6f}")
-        results.append((final_exp_name, sd, metrics, ckpt_path, cfg, c_in_vars))
+                print(f"[RESULT] {full_name_seed} | test_mae={metrics.get('test_mae', 0):.6f}")
+                results.append((final_exp_name, sd, metrics, ckpt_path, cfg, c_in_vars))
     
     # Summary Plot
     if results:
@@ -2207,6 +2850,8 @@ if __name__ == "__main__":
     # Retrieve Output Vars
     if "output_vars" in best_cfg:
         raw_out = best_cfg["output_vars"]
+    elif "shared" in best_cfg and "output_vars" in best_cfg["shared"]:
+        raw_out = best_cfg["shared"]["output_vars"]
     elif "01_construction" in best_cfg:
         raw_out = best_cfg["01_construction"].get("outputs")
     else:
@@ -2230,9 +2875,9 @@ if __name__ == "__main__":
     # Window
     best_window = best_cfg.get("time_window_input") or best_cfg.get("shared", {}).get("data", {}).get("window_size")
 
-    X_test_best, Y_test_best = build_nn_dataset(
-        best_data_path, best_sub_names, best_cond_names, c_in_vars, c_out_vars,
-        best_window, best_cfg.get("time_window_output", 10), best_cfg.get("stride", 20),
+    X_test_best, Y_test_best = build_nn_dataset_multi(
+        best_cfg, best_sub_names, best_cond_names, c_in_vars, c_out_vars,
+        best_window, best_cfg.get("time_window_output", 1), best_cfg.get("stride", 5),
         subject_selection=make_subject_selection(best_sub_names), # Use all relevant subjects for global check
         condition_selection=CONDITION_SELECTION, lpf_cutoff=best_lpf_cutoff, lpf_order=best_lpf_order,
         est_tick_ranges=best_cfg.get("est_tick_ranges", None)
@@ -2241,196 +2886,160 @@ if __name__ == "__main__":
     best_horizon = len(best_cfg.get("est_tick_ranges")) if best_cfg.get("est_tick_ranges") else best_cfg.get("time_window_output", 10)
     
     # [FIX] Extract Model Config correctly (Nested priority)
+    # Priority: 02_train.model > shared.model > root
     model_cfg = best_cfg.get("02_train", {}).get("model", {})
+    if not model_cfg:
+        model_cfg = best_cfg.get("shared", {}).get("model", {})
     if not model_cfg:
         model_cfg = best_cfg.get("model", {})
 
-    tcn_channels = model_cfg.get("channels") or best_cfg.get("tcn_channels")
+    tcn_channels = model_cfg.get("channels") or best_cfg.get("tcn_channels") or best_cfg.get("channels")
     kernel_size = model_cfg.get("kernel_size") or best_cfg.get("kernel_size")
     mlp_hidden = model_cfg.get("head_hidden") or best_cfg.get("head_hidden") or best_cfg.get("mlp_hidden")
-    head_dropout = model_cfg.get("head_dropout")
-    dropout_p = float(model_cfg.get("dropout") or best_cfg.get("dropout_p", 0.1))
+    head_dropout = model_cfg.get("head_dropout") or best_cfg.get("head_dropout")
+    dropout_p = float(model_cfg.get("dropout") or best_cfg.get("dropout", 0.1))
     
     # Norm types
     model_norm = model_cfg.get("model_norm")
     
-    best_model = TCN_MLP(
-        input_dim=X_test_best[0].shape[1],
-        output_dim=Y_test_best[0].shape[1],
-        horizon=best_horizon, 
-        channels=tcn_channels,
-        kernel_size=kernel_size,
-        dropout=dropout_p,
-        head_dropout=head_dropout,
-        mlp_hidden=mlp_hidden,
-        use_input_norm=best_cfg.get("use_input_norm", True), # Default to True to match training logic if missing
-        tcn_norm=model_norm,
-        mlp_norm=model_norm
-    )
-    
-    # Load Weights
-    ckpt = torch.load(best_ckpt, map_location='cpu') # Plotting on CPU is fine
-    best_model.load_state_dict(ckpt['state_dict'])
-    
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    best_model.to(device)
-    best_model.eval()
-    
-    # 3. Construct Feature Names
-    # Must match extract_condition_data_v2 logic
-    feature_names = []
-    
-    # (A) Input Vars - Use best_in_vars
-    for gpath, vars in c_in_vars:
-        # Custom Naming Logic
-        if 'Back_imu' in gpath or 'back_imu' in gpath:
-            prefix = "IMU"
-        elif 'Robot' in gpath or 'robot' in gpath:
-            if 'left' in gpath: prefix = "Robot_L"
-            elif 'right' in gpath: prefix = "Robot_R"
-            else: prefix = "Robot"
-        elif 'grf' in gpath:
-            # forceplate/grf/left
-            side = 'L' if 'left' in gpath else 'R'
-            prefix = f"GRF_{side}"
-        elif 'kin_qdot' in gpath:
-            prefix = "J_Vel_Meas"
-            pass 
-        elif 'kin_q' in gpath:
-            prefix = "Deg"
-        else:
-            prefix = gpath.split('/')[-1]
-            
-        for v in vars:
-            # Clean var names
-            v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
-            v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
-            v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
-            
-            if 'grf' in gpath.lower():
-                name = f"{prefix}_{v}"
-            elif 'Back_imu' in gpath or 'back_imu' in gpath:
-                v_clean = v.replace('Accel_', 'A').replace('Gyro_', 'G')
-                v_clean = v_clean.replace('accel_', 'A').replace('gyro_', 'G') # Handle lowercase
-                name = f"{prefix}_{v_clean}"
+    if not X_test_best:
+        print("[WARN] No data found for Feature Importance Re-loading. Skipping.")
+    else:
+        best_model = TCN_MLP(
+            input_dim=X_test_best[0].shape[1],
+            output_dim=Y_test_best[0].shape[1],
+            horizon=best_horizon, 
+            channels=tcn_channels,
+            kernel_size=kernel_size,
+            dropout=dropout_p,
+            head_dropout=head_dropout,
+            mlp_hidden=mlp_hidden,
+            use_input_norm=best_cfg.get("use_input_norm", True), 
+            tcn_norm=model_norm,
+            mlp_norm=model_norm
+        )
+        
+        # Load Weights
+        ckpt = torch.load(best_ckpt, map_location='cpu')
+        best_model.load_state_dict(ckpt['state_dict'])
+        
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        best_model.to(device)
+        best_model.eval()
+        
+        # 3. Construct Feature Names
+        feature_names = []
+        for gpath, vars in c_in_vars:
+            if 'Back_imu' in gpath or 'back_imu' in gpath:
+                prefix = "IMU"
+            elif 'Robot' in gpath or 'robot' in gpath:
+                prefix = "Robot_L" if 'left' in gpath else ("Robot_R" if 'right' in gpath else "Robot")
+            elif 'grf' in gpath:
+                prefix = f"GRF_{'L' if 'left' in gpath else 'R'}"
+            elif 'kin_q' in gpath:
+                prefix = "Deg"
             else:
-                name = f"{prefix}_{v_clean}"
+                prefix = gpath.split('/')[-1]
                 
-            feature_names.append(name)
+            for v in vars:
+                v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
+                v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
+                v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
+                feature_names.append(f"{prefix}_{v_clean}")
+                
+        # 4. Compute Importance (Permutation)
+        print(f"  Calculating Importances for {len(feature_names)} features...")
+        
+        def calculate_permutation_importance(model, dataloader, feature_names, device):
+            model.eval()
+            N_feats = len(feature_names)
+            total_samples = 0
             
-    # (B) Augment: Joint Veolcity/Accel
-    kin_q_vars = []
-    for gpath, vars in c_in_vars:
-        if 'kin_q' in gpath and 'dot' not in gpath:
-             kin_q_vars = vars
-             break
-             
-    for v in kin_q_vars:
-        v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
-        v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
-        v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
-        feature_names.append(f"AngVel_{v_clean}")
-        
-    for v in kin_q_vars:
-        v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
-        v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
-        v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
-        feature_names.append(f"AngAcc_{v_clean}")
-        
-    # (C) Contact
-    feature_names.append("Contact_L")
-    feature_names.append("Contact_R")
-    
-    if len(feature_names) != X_test_best[0].shape[1]:
-        print(f"[WARN] Feature name count ({len(feature_names)}) != Input dim ({X_test_best[0].shape[1]}). Using indices.")
-        feature_names = [f"Feat_{i}" for i in range(X_test_best[0].shape[1])]
-        
-    # 4. Calculate Permutation Importance
-    def calculate_permutation_importance(model, test_loader, feature_names, device='cpu'):
-        print("Collecting test data into single tensor for importance analysis...")
-        X_batches = []
-        Y_batches = []
-        
-        # Collect all batches to a single tensor for easy shuffling
-        for xb, yb in tqdm(test_loader, desc="Loading Test Data"):
-            X_batches.append(xb)
-            Y_batches.append(yb)
+            # Accumulators
+            total_base_loss = 0.0
+            feat_loss_sums = torch.zeros(N_feats, device=device)
             
-        if not X_batches:
-             print("No test data found.")
-             return np.array([])
-             
-        X_tensor = torch.cat(X_batches, dim=0).to(device)
-        Y_tensor = torch.cat(Y_batches, dim=0).to(device)
-
-        criterion = nn.L1Loss() # MAE
-        model.eval()
-        
-        def get_loss(x_in, y_in):
+            print(f"  Calculating Importances (Batch-wise, {N_feats} features)...")
+            
             with torch.no_grad():
-                batch_size = 1024
-                N = x_in.size(0)
-                running_loss = 0.0
-                
-                for i in range(0, N, batch_size):
-                    xb = x_in[i:i+batch_size]
-                    yb = y_in[i:i+batch_size]
-                    pred = model(xb)
-                    running_loss += criterion(pred, yb).item() * xb.size(0)
+                for xb, yb in dataloader:
+                    xb, yb = xb.to(device), yb.to(device)
+                    B = xb.size(0)
+                    total_samples += B
                     
-                return running_loss / N
-            
-        base_mae = get_loss(X_tensor, Y_tensor)
-        print(f"  Baseline MAE: {base_mae:.6f}")
-        
-        importances = []
-        N_feats = X_tensor.shape[2]
-        
-        for i in range(N_feats):
-            # Backup
-            original_col = X_tensor[:, :, i].clone()
-            
-            # Shuffle
-            perm_idx = torch.randperm(X_tensor.size(0), device=device)
-            X_tensor[:, :, i] = X_tensor[perm_idx, :, i]
-            
-            # Measure
-            perm_mae = get_loss(X_tensor, Y_tensor)
-            imp = perm_mae - base_mae
-            importances.append(imp)
-            
-            # Restore
-            X_tensor[:, :, i] = original_col
-            print(f"    Feat {i} ({feature_names[i]}): +{imp:.6f}", end='\r')
-            
-        print("")
-        return np.array(importances)
+                    # 1. Base Prediction
+                    pred_base = model(xb)
+                    
+                    # Shape Alignment
+                    if pred_base.dim() == 2 and yb.dim() == 3 and yb.shape[1] == 1: 
+                        yb_s = yb.squeeze(1)
+                    elif pred_base.dim() == 3 and yb.dim() == 2 and pred_base.shape[1] == 1: 
+                        pred_base = pred_base.squeeze(1)
+                        yb_s = yb
+                    else:
+                        yb_s = yb
 
-    # Create Loader for Importance Calculation
-    # Need to reuse parameters from best_cfg
-    imp_test_ds = LazyWindowDataset(
-        X_test_best, Y_test_best, 
-        best_window, best_cfg.get("time_window_output", 60), best_cfg.get("stride", 20), 
-        target_mode="sequence", est_tick_ranges=best_cfg.get("est_tick_ranges", None)
-    )
-    imp_loader = DataLoader(imp_test_ds, batch_size=1024, shuffle=False, num_workers=0)
-    
-    importances = calculate_permutation_importance(best_model, imp_loader, feature_names, device)
-    
-    # 5. Plot All Features
-    n_feats = len(importances)
-    sorted_idx = np.argsort(importances)[::-1] # All sorted
-    
-    # Dynamic Figure Height: 0.25 inch per feature
-    fig_h = max(8, n_feats * 0.25)
-    plt.figure(figsize=(10, fig_h))
-    
-    plt.barh(range(n_feats), importances[sorted_idx], align='center')
-    plt.yticks(range(n_feats), [feature_names[i] for i in sorted_idx])
-    plt.xlabel('MAE Increase (Importance)')
-    plt.title(f'Feature Importance (All Features) - {best_name}')
-    plt.gca().invert_yaxis() # Top importance at top
-    plt.tight_layout()
-    plt.savefig("experiments/feature_importance.png")
-    plt.show(block=True)
+                    # Base Loss (Sum)
+                    base_loss = torch.sum(torch.abs(pred_base - yb_s)).item()
+                    total_base_loss += base_loss
+                    
+                    # 2. Permutation (Intra-batch)
+                    for i in range(N_feats):
+                        original_col = xb[:, :, i].clone()
+                        
+                        # Shuffle indices within batch
+                        idx = torch.randperm(B, device=device)
+                        xb[:, :, i] = xb[idx, :, i]
+                        
+                        pred_p = model(xb)
+                        # Shape Alignment for Permuted (assume same as base)
+                        if pred_p.dim() == 3 and pred_p.shape[1] == 1: pred_p = pred_p.squeeze(1)
+                        
+                        # Permuted Loss sum
+                        p_loss = torch.sum(torch.abs(pred_p - yb_s))
+                        feat_loss_sums[i] += p_loss
+                        
+                        # Restore
+                        xb[:, :, i] = original_col
+            
+            # Compute Averages
+            base_mae = total_base_loss / (total_samples + 1e-9)
+            print(f"  Baseline MAE: {base_mae:.6f}")
+            
+            feat_maes = feat_loss_sums.cpu().numpy() / (total_samples + 1e-9)
+            importances = feat_maes - base_mae
+            
+            for i, imp in enumerate(importances):
+                print(f"    Feat {i}: +{imp:.6f}", end='\r')
+            print("")
+            return importances
 
+        # [MEMORY-FIX] Restore original stride but use Batch Processing for safety
+        fi_stride = best_cfg.get("stride", 5)
+        
+        imp_test_ds = LazyWindowDataset(
+            X_test_best, Y_test_best, 
+            best_window, best_cfg.get("time_window_output", 1), fi_stride, 
+            target_mode="sequence", est_tick_ranges=best_cfg.get("est_tick_ranges", None)
+        )
+        
+        # [MEMORY-FIX] Explicit GC & Shuffle=True for intra-batch permutation
+        import gc
+        gc.collect()
+        torch.cuda.empty_cache()
+        
+        imp_loader = DataLoader(imp_test_ds, batch_size=512, shuffle=True, num_workers=0)
+        importances = calculate_permutation_importance(best_model, imp_loader, feature_names, device)
+        
+        # 5. Plot
+        n_feats = len(importances)
+        sorted_idx = np.argsort(importances)[::-1]
+        fig_h = max(8, n_feats * 0.25)
+        plt.figure(figsize=(10, fig_h))
+        plt.barh(np.arange(n_feats), importances[sorted_idx][::-1], color='skyblue')
+        plt.yticks(np.arange(n_feats), np.array(feature_names)[sorted_idx][::-1] if len(feature_names)==n_feats else np.arange(n_feats))
+        plt.xlabel("Permutation Importance (MAE Increase)")
+        plt.title(f"Feature Importance: {best_name}")
+        plt.tight_layout()
+        plt.savefig("experiments/feature_importance_best.png")
+        print(">>> Feature Importance Saved: experiments/feature_importance_best.png")

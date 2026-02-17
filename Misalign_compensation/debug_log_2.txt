@@ -1,0 +1,20 @@
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1398: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+
+No display found. Using non-interactive Agg backend.
+[INFO] Resources optimized: 1 GPU, 16 CPU Threads max.
+Running plot_detailed_condition_trajectories on experiments/exp_euler_angles_Test-m1_S004_seed42...
+[INFO] Generating Detailed Grid Plots for exp_euler_angles_Test-m1_S004_seed42...
+  -> Using local config: experiments/exp_euler_angles_Test-m1_S004_seed42/config.yaml
+[DEBUG] c_in_vars: [('derived/euler', ['roll', 'pitch', 'yaw']), ('robot/left', ['hip_angle']), ('robot/right', ['hip_angle'])]
+[DEBUG] Input Dim calculated: 5
+[DEBUG] Model CFG keys: dict_keys(['attention_heads', 'attention_type', 'channels', 'dropout', 'gating_signal', 'head_dropout', 'head_hidden', 'kernel_size', 'model_norm', 'type', 'use_norm'])
+[DEBUG] mlp_hidden resolved to: 64
+[DEBUG] S004/level_08mps/lv0/trial_01: Missing group derived/euler
+[DEBUG] S004/level_12mps/lv0/trial_01: Missing group derived/euler
+[DEBUG] S004/level_16mps/lv0/trial_01: Missing group derived/euler
+[DEBUG] S004/accel_sine/lv0/trial_01: Missing group derived/euler
+[DEBUG] S004/decline_5deg/lv0/trial_01: Missing group derived/euler
+[DEBUG] S004/incline_10deg/lv0/trial_01: Missing group derived/euler
+Plotting function finished.
+

@@ -1,116 +1,81 @@
-
-import os
 import yaml
 import copy
-import sys
+import os
 
-def load_yaml(path):
-    with open(path, 'r') as f:
+def load_baseline(path="configs/baseline.yaml"):
+    with open(path, "r") as f:
+        # yaml.safe_load(f) results in a dictionary.
+        # Note: & anchors and * aliases are resolved by safe_load.
         return yaml.safe_load(f)
 
-def save_yaml(path, data):
-    with open(path, 'w') as f:
-        yaml.dump(data, f, sort_keys=False, default_flow_style=False)
+def save_yaml(cfg, path):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False, indent=2)
 
-def ensure_model_dict(cfg):
-    # If 02_train.model is None, initialize it as empty dict
-    if cfg['02_train'].get('model') is None:
-        cfg['02_train']['model'] = {}
+def make_exp_smoothness(base):
+    """실험 1: Smoothness Loss 강화"""
+    cfg = copy.deepcopy(base)
+    cfg["02_train"]["train"]["smoothness_loss_weight"] = 2.0
+    cfg["exp_name"] = "Exp_smoothness"
     return cfg
 
-def main():
-    base_config_path = "configs/baseline.yaml"
-    if not os.path.exists(base_config_path):
-        print(f"Error: {base_config_path} not found.")
-        return
+def make_exp_leglen_norm(base):
+    """실험 2: Leg Length 기반 수평 속도 정규화"""
+    cfg = copy.deepcopy(base)
+    # shared.input_vars에 추가 (이미 resolved 됨)
+    cfg["shared"]["input_vars"].append(["derived/leg_velocity", ["derived/leg_vel_l", "derived/leg_vel_r"]])
+    cfg["exp_name"] = "Exp_leglen_norm"
+    return cfg
 
-    base_config = load_yaml(base_config_path)
-    output_dir = "configs/advanced"
-    os.makedirs(output_dir, exist_ok=True)
-    
-    print(f"[Generator] Base config loaded from {base_config_path}")
+def make_exp_gait_phase(base):
+    """실험 3: Gait Phase 입력 추가"""
+    cfg = copy.deepcopy(base)
+    cfg["shared"]["input_vars"].append(["derived", ["derived/gait_phase_left", "derived/gait_phase_right"]])
+    cfg["exp_name"] = "Exp_gait_phase"
+    return cfg
 
-    # =================================================================
-    # 1. Frequency Penalty Loss
-    # =================================================================
-    # Goal: penalize high freq
-    cfg = copy.deepcopy(base_config)
-    cfg = ensure_model_dict(cfg)
-    exp_name = "Exp_Freq_Penalty_Loss"
-    cfg['02_train']['experiment_name'] = exp_name
-    
-    # Toggle existing keys
-    cfg['02_train']['train']['loss_penalty'] = "frequency_cutoff_penalty"
-    cfg['02_train']['train']['loss_penalty_weight'] = 0.5
-    cfg['02_train']['train']['loss_penalty_cutoff'] = "reference"
-    
-    save_yaml(f"{output_dir}/{exp_name}.yaml", cfg)
-    print(f"[Generated] {exp_name}")
+def make_exp_stance_gate(base):
+    """실험 4: Stance Gating"""
+    cfg = copy.deepcopy(base)
+    cfg["02_train"]["model"]["type"] = "StanceGatedTCN"
+    cfg["shared"]["input_vars"].append(["derived", ["derived/contact_left", "derived/contact_right"]])
+    cfg["exp_name"] = "Exp_stance_gate"
+    return cfg
 
-    # =================================================================
-    # 2. Leg Length Normalization
-    # =================================================================
-    cfg = copy.deepcopy(base_config)
-    cfg = ensure_model_dict(cfg)
-    exp_name = "Exp_Leg_Length_Norm"
-    cfg['02_train']['experiment_name'] = exp_name
-    
-    # Toggle data keys
-    if 'data' in cfg['02_train']:
-        cfg['02_train']['data']['normalize_type'] = "leg_length_scaled"
-        cfg['02_train']['data']['use_physical_velocity_model'] = True
-        
-    save_yaml(f"{output_dir}/{exp_name}.yaml", cfg)
-    print(f"[Generated] {exp_name}")
+def make_exp_attention(base):
+    """실험 5: Temporal Attention"""
+    cfg = copy.deepcopy(base)
+    cfg["02_train"]["model"]["type"] = "AttentionTCN"
+    cfg["02_train"]["model"]["attention_type"] = "temporal"
+    cfg["exp_name"] = "Exp_attention"
+    return cfg
 
-    # =================================================================
-    # 3. Gait Phase Input
-    # =================================================================
-    cfg = copy.deepcopy(base_config)
-    cfg = ensure_model_dict(cfg)
-    exp_name = "Exp_Gait_Phase_Input"
-    cfg['02_train']['experiment_name'] = exp_name
-    
-    # Add input manually (still needed as baseline inputs are fixed list)
-    new_input = ["derived", ["gait_phase_L", "gait_phase_R"]]
-    if '01_construction' in cfg and 'inputs' in cfg['01_construction']:
-        cfg['01_construction']['inputs'].append(new_input)
-        
-    cfg['02_train']['data']['use_gait_phase'] = True
-    
-    save_yaml(f"{output_dir}/{exp_name}.yaml", cfg)
-    print(f"[Generated] {exp_name}")
-
-    # =================================================================
-    # 4. Stance Gating
-    # =================================================================
-    cfg = copy.deepcopy(base_config)
-    cfg = ensure_model_dict(cfg)
-    exp_name = "Exp_Stance_Gating"
-    cfg['02_train']['experiment_name'] = exp_name
-    
-    # Toggle model keys
-    cfg['02_train']['model']['type'] = "StanceGatedTCN"
-    cfg['02_train']['model']['gating_signal'] = "contact"
-        
-    save_yaml(f"{output_dir}/{exp_name}.yaml", cfg)
-    print(f"[Generated] {exp_name}")
-
-    # =================================================================
-    # 5. Attention Mechanism
-    # =================================================================
-    cfg = copy.deepcopy(base_config)
-    cfg = ensure_model_dict(cfg)
-    exp_name = "Exp_Attention_Model"
-    cfg['02_train']['experiment_name'] = exp_name
-    
-    # Toggle model keys
-    cfg['02_train']['model']['type'] = "AttentionTCN"
-    cfg['02_train']['model']['attention_type'] = "temporal"
-    cfg['02_train']['model']['attention_heads'] = 4
-        
-    save_yaml(f"{output_dir}/{exp_name}.yaml", cfg)
-    print(f"[Generated] {exp_name}")
+def make_exp_instance_norm(base):
+    """실험 6: Instance Normalization (Subject-wise)"""
+    cfg = copy.deepcopy(base)
+    cfg["use_input_norm"] = False # Global norm 비활성화
+    cfg["02_train"]["data"]["normalize_type"] = "subject" # 피험자별 정규화 활성화
+    cfg["02_train"]["model"]["model_norm"] = "instance" # 모델 내부 InstanceNorm1d 사용
+    cfg["exp_name"] = "Exp_instance_norm"
+    return cfg
 
 if __name__ == "__main__":
-    main()
+    base = load_baseline()
+    exps = [
+        # make_exp_smoothness(base),
+        # make_exp_leglen_norm(base),
+        # make_exp_gait_phase(base),
+        # make_exp_stance_gate(base),
+        # make_exp_attention(base),
+        make_exp_instance_norm(base)
+    ]
+    
+    for cfg in exps:
+        # [NEW] Ensure LOSO filter and Batch Size are consistent based on baseline or explicit
+        # baseline.yaml already has these, so copy.deepcopy(base) should inherit them.
+        # But we double check and can explicitly set them if needed.
+        
+        path = f"configs/{cfg['exp_name']}.yaml"
+        save_yaml(cfg, path)
+        print(f"[SAVED] {path}")

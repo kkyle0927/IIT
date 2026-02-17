@@ -1,0 +1,23 @@
+# =============================================================================
+# Overlap Ensemble: Weighted Mean (가까운 horizon에 더 큰 가중치)
+# baseline 대비 변경: est_tick_ranges → [1..10], overlap_ensemble (weighted_mean)
+# 가중치: w_h = 0.8^(h-1), h=1이 가장 크고 h=10이 가장 작음
+# =============================================================================
+
+shared:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+02_train:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+03_eval:
+  overlap_ensemble:
+    enable: true
+    method: "weighted_mean"
+    weights_decay: 0.8
+
+exp_name: "exp_multistep_H10_overlap_wmean"

@@ -1,0 +1,15 @@
+# =============================================================================
+# TCN + GRU Head (h=32) + Smoothness Loss (λ=0.05)
+# GRU의 시계열 연속성에 Smoothness 제약을 더해 최상의 부드러움 추구
+# =============================================================================
+
+shared:
+  model:
+    type: "TCN_GRU"
+    gru_hidden: 32
+
+02_train:
+  train:
+    smoothness_loss_weight: 0.05
+
+exp_name: "exp_tcn_gru_head_h32_smooth"

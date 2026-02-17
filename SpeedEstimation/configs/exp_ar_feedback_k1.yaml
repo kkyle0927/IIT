@@ -1,0 +1,14 @@
+# =============================================================================
+# AR Feedback k=1 (이전 GT를 입력 피드백, Teacher Forcing 100%)
+# baseline 대비 변경: shared.model.ar_feedback 추가
+# 입력에 prev_pred_speed 1채널 추가, 학습 중 teacher forcing=1.0
+# =============================================================================
+
+shared:
+  model:
+    ar_feedback:
+      enable: true
+      k: 1
+      teacher_forcing: 1.0
+
+exp_name: "exp_ar_feedback_k1"
