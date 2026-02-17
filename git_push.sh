@@ -4,6 +4,13 @@
 REPO_ROOT="/home/chanyoungko/IIT"
 cd "$REPO_ROOT" || exit
 
+# VS Code의 인증 도우미가 연결이 끊어졌을 때 발생하는 에러 방지
+unset GIT_ASKPASS
+unset VSCODE_GIT_ASKPASS_NODE
+unset VSCODE_GIT_ASKPASS_EXTRA_ARGS
+unset VSCODE_GIT_ASKPASS_MAIN
+unset VSCODE_GIT_IPC_HANDLE
+
 echo "--- Git Sync Start ---"
 
 # 1. 모든 변경사항 스테이징
