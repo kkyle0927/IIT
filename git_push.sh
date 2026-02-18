@@ -13,8 +13,8 @@ unset VSCODE_GIT_IPC_HANDLE
 
 echo "--- Git Sync Start ---"
 
-# 1. 모든 변경사항 스테이징
-git add .
+# 1. 모든 변경사항 스테이징 (h5 파일 제외)
+git add . ':!*.h5'
 
 # 2. 커밋 메시지 생성 (현재 시간 포함)
 COMMIT_MSG="Auto sync: $(date '+%Y-%m-%d %H:%M:%S')"

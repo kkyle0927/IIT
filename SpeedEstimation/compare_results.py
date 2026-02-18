@@ -431,6 +431,7 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         return None
 
     folder_name = exp_path.name
+    model_norm_type = "layer" # Default
     
     # =========================================================================
     # Step 1: YAML Config 로드 (Training CV loop line 1833과 동일)
@@ -469,8 +470,26 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
              print(f"Config file not found: {original_config_path} AND {local_config}. Skipping.")
              return None
     
+    # Load base config (baseline.yaml) first, just like training
+    base_config_path = Path("configs/baseline.yaml")
+    cfg = {}
+    
+    def deep_merge(base, override):
+        for k, v in override.items():
+            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                deep_merge(base[k], v)
+            else:
+                base[k] = v
+
+    if base_config_path.exists():
+        with open(base_config_path, 'r') as f:
+            cfg = yaml.safe_load(f)
+            print(f"[EVAL] Loaded base defaults from {base_config_path}")
+    
     with open(config_to_load, 'r') as f:
-        cfg = yaml.safe_load(f)
+        exp_cfg = yaml.safe_load(f)
+        # Use deep_merge for inheritance
+        deep_merge(cfg, exp_cfg)
     
     print(f"\n{'='*60}")
     print(f"[EVAL] {folder_name}")
@@ -638,7 +657,35 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     # =========================================================================
     # Step 9: 모델 초기화 - train_experiment (line 1275-1410)과 동일
     # =========================================================================
+    # [NEW] Merge overrides from shared.model/data (Deep Merge)
+    shared_model = cfg.get("shared", {}).get("model", {})
+    shared_data  = cfg.get("shared", {}).get("data", {})
+    
+    def deep_merge(base, override):
+        for k, v in override.items():
+            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                deep_merge(base[k], v)
+            else:
+                base[k] = v
+
+    model_cfg = train_cfg_section.get("model", {})
+    if not model_cfg:
+        data_cfg_m = train_cfg_section.get("data", {})
+        if data_cfg_m and "channels" in data_cfg_m: model_cfg = data_cfg_m
+    if not model_cfg: model_cfg = cfg.get("model") or {}
+    
+    deep_merge(model_cfg, shared_model)
+    
+    # AR Feedback check
+    ar_cfg = model_cfg.get("ar_feedback", {})
+    ar_enable = ar_cfg.get("enable", False)
+    ar_k = ar_cfg.get("k", 1)
+
     input_dim = X_list[0].shape[1]
+    if ar_enable:
+        print(f"[EVAL] AR Feedback detected. Augmenting input_dim {input_dim} -> {input_dim + ar_k}")
+        input_dim += ar_k
+
     output_dim = Y_list[0].shape[1]
     
     if est_tick_ranges:
@@ -646,12 +693,8 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     else:
         horizon = window_output
     
-    # Model Config (Training line 1277-1285)
-    model_cfg = train_cfg_section.get("model")
-    if not model_cfg:
-        data_cfg_m = train_cfg_section.get("data")
-        if data_cfg_m and "channels" in data_cfg_m: model_cfg = data_cfg_m
-    if not model_cfg: model_cfg = cfg.get("model") or {}
+    model_norm_type = model_cfg.get("model_norm", None)
+    input_norm_type = model_cfg.get("input_norm_type", model_norm_type or "layer")
     
     # TCN 파라미터 (Training line 1286-1310)
     tcn_channels = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
@@ -671,7 +714,6 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     if use_input_norm is None:
         use_input_norm = cfg.get("use_input_norm", True)
     
-    model_norm_type = model_cfg.get("model_norm", None)
     tcn_norm = model_norm_type
     mlp_norm = model_norm_type
     
@@ -693,6 +735,7 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         head_dropout=head_dropout,
         mlp_hidden=mlp_hidden,
         use_input_norm=use_input_norm,
+        input_norm_type=input_norm_type,
         tcn_norm=tcn_norm,
         mlp_norm=mlp_norm
     )
@@ -704,6 +747,9 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         attn_type = model_cfg.get("attention_type", "temporal")
         heads = model_cfg.get("attention_heads", 4)
         model = AttentionTCN(**common_args, attention_type=attn_type, attention_heads=heads)
+    elif model_type == "TCN_GRU":
+        gru_h = model_cfg.get("gru_hidden", 32)
+        model = TCN_GRU_Head(**common_args, gru_hidden=gru_h)
     else:
         model = TCN_MLP(**common_args)
     
@@ -722,6 +768,13 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     with torch.no_grad():
         for xb, yb in loader:
             xb = xb.to(device)
+            
+            # [NEW] AR Feedback Inference: append zero channel
+            if ar_enable:
+                B, T_in, _ = xb.shape
+                prev_channel = torch.zeros(B, T_in, ar_k, device=device)
+                xb = torch.cat([xb, prev_channel], dim=-1)
+                
             out = model(xb)
             y_preds.append(out.cpu().numpy())
             y_trues.append(yb.cpu().numpy())
@@ -2023,16 +2076,36 @@ def analyze_detailed_single(exp_path):
     import re
     folder_name = exp_path.name
     exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
-    exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
+    exp_name = exp_name_match.group(1) if exp_name_match else "baseline" # Default if no match
     
+    # Load base config (baseline.yaml) first, just like training
+    base_config_path = Path("configs/baseline.yaml")
+    cfg = {}
+    
+    def deep_merge(base, override):
+        for k, v in override.items():
+            if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                deep_merge(base[k], v)
+            else:
+                base[k] = v
+
+    if base_config_path.exists():
+        with open(base_config_path, 'r') as f:
+            cfg = yaml.safe_load(f)
+            print(f"[EVAL] Loaded base defaults from {base_config_path}")
+    
+    # Determine the experiment-specific config path
     original_config_path = Path(f"configs/{exp_name}.yaml")
     if original_config_path.exists():
-        with open(original_config_path, 'r') as f_cfg:
-            cfg = yaml.safe_load(f_cfg)
+        config_to_load = original_config_path
     else:
         # Fallback to per-experiment config.yaml
-        config_path = exp_path / "config.yaml"
-        with open(config_path) as f_cfg: cfg = yaml.safe_load(f_cfg)
+        config_to_load = exp_path / "config.yaml"
+
+    with open(config_to_load, 'r') as f:
+        exp_cfg = yaml.safe_load(f)
+        # Use deep_merge for inheritance
+        deep_merge(cfg, exp_cfg)
     
     # Config 파싱 - Training과 동일 (load_and_evaluate line 참조)
     curr_input_vars = cfg.get("input_vars")

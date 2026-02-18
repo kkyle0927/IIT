@@ -4,8 +4,8 @@
     "test_rmse": 0.050144292414188385,
     "n_params": 400793,
     "model_size_mb": 1.5289,
-    "host_latency_ms": 2.4629,
-    "host_max_freq_hz": 406.03,
+    "host_latency_ms": 2.5215,
+    "host_max_freq_hz": 396.59,
     "config": {
         "shared": {
             "data_sources": {

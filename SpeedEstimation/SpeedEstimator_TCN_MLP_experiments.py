@@ -1642,9 +1642,14 @@ def train_experiment(
     # but YAML anchors create separate copies in 02_train.model, so we must merge)
     shared_model = config.get("shared", {}).get("model", {})
     if shared_model:
-        for k, v in shared_model.items():
-            if k not in model_cfg or model_cfg[k] != v:
-                model_cfg[k] = v
+        def deep_merge(base, override):
+            """Deep merge override dict into base dict"""
+            for k, v in override.items():
+                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                    deep_merge(base[k], v)
+                else:
+                    base[k] = v
+        deep_merge(model_cfg, shared_model)
 
     batch_size = loader_cfg.get("batch_size") or config.get("batch_size")
     val_batch_size = loader_cfg.get("val_batch_size") or config.get("val_batch_size") or batch_size
@@ -1703,9 +1708,14 @@ def train_experiment(
     # [NEW] Merge overrides from shared.data (same anchor duplication issue as model)
     shared_data = config.get("shared", {}).get("data", {})
     if shared_data:
-        for k, v in shared_data.items():
-            if k not in data_cfg or data_cfg[k] != v:
-                data_cfg[k] = v
+        def deep_merge_data(base, override):
+            """Deep merge override dict into base dict"""
+            for k, v in override.items():
+                if k in base and isinstance(base[k], dict) and isinstance(v, dict):
+                    deep_merge_data(base[k], v)
+                else:
+                    base[k] = v
+        deep_merge_data(data_cfg, shared_data)
     
     print(f"[DEBUG-R] data_cfg keys: {list(data_cfg.keys())}")
     
@@ -1952,6 +1962,13 @@ def train_experiment(
         with torch.no_grad():
             for xb, yb in val_pbar:
                 xb, yb = xb.to(device), yb.to(device)
+                
+                # [NEW] AR Feedback Validation: append zero channel (inference mode)
+                if ar_enable:
+                    B, T_in, _ = xb.shape
+                    prev_channel = torch.zeros(B, T_in, ar_k, device=device)
+                    xb = torch.cat([xb, prev_channel], dim=-1)
+                
                 pred = model(xb)
                 
                 if use_weighted_loss:
@@ -2024,6 +2041,13 @@ def train_experiment(
     with torch.no_grad():
         for xb, yb in test_loader:
             xb, yb = xb.to(device), yb.to(device)
+            
+            # [NEW] AR Feedback Test: append zero channel (inference mode)
+            if ar_enable:
+                B, T_in, _ = xb.shape
+                prev_channel = torch.zeros(B, T_in, ar_k, device=device)
+                xb = torch.cat([xb, prev_channel], dim=-1)
+                
             pred = model(xb)
             
             if use_weighted_loss:

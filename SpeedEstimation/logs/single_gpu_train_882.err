@@ -1,0 +1,24 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1779, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=False)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 682, in load_and_evaluate
+    input_norm_type = model_cfg.get("input_norm_type", model_norm_type or "layer")
+UnboundLocalError: local variable 'model_norm_type' referenced before assignment
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1779, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=False)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 682, in load_and_evaluate
+    input_norm_type = model_cfg.get("input_norm_type", model_norm_type or "layer")
+UnboundLocalError: local variable 'model_norm_type' referenced before assignment
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1779, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=False)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 682, in load_and_evaluate
+    input_norm_type = model_cfg.get("input_norm_type", model_norm_type or "layer")
+UnboundLocalError: local variable 'model_norm_type' referenced before assignment
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1779, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=False)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 682, in load_and_evaluate
+    input_norm_type = model_cfg.get("input_norm_type", model_norm_type or "layer")
+UnboundLocalError: local variable 'model_norm_type' referenced before assignment

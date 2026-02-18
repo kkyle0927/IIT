@@ -1,0 +1,735 @@
+Job started on server1 at Mon Feb 16 11:04:25 PM KST 2026
+CUDA_VISIBLE_DEVICES=0,1,2
+GPU 0: NVIDIA RTX A5000 (UUID: GPU-f411cc27-8b1b-872b-45e8-d981ad07efac)
+GPU 1: NVIDIA RTX A5000 (UUID: GPU-a792101e-894b-2a35-89fd-d11e1db52899)
+GPU 2: NVIDIA RTX A5000 (UUID: GPU-0419b0c5-28d5-d3c3-b641-5b0ae0dfd5bf)
+[setup] Detected 3 GPUs allocated by SLURM.
+[SCHEDULER] Starting queue (13 items).
+[SCHEDULER] Launching baseline.yaml on GPU 0
+[SCHEDULER] Launching exp_attention.yaml on GPU 1
+[SCHEDULER] Launching exp_euler_angles.yaml on GPU 2
+[SCHEDULER] GPU 1 job finished.
+[SCHEDULER] Launching exp_no_gyro.yaml on GPU 1
+[SCHEDULER] GPU 0 job finished.
+[SCHEDULER] Launching exp_shallow_tcn.yaml on GPU 0
+[SCHEDULER] GPU 2 job finished.
+[SCHEDULER] Launching exp_stride_02.yaml on GPU 2
+[SCHEDULER] GPU 1 job finished.
+[SCHEDULER] Launching exp_stride_05.yaml on GPU 1
+[SCHEDULER] GPU 0 job finished.
+[SCHEDULER] Launching exp_stride_10.yaml on GPU 0
+[SCHEDULER] GPU 2 job finished.
+[SCHEDULER] Launching exp_stride_20.yaml on GPU 2
+[SCHEDULER] GPU 1 job finished.
+[SCHEDULER] Launching exp_win_030.yaml on GPU 1
+[SCHEDULER] GPU 0 job finished.
+[SCHEDULER] Launching exp_win_050.yaml on GPU 0
+[SCHEDULER] GPU 2 job finished.
+[SCHEDULER] Launching exp_win_100.yaml on GPU 2
+[SCHEDULER] GPU 1 job finished.
+[SCHEDULER] Launching exp_win_400.yaml on GPU 1
+[SCHEDULER] GPU 0 job finished.
+[SCHEDULER] GPU 2 job finished.
+[SCHEDULER] GPU 1 job finished.
+[SCHEDULER] All training jobs finished. Starting comparison...
+No display found. Using non-interactive Agg backend.
+[INFO] Resources optimized: 1 GPU, 16 CPU Threads max.
+[AUTO] Searching for all subfolders in experiments
+[AUTO] Found 39 experiments to analyze.
+
+============================================================
+[EVAL] exp_stride_20_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_20.yaml
+Skipping exp_stride_20_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_shallow_tcn_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_shallow_tcn.yaml
+Skipping exp_shallow_tcn_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_05_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_05.yaml
+Skipping exp_stride_05_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_euler_angles_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_euler_angles.yaml
+Skipping exp_euler_angles_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_030_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_030.yaml
+Skipping exp_win_030_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_euler_angles_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_euler_angles.yaml
+Skipping exp_euler_angles_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_400_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_400.yaml
+Skipping exp_win_400_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_02_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_02.yaml
+Skipping exp_stride_02_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_05_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_05.yaml
+Skipping exp_stride_05_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_attention_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_attention.yaml
+Skipping exp_attention_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_10_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_10.yaml
+Skipping exp_stride_10_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_400_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_400.yaml
+Skipping exp_win_400_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_02_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_02.yaml
+Skipping exp_stride_02_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_02_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_02.yaml
+Skipping exp_stride_02_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_100_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_100.yaml
+Skipping exp_win_100_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_100_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_100.yaml
+Skipping exp_win_100_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_030_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_030.yaml
+Skipping exp_win_030_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_05_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_05.yaml
+Skipping exp_stride_05_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_attention_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_attention.yaml
+Skipping exp_attention_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_attention_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_attention.yaml
+Skipping exp_attention_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_shallow_tcn_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_shallow_tcn.yaml
+Skipping exp_shallow_tcn_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_no_gyro_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_no_gyro.yaml
+Skipping exp_no_gyro_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_no_gyro_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_no_gyro.yaml
+Skipping exp_no_gyro_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_20_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_20.yaml
+Skipping exp_stride_20_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_euler_angles_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_euler_angles.yaml
+Skipping exp_euler_angles_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_shallow_tcn_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_shallow_tcn.yaml
+Skipping exp_shallow_tcn_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_050_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_050.yaml
+Skipping exp_win_050_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] baseline_Test-m1_S011_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m1_S011...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+     Loaded 6 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m1_S011_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (70807, 2)
+[EVAL] Results: MAE=7.5991, RMSE=9.1904, R²=0.6982, Lag=3.3ms
+
+============================================================
+[EVAL] exp_win_100_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_100.yaml
+Skipping exp_win_100_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_10_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_10.yaml
+Skipping exp_stride_10_Test-m1_S011_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_20_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_20.yaml
+Skipping exp_stride_20_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_no_gyro_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_no_gyro.yaml
+Skipping exp_no_gyro_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] baseline_Test-m1_S004_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m1_S004...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+     Loaded 6 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m1_S004_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (71010, 2)
+[EVAL] Results: MAE=3.2845, RMSE=4.1151, R²=0.9322, Lag=5.0ms
+
+============================================================
+[EVAL] exp_win_050_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_050.yaml
+Skipping exp_win_050_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_stride_10_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_10.yaml
+Skipping exp_stride_10_Test-m1_S004_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] baseline_Test-m2_S008_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m2_S008...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+     Loaded 20 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m2_S008_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (379575, 2)
+[EVAL] Results: MAE=12.2966, RMSE=13.2422, R²=0.5136, Lag=6.5ms
+
+============================================================
+[EVAL] exp_win_050_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_050.yaml
+Skipping exp_win_050_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_400_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_400.yaml
+Skipping exp_win_400_Test-m2_S008_seed42: Missing input/output vars in config.
+
+============================================================
+[EVAL] exp_win_030_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_030.yaml
+Skipping exp_win_030_Test-m1_S011_seed42: Missing input/output vars in config.
+
+[INFO] Generating detailed reports for 3 results...
+[1/3] Processing: baseline_Test-m1_S011_seed42 -> baseline_Test-m1_S011_seed42
+Saved compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/training_curves.png
+
+============================================================
+[EVAL] baseline_Test-m1_S011_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m1_S011...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+     Loaded 6 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m1_S011_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (70807, 2)
+[EVAL] Results: MAE=7.5991, RMSE=9.1904, R²=0.6982, Lag=3.3ms
+  [SAVED] Trajectory plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/trajectory.png
+[INFO] Generating Detailed Grid Plots for baseline_Test-m1_S011_seed42...
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/m1_S011_level_08mps.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/m1_S011_level_12mps.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/m1_S011_level_16mps.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/m1_S011_accel_sine.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/m1_S011_decline_5deg.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S011_seed42/baseline_Test-m1_S011_seed42/m1_S011_incline_10deg.png
+  -> Calculating Feature Importance for baseline_Test-m1_S011_seed42...
+  [ERROR] Failed to generate plots for baseline_Test-m1_S011_seed42: Error(s) in loading state_dict for TCN_MLP:
+	size mismatch for head_out.weight: copying a param with shape torch.Size([2, 64]) from checkpoint, the shape in current model is torch.Size([1, 64]).
+	size mismatch for head_out.bias: copying a param with shape torch.Size([2]) from checkpoint, the shape in current model is torch.Size([1]).
+[2/3] Processing: baseline_Test-m1_S004_seed42 -> baseline_Test-m1_S004_seed42
+Saved compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/training_curves.png
+
+============================================================
+[EVAL] baseline_Test-m1_S004_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m1_S004...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+     Loaded 6 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m1_S004_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (71010, 2)
+[EVAL] Results: MAE=3.2845, RMSE=4.1151, R²=0.9322, Lag=5.0ms
+  [SAVED] Trajectory plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/trajectory.png
+[INFO] Generating Detailed Grid Plots for baseline_Test-m1_S004_seed42...
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/m1_S004_level_08mps.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/m1_S004_level_12mps.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/m1_S004_level_16mps.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/m1_S004_accel_sine.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/m1_S004_decline_5deg.png
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+  [SAVED] Detail Plot: compare_result/baseline_Test-m1_S004_seed42/baseline_Test-m1_S004_seed42/m1_S004_incline_10deg.png
+  -> Calculating Feature Importance for baseline_Test-m1_S004_seed42...
+  [ERROR] Failed to generate plots for baseline_Test-m1_S004_seed42: Error(s) in loading state_dict for TCN_MLP:
+	size mismatch for head_out.weight: copying a param with shape torch.Size([2, 64]) from checkpoint, the shape in current model is torch.Size([1, 64]).
+	size mismatch for head_out.bias: copying a param with shape torch.Size([2]) from checkpoint, the shape in current model is torch.Size([1]).
+[3/3] Processing: baseline_Test-m2_S008_seed42 -> baseline_Test-m2_S008_seed42
+Saved compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/training_curves.png
+
+============================================================
+[EVAL] baseline_Test-m2_S008_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m2_S008...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+     Loaded 20 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m2_S008_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (379575, 2)
+[EVAL] Results: MAE=12.2966, RMSE=13.2422, R²=0.5136, Lag=6.5ms
+  [SAVED] Trajectory plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/trajectory.png
+[INFO] Generating Detailed Grid Plots for baseline_Test-m2_S008_seed42...
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_level_075mps.png
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_level_100mps.png
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_level_125mps.png
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_accel_sine.png
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_decline_5deg.png
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_incline_10deg.png
+  [SAVED] Detail Plot: compare_result/baseline_Test-m2_S008_seed42/baseline_Test-m2_S008_seed42/m2_S008_stopandgo.png
+  -> Calculating Feature Importance for baseline_Test-m2_S008_seed42...
+  [ERROR] Failed to generate plots for baseline_Test-m2_S008_seed42: Error(s) in loading state_dict for TCN_MLP:
+	size mismatch for head_out.weight: copying a param with shape torch.Size([2, 64]) from checkpoint, the shape in current model is torch.Size([1, 64]).
+	size mismatch for head_out.bias: copying a param with shape torch.Size([2]) from checkpoint, the shape in current model is torch.Size([1]).
+Starting Ablation Analysis Report...
+Found 39 potential experiment folders.
+[1/39] Evaluating baseline_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] baseline_Test-m1_S004_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m1_S004...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+     Loaded 6 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m1_S004_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (71010, 2)
+[EVAL] Results: MAE=3.2845, RMSE=4.1151, R²=0.9322, Lag=5.0ms
+[2/39] Evaluating baseline_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] baseline_Test-m1_S011_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m1_S011...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+[INFO] Loaded motor_angle as fallback for hip_angle
+     Loaded 6 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m1_S011_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (70807, 2)
+[EVAL] Results: MAE=7.5991, RMSE=9.1904, R²=0.6982, Lag=3.3ms
+[3/39] Evaluating baseline_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] baseline_Test-m2_S008_seed42
+[EVAL] Config: configs/baseline.yaml
+[EVAL] Data: win_in=200, win_out=1, stride_train=5, stride_eval=1
+[EVAL] est_tick_ranges=[0]
+[EVAL] Loading Test Data for Subject m2_S008...
+[DATA] Loading Multi-Source: keys=['m1_', 'm2_']
+     Loaded 20 trials
+[EVAL] Applying scaler from experiments/baseline_Test-m2_S008_seed42/scaler.npz (mean shape=(8,))
+[EVAL] Model: type=TCN, ch=[32, 64, 64, 128], k=5
+[EVAL] Dropout=0.5, head_dropout=0.5, hidden=[64]
+[EVAL] use_input_norm=True, norm_type=layer
+[EVAL] input_dim=8, output_dim=2, horizon=1
+[EVAL] Final y_pred shape: (379575, 2)
+[EVAL] Results: MAE=12.2966, RMSE=13.2422, R²=0.5136, Lag=6.5ms
+[4/39] Evaluating exp_attention_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_attention_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_attention.yaml
+Skipping exp_attention_Test-m1_S004_seed42: Missing input/output vars in config.
+[5/39] Evaluating exp_attention_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_attention_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_attention.yaml
+Skipping exp_attention_Test-m1_S011_seed42: Missing input/output vars in config.
+[6/39] Evaluating exp_attention_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_attention_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_attention.yaml
+Skipping exp_attention_Test-m2_S008_seed42: Missing input/output vars in config.
+[7/39] Evaluating exp_euler_angles_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_euler_angles_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_euler_angles.yaml
+Skipping exp_euler_angles_Test-m1_S004_seed42: Missing input/output vars in config.
+[8/39] Evaluating exp_euler_angles_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_euler_angles_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_euler_angles.yaml
+Skipping exp_euler_angles_Test-m1_S011_seed42: Missing input/output vars in config.
+[9/39] Evaluating exp_euler_angles_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_euler_angles_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_euler_angles.yaml
+Skipping exp_euler_angles_Test-m2_S008_seed42: Missing input/output vars in config.
+[10/39] Evaluating exp_no_gyro_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_no_gyro_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_no_gyro.yaml
+Skipping exp_no_gyro_Test-m1_S004_seed42: Missing input/output vars in config.
+[11/39] Evaluating exp_no_gyro_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_no_gyro_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_no_gyro.yaml
+Skipping exp_no_gyro_Test-m1_S011_seed42: Missing input/output vars in config.
+[12/39] Evaluating exp_no_gyro_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_no_gyro_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_no_gyro.yaml
+Skipping exp_no_gyro_Test-m2_S008_seed42: Missing input/output vars in config.
+[13/39] Evaluating exp_shallow_tcn_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_shallow_tcn_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_shallow_tcn.yaml
+Skipping exp_shallow_tcn_Test-m1_S004_seed42: Missing input/output vars in config.
+[14/39] Evaluating exp_shallow_tcn_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_shallow_tcn_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_shallow_tcn.yaml
+Skipping exp_shallow_tcn_Test-m1_S011_seed42: Missing input/output vars in config.
+[15/39] Evaluating exp_shallow_tcn_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_shallow_tcn_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_shallow_tcn.yaml
+Skipping exp_shallow_tcn_Test-m2_S008_seed42: Missing input/output vars in config.
+[16/39] Evaluating exp_stride_02_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_stride_02_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_02.yaml
+Skipping exp_stride_02_Test-m1_S004_seed42: Missing input/output vars in config.
+[17/39] Evaluating exp_stride_02_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_stride_02_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_02.yaml
+Skipping exp_stride_02_Test-m1_S011_seed42: Missing input/output vars in config.
+[18/39] Evaluating exp_stride_02_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_stride_02_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_02.yaml
+Skipping exp_stride_02_Test-m2_S008_seed42: Missing input/output vars in config.
+[19/39] Evaluating exp_stride_05_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_stride_05_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_05.yaml
+Skipping exp_stride_05_Test-m1_S004_seed42: Missing input/output vars in config.
+[20/39] Evaluating exp_stride_05_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_stride_05_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_05.yaml
+Skipping exp_stride_05_Test-m1_S011_seed42: Missing input/output vars in config.
+[21/39] Evaluating exp_stride_05_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_stride_05_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_05.yaml
+Skipping exp_stride_05_Test-m2_S008_seed42: Missing input/output vars in config.
+[22/39] Evaluating exp_stride_10_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_stride_10_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_10.yaml
+Skipping exp_stride_10_Test-m1_S004_seed42: Missing input/output vars in config.
+[23/39] Evaluating exp_stride_10_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_stride_10_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_10.yaml
+Skipping exp_stride_10_Test-m1_S011_seed42: Missing input/output vars in config.
+[24/39] Evaluating exp_stride_10_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_stride_10_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_10.yaml
+Skipping exp_stride_10_Test-m2_S008_seed42: Missing input/output vars in config.
+[25/39] Evaluating exp_stride_20_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_stride_20_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_stride_20.yaml
+Skipping exp_stride_20_Test-m1_S004_seed42: Missing input/output vars in config.
+[26/39] Evaluating exp_stride_20_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_stride_20_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_stride_20.yaml
+Skipping exp_stride_20_Test-m1_S011_seed42: Missing input/output vars in config.
+[27/39] Evaluating exp_stride_20_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_stride_20_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_stride_20.yaml
+Skipping exp_stride_20_Test-m2_S008_seed42: Missing input/output vars in config.
+[28/39] Evaluating exp_win_030_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_win_030_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_030.yaml
+Skipping exp_win_030_Test-m1_S004_seed42: Missing input/output vars in config.
+[29/39] Evaluating exp_win_030_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_win_030_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_030.yaml
+Skipping exp_win_030_Test-m1_S011_seed42: Missing input/output vars in config.
+[30/39] Evaluating exp_win_030_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_win_030_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_030.yaml
+Skipping exp_win_030_Test-m2_S008_seed42: Missing input/output vars in config.
+[31/39] Evaluating exp_win_050_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_win_050_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_050.yaml
+Skipping exp_win_050_Test-m1_S004_seed42: Missing input/output vars in config.
+[32/39] Evaluating exp_win_050_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_win_050_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_050.yaml
+Skipping exp_win_050_Test-m1_S011_seed42: Missing input/output vars in config.
+[33/39] Evaluating exp_win_050_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_win_050_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_050.yaml
+Skipping exp_win_050_Test-m2_S008_seed42: Missing input/output vars in config.
+[34/39] Evaluating exp_win_100_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_win_100_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_100.yaml
+Skipping exp_win_100_Test-m1_S004_seed42: Missing input/output vars in config.
+[35/39] Evaluating exp_win_100_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_win_100_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_100.yaml
+Skipping exp_win_100_Test-m1_S011_seed42: Missing input/output vars in config.
+[36/39] Evaluating exp_win_100_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_win_100_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_100.yaml
+Skipping exp_win_100_Test-m2_S008_seed42: Missing input/output vars in config.
+[37/39] Evaluating exp_win_400_Test-m1_S004_seed42...
+
+============================================================
+[EVAL] exp_win_400_Test-m1_S004_seed42
+[EVAL] Config: configs/exp_win_400.yaml
+Skipping exp_win_400_Test-m1_S004_seed42: Missing input/output vars in config.
+[38/39] Evaluating exp_win_400_Test-m1_S011_seed42...
+
+============================================================
+[EVAL] exp_win_400_Test-m1_S011_seed42
+[EVAL] Config: configs/exp_win_400.yaml
+Skipping exp_win_400_Test-m1_S011_seed42: Missing input/output vars in config.
+[39/39] Evaluating exp_win_400_Test-m2_S008_seed42...
+
+============================================================
+[EVAL] exp_win_400_Test-m2_S008_seed42
+[EVAL] Config: configs/exp_win_400.yaml
+Skipping exp_win_400_Test-m2_S008_seed42: Missing input/output vars in config.
+
+Baseline (baseline) found: MAE=7.7267
+
+====================================================================================================
+Experiment Group                         | MAE      | Delta    | % Chg    | Lag(ms) 
+----------------------------------------------------------------------------------------------------
+baseline                                 | 7.7267   | +0.0000   | +0.0%    | 4.9
+====================================================================================================
+
+Saved Summary CSV to: compare_result/final_ablation_summary.csv
+Saved plots to compare_result/

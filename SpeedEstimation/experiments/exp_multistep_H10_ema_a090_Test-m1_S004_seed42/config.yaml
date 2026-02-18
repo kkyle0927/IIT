@@ -1,0 +1,207 @@
+02_train:
+  data:
+    est_tick_ranges:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    - 10
+    normalize: true
+    normalize_type: standard
+    stride: 5
+    stride_inf: 1
+    time_window_output: 10
+    use_gait_phase: false
+    use_physical_velocity_model: false
+    window_size: 300
+    y_delay: 5
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model: &id003
+    attention_heads: 0
+    attention_type: null
+    channels: &id005
+    - 32
+    - 32
+    - 64
+    - 64
+    - 128
+    - 128
+    dropout: 0.2
+    gating_signal: null
+    head_dropout: 0.5
+    head_hidden:
+    - 64
+    kernel_size: 5
+    model_norm: layer
+    norm_type: layer
+    type: TCN
+    use_input_norm: true
+    use_norm: true
+  train:
+    amp: true
+    augment_noise_std: 0.03
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 1e-04
+    early_stop_patience: 10
+    early_stop_warmup: 10
+    epochs: 30
+    eta_min: 1.0e-05
+    huber_delta: 0.1
+    k_fold: 4
+    kinematic_loss_degrees: false
+    kinematic_loss_tolerance: 0.05
+    kinematic_loss_weight_limit: 0
+    kinematic_loss_weight_pos: 0.0
+    loss: huber
+    loss_penalty: null
+    loss_penalty_cutoff: null
+    loss_penalty_weight: 0.0
+    lr: 0.001
+    save_dir: ./runs_tcn
+    smoothness_loss_weight: 0.0
+    task_type: regression
+    train_loss_target: 0.0
+    wd: 0.001
+03_eval:
+  data: &id002
+    est_tick_ranges:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    - 7
+    - 8
+    - 9
+    - 10
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 10
+    window_size: 300
+    y_delay: 5
+  ema_alpha: 0.9
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m1_S004
+    - m2_S008
+    - m1_S011
+    manual:
+      test:
+      - m2_S008
+      val:
+      - m2_S007
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id001
+- level_08mps
+- level_12mps
+- level_16mps
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data.h5
+est_tick_ranges:
+- 5
+exp_name: exp_multistep_H10_ema_a090
+shared:
+  conditions: *id001
+  data: *id002
+  data_sources:
+    milestone1:
+      exclude_subjects:
+      - S001
+      - S002
+      - S003
+      path: ./combined_data_milestone1.h5
+      prefix: m1_
+    milestone2:
+      exclude_subjects: []
+      path: ./combined_data.h5
+      prefix: m2_
+  input_vars:
+  - - mocap/kin_q
+    - - hip_flexion_l
+      - hip_flexion_r
+      - knee_angle_l
+      - knee_angle_r
+      - ankle_angle_l
+      - ankle_angle_r
+  - - mocap/kin_q
+    - - hip_flexion_l_dot
+      - hip_flexion_r_dot
+      - knee_angle_l_dot
+      - knee_angle_r_dot
+      - ankle_angle_l_dot
+      - ankle_angle_r_dot
+  - - mocap/kin_q
+    - - hip_flexion_l_ddot
+      - hip_flexion_r_ddot
+      - knee_angle_l_ddot
+      - knee_angle_r_ddot
+      - ankle_angle_l_ddot
+      - ankle_angle_r_ddot
+  - - robot/back_imu
+    - - accel_x
+      - accel_y
+      - accel_z
+      - gyro_x
+      - gyro_y
+      - gyro_z
+  - - forceplate/grf/left
+    - - x
+      - y
+      - z
+  - - forceplate/grf/right
+    - - x
+      - y
+      - z
+  lpf_cutoff: 0.5
+  lpf_order: 4
+  model: *id003
+  output_vars:
+  - - treadmill/left
+    - - speed_leftbelt
+  subjects: &id004
+  - m1_S004
+  - m1_S005
+  - m1_S006
+  - m1_S007
+  - m1_S008
+  - m1_S009
+  - m1_S010
+  - m1_S011
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+subjects: *id004
+tcn_channels: *id005
