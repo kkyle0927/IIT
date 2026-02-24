@@ -1,11 +1,11 @@
 {
-    "test_huber": 0.003952207411550096,
-    "test_mae": 0.031293876469135284,
-    "test_rmse": 0.04976050183176994,
+    "test_huber": 0.004587503241096288,
+    "test_mae": 0.03700978681445122,
+    "test_rmse": 0.05742422863841057,
     "n_params": 401181,
     "model_size_mb": 1.5304,
-    "host_latency_ms": 2.5197,
-    "host_max_freq_hz": 396.88,
+    "host_latency_ms": 2.5923,
+    "host_max_freq_hz": 385.76,
     "config": {
         "shared": {
             "data_sources": {

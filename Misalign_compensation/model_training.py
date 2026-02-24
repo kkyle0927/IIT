@@ -537,7 +537,7 @@ def extract_condition_data_v2(
                     if p in grp: grp = grp[p]
                     else: missing_grp=True; break
                 
-                if missing_grp:
+                if missing_grp and gpath != "derived":
                     print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing group {gpath}")
                     valid_trial = False
                     break
@@ -635,6 +635,8 @@ def extract_condition_data_v2(
                          side = 'left' if '_L' in v_name else 'right'
                          z_path = f"forceplate/grf/{side}/z"
                          z_data = get_data_from_group(trial_group, z_path)
+                         if sub.startswith("m2_"):
+                             z_data = -z_data
                          if z_data is not None:
                              cont = get_ground_contact(z_data)
                              # Calculate Phase
@@ -1216,8 +1218,9 @@ class TemporalBlock(nn.Module):
         return self.relu(out + res)
 
 class TCNEncoder(nn.Module):
-    def __init__(self, input_dim, channels=(64, 64, 128), kernel_size=3, dropout=0.1, norm_type=None):
+    def __init__(self, input_dim, channels=(64, 64, 128), kernel_size=3, dropout=0.1, norm_type=None, return_last=True):
         super().__init__()
+        self.return_last = return_last
         
         layers = []
         in_ch = input_dim
@@ -1236,7 +1239,10 @@ class TCNEncoder(nn.Module):
             x = x.unsqueeze(1)
         x = x.transpose(1, 2)
         y = self.network(x)
-        return y[:, :, -1]
+        if self.return_last:
+            return y[:, :, -1]
+        else:
+            return y.transpose(1, 2)
 
 # KinematicChainLoss moved to losses.py
 
@@ -1441,6 +1447,73 @@ class AttentionTCN(TCN_MLP):
 # -------------------------------------------------------------------------------------------------
 # Training Function (Accepts Config)
 # -------------------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------------------------------
+# TCN + GRU Hybrid Model
+# -------------------------------------------------------------------------------------------------
+class TCN_GRU(TCN_MLP):
+    def __init__(self, input_dim, output_dim, horizon, channels=(64,64,128), kernel_size=3, 
+                 dropout=0.1, head_dropout=None, mlp_hidden=128,
+                 gru_hidden=64, gru_layers=1, bidirectional=False, **kwargs):
+        super().__init__(input_dim, output_dim, horizon, channels, kernel_size, dropout, 
+                         head_dropout, mlp_hidden, **kwargs)
+        
+        # Override Encoder to return sequence
+        tcn_norm = kwargs.get('tcn_norm', None)
+        self.enc = TCNEncoder(input_dim, channels, kernel_size, dropout, norm_type=tcn_norm, return_last=False)
+        
+        # GRU Layer
+        tcn_out_dim = channels[-1]
+        self.gru_hidden = gru_hidden
+        self.gru_layers = gru_layers
+        self.bidirectional = bidirectional
+        
+        self.gru = nn.GRU(tcn_out_dim, gru_hidden, num_layers=gru_layers, 
+                          batch_first=True, dropout=dropout if gru_layers>1 else 0.0,
+                          bidirectional=bidirectional)
+        
+        # Rebuild Head
+        gru_out_dim = gru_hidden * (2 if bidirectional else 1)
+        
+        head_layers = []
+        if isinstance(mlp_hidden, int): mlp_hidden = [mlp_hidden]
+        if head_dropout is None: head_dropout = dropout
+        mlp_norm = kwargs.get('mlp_norm', None)
+        
+        curr_in = gru_out_dim
+        for h_size in mlp_hidden:
+            head_layers.append(nn.Linear(curr_in, h_size))
+            if mlp_norm == 'layer': head_layers.append(nn.LayerNorm(h_size))
+            elif mlp_norm == 'batch': head_layers.append(nn.LayerNorm(h_size))
+            head_layers.append(nn.ReLU())
+            if head_dropout > 0: head_layers.append(nn.Dropout(head_dropout))
+            curr_in = h_size
+            
+        self.head_base = nn.Sequential(*head_layers)
+        self.head_out = nn.Linear(curr_in, horizon * output_dim)
+
+    def forward(self, x):
+        if x.dim() == 2: x = x.unsqueeze(1)
+        if self.use_input_norm:
+            if isinstance(self.input_norm, nn.InstanceNorm1d):
+                x = x.transpose(1, 2); x = self.input_norm(x); x = x.transpose(1, 2)
+            else:
+                x = self.input_norm(x)
+        
+        # TCN (B, T, C)
+        ctx = self.enc(x)
+        
+        # GRU (B, T, H)
+        out, _ = self.gru(ctx)
+        
+        # Last step
+        last_out = out[:, -1, :]
+        
+        feat = self.head_base(last_out)
+        out = self.head_out(feat)
+        
+        if self.horizon > 1: out = out.view(-1, self.horizon, self.output_dim)
+        return out
 
 # -------------------------------------------------------------------------------------------------
 # Resource Calculation Helper
@@ -1657,6 +1730,12 @@ def train_experiment(
         attn_type = model_cfg.get("attention_type", "temporal")
         heads = model_cfg.get("attention_heads", 4)
         model = AttentionTCN(**common_args, attention_type=attn_type, attention_heads=heads)
+
+    elif model_type == "TCN_GRU":
+        gru_hidden = model_cfg.get("gru_hidden", 64)
+        gru_layers = model_cfg.get("gru_layers", 1)
+        bidirectional = model_cfg.get("bidirectional", False)
+        model = TCN_GRU(**common_args, gru_hidden=gru_hidden, gru_layers=gru_layers, bidirectional=bidirectional)
         
     else:
         # Default TCN_MLP

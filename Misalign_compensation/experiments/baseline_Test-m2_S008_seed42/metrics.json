@@ -1,11 +1,11 @@
 {
-    "test_huber": 11.088999711303197,
-    "test_mae": 10.7908296585083,
-    "test_rmse": 11.933486938476562,
-    "n_params": 221938,
-    "model_size_mb": 0.8466,
-    "host_latency_ms": 1.7563,
-    "host_max_freq_hz": 569.37,
+    "test_huber": 10.045403591310135,
+    "test_mae": 9.018072128295898,
+    "test_rmse": 10.696932792663574,
+    "n_params": 221356,
+    "model_size_mb": 0.8444,
+    "host_latency_ms": 1.7964,
+    "host_max_freq_hz": 556.68,
     "config": {
         "shared": {
             "data_sources": {
@@ -56,14 +56,11 @@
             ],
             "input_vars": [
                 [
-                    "robot/back_imu",
+                    "derived/euler",
                     [
-                        "accel_x",
-                        "accel_y",
-                        "accel_z",
-                        "gyro_x",
-                        "gyro_y",
-                        "gyro_z"
+                        "roll",
+                        "pitch",
+                        "yaw"
                     ]
                 ],
                 [
@@ -98,7 +95,7 @@
                 ],
                 "normalize": true,
                 "time_window_output": 1,
-                "use_complementary_filter_euler": false
+                "use_complementary_filter_euler": true
             },
             "model": {
                 "type": "TCN",
@@ -132,7 +129,7 @@
                 ],
                 "normalize": true,
                 "time_window_output": 1,
-                "use_complementary_filter_euler": false,
+                "use_complementary_filter_euler": true,
                 "normalize_type": "standard"
             },
             "model": {
@@ -211,7 +208,7 @@
                 ],
                 "normalize": true,
                 "time_window_output": 1,
-                "use_complementary_filter_euler": false
+                "use_complementary_filter_euler": true
             },
             "train": {
                 "device": "cuda"

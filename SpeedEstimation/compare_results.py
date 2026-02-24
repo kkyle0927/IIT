@@ -173,7 +173,13 @@ def calculate_lag(y_true, y_pred, fs=100, series_offsets=None):
     lag_idx = np.argmax(correlation)
     lag_samples = lags[lag_idx]
     
-    lag_ms = -lag_samples * (1000.0 / fs)
+    # [FIX] Positive lag => Prediction is DELAYED (behind truth).
+    # correlation_lags returns index shift. Positive lag means y_pred is shifted RIGHT (delayed) vs y_true?
+    # No, correlate(a, b). Argmax is shift of b relative to a.
+    # If y_pred is delayed (t+k), it matches y_true at lag k.
+    # So positive lag matches delay.
+    # Original code inverted it (-lag_samples).
+    lag_ms = lag_samples * (1000.0 / fs)
     return lag_ms
 
 def calculate_smoothness(y_pred, series_offsets=None):
@@ -470,7 +476,8 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
              print(f"Config file not found: {original_config_path} AND {local_config}. Skipping.")
              return None
     
-    # Load base config (baseline.yaml) first, just like training
+    # [FIX-CORRECTION] Training script DOES load baseline.yaml implicitly (lines 2595-2632).
+    # So we MUST load it here too for partial configs like 'exp_single_ema_a080'.
     base_config_path = Path("configs/baseline.yaml")
     cfg = {}
     

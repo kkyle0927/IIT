@@ -71,12 +71,15 @@ shared:
   # ---------------------------------------------------------------------------
   # [4] 입력 변수 정의 (30개 특성)
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # [4] 입력 변수 정의 (30개 특성)
+  # ---------------------------------------------------------------------------
   # 형식: ["그룹경로", ["변수1", "변수2", ...]]
   # _dot 접미사: 수치미분으로 각속도 계산
   # _ddot 접미사: 2차 수치미분으로 각가속도 계산
   input_vars: &INPUT_VARS
-    # Back IMU (6개)
-    - ["robot/back_imu", ["accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z"]]
+    # Euler Angles from Complementary Filter (Trunk Rotation 반영)
+    - ["derived/euler", ["roll", "pitch", "yaw"]]
     # Robot Hip Joint Angle (2개)
     - ["robot/left", ["hip_angle"]]
     - ["robot/right", ["hip_angle"]]
@@ -99,7 +102,7 @@ shared:
     est_tick_ranges: [0]   # 현재 시점
     normalize: true        # 입력 정규화 활성화
     time_window_output: 1  # 단일 스칼라 출력
-    use_complementary_filter_euler: false # 상보 필터(Euler Angle) 사용 여부 (기본 false)
+    use_complementary_filter_euler: true # 상보 필터(Euler Angle) 사용 여부 (기본 false)
 
   # ---------------------------------------------------------------------------
   # [8] 모델 구조 정의

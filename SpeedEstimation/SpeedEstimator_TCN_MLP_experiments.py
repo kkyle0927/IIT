@@ -24,8 +24,8 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 import torch
 import torch.nn.functional as F
 import torch.fft
-torch.set_num_threads(1)
-torch.set_num_interop_threads(1)
+torch.set_num_threads(8) # [FIX] Allow more threads for validation speed
+# torch.set_num_interop_threads(1)
 
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -1363,7 +1363,14 @@ class TCN_MLP(nn.Module):
         for h_size in h_list:
             head_layers.append(nn.Linear(curr_in, h_size))
             if mlp_norm == 'batch':
-                head_layers.append(nn.LayerNorm(h_size))
+                # [FIX] Use BatchNorm1d (requires B, C, seq_len? No, Linear is (B, *, H))
+                # MLP head inputs are (B, Hidden) or (B, T, Hidden)?
+                # TCN output ctx is (B, Hidden) (last step) or (B, T, Hidden) (if horizon>1?)
+                # Code says: ctx = self.enc(x) -> (B, C) (TCNEncoder returns last step)
+                # So we have (B, Features). BatchNorm1d expects (B, C) or (B, C, L).
+                # nn.Linear outputs (B, C). 
+                # So BatchNorm1d(h_size) is correct for 1D input (B, C).
+                head_layers.append(nn.BatchNorm1d(h_size))
             elif mlp_norm == 'layer':
                 head_layers.append(nn.LayerNorm(h_size))
             
@@ -1420,7 +1427,13 @@ class StanceGatedTCN(TCN_MLP):
         # Assuming args are passed positionally matching TCN_MLP, or kwargs.
         super().__init__(*args, **kwargs)
         
-        input_dim = kwargs.get('input_dim') if 'input_dim' in kwargs else args[0]
+        # [FIX] Safer arg extraction
+        if 'input_dim' in kwargs:
+            input_dim = kwargs['input_dim']
+        elif args:
+             input_dim = args[0]
+        else:
+             raise ValueError("StanceGatedTCN: 'input_dim' must be provided in args or kwargs.")
         
         # Gating Network: (B, T, In) -> (B, T, In)
         # Simple MLP per-step or shared weights? Shared weights (Conv1d(1)) or Linear.
@@ -1466,8 +1479,8 @@ class AttentionTCN(TCN_MLP):
         # We need to hack TCNEncoder or override it.
         # TCNEncoder is defined in this file.
         # We can wrap self.enc with a version that returns full sequence, 
-        # OR we just access self.enc.network directly?
-        pass
+        # [FIX] Initialize Attention weights here, not lazy
+        self.atten_w = nn.Linear(self.enc.out_ch, 1)
 
     def forward(self, x):
         # Handle 2D input (B, D) -> (B, 1, D)
@@ -1495,11 +1508,12 @@ class AttentionTCN(TCN_MLP):
         
         # Lazy Init check? No, do it in init?
         # In init, we can access self.enc.out_ch
-        if not hasattr(self, 'atten_layer'):
-             dim = self.enc.out_ch
-             self.atten_w = nn.Linear(dim, 1) # Score
-             self.atten_layer = True
-             self.atten_w.to(x.device) # Ensure device
+        # [FIX] Removed Lazy Init
+        # if not hasattr(self, 'atten_layer'):
+        #      dim = self.enc.out_ch
+        #      self.atten_w = nn.Linear(dim, 1) # Score
+        #      self.atten_layer = True
+        #      self.atten_w.to(x.device) # Ensure device
         
         # Calculate Scores
         # enc_seq: (B, C, T) -> (B, T, C)
@@ -1649,7 +1663,48 @@ def train_experiment(
                     deep_merge(base[k], v)
                 else:
                     base[k] = v
-        deep_merge(model_cfg, shared_model)
+        # [FIX] shared settings are defaults, model_cfg are overrides. 
+        # But here logic was inverted? No.
+        # If model_cfg has content (from anchor), and shared_model has SAME content (from anchor def).
+        # We want to ensure any experiment-specific overrides in 'model' are kept?
+        # Actually, YAML anchor ensures 02_train.model is a copy of shared.model.
+        # But if user wrote: 
+        # 02_train:
+        #   model:
+        #     <<: *NN_MODEL
+        #     dropout: 0.5
+        # Then model_cfg has dropout:0.5. shared_model has dropout:0.2.
+        # We want model_cfg to win.
+        # So we should merge shared INTO model_cfg (base=model_cfg, override=shared) ??
+        # No! Override overwrites base!
+        # deep_merge(base, override) -> override values win.
+        # So we want shared_model (defaults) to be BASE. model_cfg (specifics) to be OVERRIDE.
+        # But model_cfg is the object we use.
+        # So: deep_merge(model_cfg, shared_model) means shared_model overwrites model_cfg.
+        # THIS IS WRONG if we want model_cfg to persist.
+        # BUT: usually shared is "partial defaults" and model_cfg is "full"?
+        # Actually, in this codebase, shared.model is the "Golden Baseline".
+        # We want to ensure missing keys in model_cfg are filled from shared_model.
+        # But deep_merge as defined: base[k] = v. So it OVERWRITES.
+        # To fill missing keys only (Defaults), we should invert:
+        # deep_merge(base=model_cfg, override=shared_model) -> shared wins.
+        # Logic fix: We want shared to be applied ONLY if key missing?
+        # Let's use correct direction: Start with shared, merge model_cfg on top.
+        # final_cfg = copy.deepcopy(shared_model)
+        # deep_merge(final_cfg, model_cfg)
+        # model_cfg = final_cfg
+        
+        # Simpler fix respecting current structure:
+        # Invert merge direction logic in function or swap args?
+        # deep_merge(base, override) -> override wins.
+        # We want model_cfg (config) to win over shared (default).
+        # So deep_merge(shared_model, model_cfg) -> shared is updated with model_cfg.
+        # Then use shared_model as model_cfg.
+        
+        # Current code: deep_merge(model_cfg, shared_model) -> shared overwrites model.
+        # [FIX] Invert direction to respect experiment config.
+        deep_merge(shared_model, model_cfg) 
+        model_cfg = shared_model
 
     batch_size = loader_cfg.get("batch_size") or config.get("batch_size")
     val_batch_size = loader_cfg.get("val_batch_size") or config.get("val_batch_size") or batch_size
@@ -1701,8 +1756,9 @@ def train_experiment(
     # Dataset
     target_mode = "sequence"
     # Lazy Windowing (Stride & Windows passed here)
-    train_cfg = config.get("02_train", {})
-    data_cfg = train_cfg.get("data", {})
+    # [FIX] train_cfg variable name shadowing fix
+    train_section_cfg = config.get("02_train", {})
+    data_cfg = train_section_cfg.get("data", {})
     if not data_cfg: data_cfg = config.get("data", {}) # Fallback to root data if legacy
     
     # [NEW] Merge overrides from shared.data (same anchor duplication issue as model)
@@ -1730,7 +1786,7 @@ def train_experiment(
     print(f"[DEBUG] win_in={window_size}, win_out={window_output}, ranges={est_tick_ranges}, stride={stride}")
     
     # Augmentation Params
-    actual_train_params = train_cfg.get("train", {})
+    actual_train_params = train_section_cfg.get("train", {})
     aug_std = actual_train_params.get("augment_noise_std", 0.0)
     if aug_std > 0:
         print(f"[INFO] Training Data Augmentation Enabled: Gaussian Noise (std={aug_std})")
@@ -1887,15 +1943,39 @@ def train_experiment(
             xb, yb = xb.to(device), yb.to(device)
             
             # [NEW] AR Feedback: append prev_pred channel
+            # [NEW] AR Feedback: append prev_pred channel
             if ar_enable:
                 B, T_in, D = xb.shape
-                if random.random() < tf_ratio:
-                    # Teacher forcing: use ground truth (last output value = y at t-1)
-                    # Approximate: use the output LPF target value at the last input timestep
-                    prev_val = yb[:, 0:1, :] if yb.dim() == 3 else yb[:, :1].unsqueeze(1)
-                    prev_channel = prev_val.expand(B, T_in, 1)
-                else:
-                    prev_channel = torch.zeros(B, T_in, 1, device=device)
+                # [FIX] Label Leakage:
+                # Do NOT use yb (ground truth of current step) as input.
+                # Must use y at t-1.
+                # Since we don't have easy access to t-1 in this loop (shuffled batches),
+                # we should simply use 0-padding for training or Noise.
+                # Teacher Forcing in strictly autoregressive setup often uses "previous ground truth".
+                # But here yb corresponds to prediction target at T.
+                # If yb is aligned s.t. y[t] is target for x[t], then "previous output" is y[t-1].
+                # But LazyWindowDataset returns x[t:t+w] and y[t:t+w].
+                # So y[0] is target for x[0].
+                # We want input to be previous prediction.
+                # If we want Teacher Forcing with GT, we need y at t-1.
+                # We assume x contains kinematics. 
+                # Without modifying Dataset, we can't easily get y[t-1].
+                # However, for training stability, using Zero-padding (or noise) is safer 
+                # to prevent leakage, OR, assuming first step has 0 prev.
+                
+                # Correct "Teacher Forcing" implementation requires fetching Y[t-1].
+                # Given dataset limitation, we will USE ZEROS (or estimated) for now
+                # to fix the leakage. 
+                # Better: In LazyWindowDataset, return prev_y as extra item?
+                # For now: Fix Critical Leakage by using Zeros. 
+                # This makes it "No Teacher Forcing" (Student Forcing with 0 init).
+                # To support TF properly, we need dataset change. 
+                # But let's start by removing leakage.
+                prev_channel = torch.zeros(B, T_in, ar_k, device=device)
+                    
+                # if random.random() < tf_ratio:
+                #    ... (Disabled to prevent leakage until dataset supports y_prev) 
+                
                 xb = torch.cat([xb, prev_channel], dim=-1)
             
             optimizer.zero_grad(set_to_none=True)
@@ -1983,7 +2063,13 @@ def train_experiment(
         val_loss = val_running / max(1, len(val_loader))
         
         if scheduler:
-            scheduler.step(epoch - 1)
+            # [FIX] Scheduler step should use epoch index (start from 0) or simply .step()
+            # epoch starts at 1 in this loop.
+            # scheduler.step() expects no arg (updates internal counter) or epoch value.
+            # CosineAnnealingWarmRestarts: step(epoch=None). If None, internal step.
+            # If we pass epoch, it should be the float/int epoch.
+            # epoch 1 -> step(1).
+            scheduler.step()
             
         cur_lr = optimizer.param_groups[0]["lr"]
         epoch_time = time.time() - t0
@@ -2066,6 +2152,12 @@ def train_experiment(
     with torch.no_grad():
         for xb, yb in test_loader:
             xb = xb.to(device)
+            # [FIX] AR Feedback missing in test metric loop
+            if ar_enable:
+                B, T_in, _ = xb.shape
+                prev_channel = torch.zeros(B, T_in, ar_k, device=device)
+                xb = torch.cat([xb, prev_channel], dim=-1)
+
             pred = model(xb).cpu().numpy()
             
             # Align shapes before appending
@@ -2085,11 +2177,9 @@ def train_experiment(
     test_mae = np.mean(np.abs(err))
     test_rmse = np.sqrt(np.mean(err**2))
     
-    test_mae = np.mean(np.abs(err))
-    test_rmse = np.sqrt(np.mean(err**2))
-    
     # Calculate Resources
-    input_window = config.get("time_window_input", 100) # Fixed: X_train is list
+    # [FIX] Use correct window_size variable
+    input_window = window_size
     res_metrics = calculate_model_resources(model, input_dim, input_window, device)
     
     # [NEW] Multi-Step per-horizon metrics

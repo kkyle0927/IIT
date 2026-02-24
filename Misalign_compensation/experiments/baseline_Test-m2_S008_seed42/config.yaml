@@ -7,7 +7,7 @@
     stride: 5
     stride_inf: 1
     time_window_output: 1
-    use_complementary_filter_euler: false
+    use_complementary_filter_euler: true
     window_size: 200
     y_delay: 0
   loader:
@@ -52,7 +52,7 @@
     stride: 5
     stride_inf: 1
     time_window_output: 1
-    use_complementary_filter_euler: false
+    use_complementary_filter_euler: true
     window_size: 200
     y_delay: 0
   scaler_path: ./runs_tcn/scaler.npz
@@ -108,13 +108,10 @@ shared:
       path: ./combined_data.h5
       prefix: m2_
   input_vars:
-  - - robot/back_imu
-    - - accel_x
-      - accel_y
-      - accel_z
-      - gyro_x
-      - gyro_y
-      - gyro_z
+  - - derived/euler
+    - - roll
+      - pitch
+      - yaw
   - - robot/left
     - - hip_angle
   - - robot/right
