@@ -1,0 +1,107 @@
+# -----------------------------------------
+# Your existing rules
+# -----------------------------------------
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+# Debug info
+*.dwo
+
+# -----------------------------------------
+# STM32CubeIDE / Eclipse-specific ignores
+# -----------------------------------------
+
+# Build directories (auto-generated)
+Debug/
+Release/
+
+# IDE metadata
+.metadata/
+.settings/*prefs
+.settings/org.eclipse.cdt.core/*.*
+.settings/org.eclipse.cdt.make.core/*.*
+.settings/org.eclipse.core.resources.prefs
+
+# STM32Cube auto-generated files
+*.launch
+*.uvprojx
+*.uvoptx
+*.uvguix
+*.mxproject
+
+# CubeMX build artifacts
+*.ioc-backup
+*.ioc.save
+
+# Temporary/Cache
+*.i
+*.s
+*.lst
+
+# Log files
+*.log
+
+# Exclude build analyzer caches
+*.bak
+*.tmp
+
+# -----------------------------------------
+# Optional: ignore automatically generated
+# linker scripts or listing outputs
+# (uncomment only if your team does not track them)
+# -----------------------------------------
+# *.ld
+# *.map
+
+# HDF5 files
+*.h5
