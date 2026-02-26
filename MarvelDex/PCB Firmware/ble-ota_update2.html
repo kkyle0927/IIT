@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AngelRobo Firmware Update</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .step {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #007bff;
+        }
+        .step h2 {
+            margin-top: 0;
+            color: #007bff;
+            font-size: 18px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 5px 10px 0;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        input[type="file"] {
+            display: block;
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        #progressBar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        #progressFill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #20c997);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        #progressText {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            color: #333;
+            margin-top: 10px;
+        }
+        #status {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 13px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        #status div {
+            margin: 2px 0;
+        }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .info { color: #007bff; }
+        .warning { color: #ff9800; }
+        .file-info {
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .device-info {
+            padding: 10px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AngelRobo 펌웨어 업데이트</h1>
+        <p class="subtitle">마블덱스</p>
+        <p class="subtitle">ESP32-S3 장치 펌웨어를 BLE로 무선 업데이트</p>
+
+        <!-- Step 1: Firmware Selection -->
+        <div class="step">
+            <h2>단계 1: 펌웨어 파일 선택</h2>
+            <input type="file" id="fileInput" accept=".bin">
+            <div id="fileInfo" class="file-info">파일이 선택되지 않았습니다</div>
+        </div>
+
+        <!-- Step 2: Device Connection -->
+        <div class="step">
+            <h2>단계 2: 장치 연결</h2>
+            <p>USB 단자 옆 택트 버튼을 3~5초 누르세요.<br>
+            LED 색상 변화 : 흰색[0~1초] → 노랑[1~3초] → [꺼짐 3~5초 구간] → 보라[5초~]<br>
+            '꺼짐' 구간에서 손을 떼세요.<br><br>
+            손을 뗀 후에 파란 색이 점멸되면 아래 '장치 연결' 버튼을 눌러서 연결하세요.</p>
+            <button id="connectBtn">장치 연결</button>
+            <button id="disconnectBtn" disabled>연결 끊기</button>
+            <div id="deviceInfo" class="device-info">연결되지 않음</div>
+        </div>
+
+        <!-- Step 3: Upload Firmware -->
+        <div class="step">
+            <h2>단계 3: 펌웨어 업로드</h2>
+            <button id="uploadBtn" disabled>업로드 시작</button>
+            <div id="progressBar">
+                <div id="progressFill"></div>
+            </div>
+            <div id="progressText">0%</div>
+        </div>
+
+        <!-- Status Log -->
+        <div id="status"></div>
+    </div>
+
+    <script>
+        // BLE Service and Characteristic UUIDs
+        const OTA_SERVICE_UUID = '8ec86a80-7f3e-44d4-a50e-08b8bd49241c';
+        const OTA_CONTROL_UUID = '8ec86a81-7f3e-44d4-a50e-08b8bd49241c';
+        const OTA_DATA_UUID = '8ec86a82-7f3e-44d4-a50e-08b8bd49241c';
+        const OTA_STATUS_UUID = '8ec86a83-7f3e-44d4-a50e-08b8bd49241c';
+
+        // Global variables
+        let device = null;
+        let controlChar = null;
+        let dataChar = null;
+        let statusChar = null;
+        let firmwareData = null;
+
+        // DOM elements
+        const fileInput = document.getElementById('fileInput');
+        const fileInfo = document.getElementById('fileInfo');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const deviceInfo = document.getElementById('deviceInfo');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const progressBar = document.getElementById('progressBar');
+        const progressFill = document.getElementById('progressFill');
+        const progressText = document.getElementById('progressText');
+        const statusDiv = document.getElementById('status');
+
+        const MAX_LOG_LINES = 200;
+
+        // Logging function
+        function log(message, type = 'info') {
+            const logLine = document.createElement('div');
+            logLine.className = type;
+            logLine.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            statusDiv.appendChild(logLine);
+
+            while (statusDiv.children.length > MAX_LOG_LINES) {
+                statusDiv.removeChild(statusDiv.firstChild);
+            }
+
+            statusDiv.scrollTop = statusDiv.scrollHeight;
+        }
+
+        // File selection handler
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) {
+                fileInfo.textContent = '파일이 선택되지 않았습니다';
+                return;
+            }
+
+            if (!file.name.endsWith('.bin')) {
+                log('.bin 펌웨어 파일을 선택하세요', 'error');
+                fileInfo.textContent = '잘못된 파일 형식';
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                firmwareData = new Uint8Array(e.target.result);
+                const sizeKB = (firmwareData.length / 1024).toFixed(2);
+                fileInfo.innerHTML = `<strong>${file.name}</strong><br>${firmwareData.length} bytes (${sizeKB} KB)`;
+                log(`파일 로드 완료: ${file.name} (${sizeKB} KB)`, 'success');
+
+                if (firmwareData.length > 2000000) {
+                    log('경고: 펌웨어 크기가 2MB를 초과합니다', 'warning');
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // Connect to device
+        connectBtn.addEventListener('click', async () => {
+            try {
+                log('BLE 장치 검색 중...', 'info');
+
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [{ namePrefix: 'AngelRobo-FSR' }],
+                    optionalServices: [OTA_SERVICE_UUID]
+                });
+
+                log(`장치 발견: ${device.name}`, 'success');
+                device.addEventListener('gattserverdisconnected', onDisconnected);
+
+                log('GATT 서버 연결 중...', 'info');
+                const server = await device.gatt.connect();
+                log('연결 완료!', 'success');
+
+                log('OTA 서비스 확인 중...', 'info');
+                const service = await server.getPrimaryService(OTA_SERVICE_UUID);
+                log('OTA 서비스 확인됨', 'success');
+
+                log('특성(Characteristics) 확인 중...', 'info');
+                controlChar = await service.getCharacteristic(OTA_CONTROL_UUID);
+                dataChar = await service.getCharacteristic(OTA_DATA_UUID);
+                statusChar = await service.getCharacteristic(OTA_STATUS_UUID);
+                log('모든 특성 준비 완료', 'success');
+
+                await statusChar.startNotifications();
+                statusChar.addEventListener('characteristicvaluechanged', handleStatusUpdate);
+                log('상태 알림 시작됨', 'success');
+
+                deviceInfo.innerHTML = `<strong>연결됨:</strong> ${device.name}`;
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                uploadBtn.disabled = !firmwareData;
+
+            } catch (error) {
+                log(`연결 오류: ${error.message}`, 'error');
+                console.error(error);
+            }
+        });
+
+        // Disconnect from device
+        disconnectBtn.addEventListener('click', () => {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+                log('수동으로 연결 끊김', 'info');
+            }
+        });
+
+        function onDisconnected() {
+            log('장치 연결 끊김', 'warning');
+            deviceInfo.textContent = '연결되지 않음';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            uploadBtn.disabled = true;
+        }
+
+        // Handle status updates from device
+        let lastLoggedProgress = -1;
+        function handleStatusUpdate(event) {
+            const progress = event.target.value.getUint8(0);
+
+            if (progress <= 100) {
+                progressFill.style.width = `${progress}%`;
+                progressText.textContent = `${progress}%`;
+
+                // Log every 1% change
+                if (progress > lastLoggedProgress && progress < 100) {
+                    log(`업로드 진행: ${progress}%`, 'info');
+                    lastLoggedProgress = progress;
+                }
+
+                if (progress === 100 && lastLoggedProgress < 100) {
+                    log('업로드 완료! 장치가 재부팅됩니다...', 'success');
+                    lastLoggedProgress = 100;
+                }
+            } else if (progress === 255) {
+                log('업데이트 중 오류 발생!', 'error');
+                progressFill.style.background = '#dc3545';
+            }
+        }
+
+        // Upload firmware
+        uploadBtn.addEventListener('click', async () => {
+            if (!firmwareData) {
+                log('펌웨어 파일이 로드되지 않음', 'error');
+                return;
+            }
+
+            if (!device || !device.gatt.connected) {
+                log('장치가 연결되지 않음', 'error');
+                return;
+            }
+
+            let endCommandSent = false;
+
+            try {
+                uploadBtn.disabled = true;
+                progressFill.style.width = '0%';
+                progressFill.style.background = 'linear-gradient(90deg, #28a745, #20c997)';
+                progressText.textContent = '0%';
+                lastLoggedProgress = -1; // Reset progress tracking
+
+                log('펌웨어 업로드 시작...', 'info');
+
+                // Step 1: Send START command
+                const startCmd = `START ${firmwareData.length}`;
+                log(`START 명령 전송 중 (${firmwareData.length} bytes)`, 'info');
+                await controlChar.writeValue(new TextEncoder().encode(startCmd));
+                await delay(100);
+
+                // Step 2: Send firmware data in chunks
+                const CHUNK_SIZE = 244; // Safe size for MTU 255 (255 - 3 byte header - margin)
+                const totalChunks = Math.ceil(firmwareData.length / CHUNK_SIZE);
+                log(`${totalChunks}개 청크 전송 중 (각 ${CHUNK_SIZE} bytes)...`, 'info');
+
+                for (let offset = 0; offset < firmwareData.length; offset += CHUNK_SIZE) {
+                    const chunk = firmwareData.slice(offset, Math.min(offset + CHUNK_SIZE, firmwareData.length));
+                    await dataChar.writeValue(chunk);
+                    await delay(4); // Delay for ESP32 flash write (2x margin)
+                }
+
+                log('모든 데이터 청크 전송 완료', 'success');
+
+                // Step 3: Send END command
+                await delay(500);
+                log('END 명령 전송 중...', 'info');
+                endCommandSent = true;  // writeValue 전에 설정 (재부팅으로 예외 발생 대비)
+                await controlChar.writeValue(new TextEncoder().encode('END'));
+
+                log('펌웨어 업로드 성공적으로 완료!', 'success');
+                log('장치가 재부팅되어 새 펌웨어를 적용합니다...', 'info');
+
+            } catch (error) {
+                // END 전송 후 장치 재부팅으로 인한 정상적인 연결 끊김
+                if (endCommandSent && error.message.includes('GATT')) {
+                    log('장치가 재부팅 중입니다. 업데이트 성공!', 'success');
+                } else {
+                    log(`업로드 실패: ${error.message}`, 'error');
+                    console.error(error);
+                    progressFill.style.background = '#dc3545';
+                    uploadBtn.disabled = false;
+                }
+            }
+        });
+
+        // Utility function
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // Check if Web Bluetooth is supported
+        if (!navigator.bluetooth) {
+            log('이 브라우저는 Web Bluetooth API를 지원하지 않습니다!', 'error');
+            log('Chrome 또는 Edge 브라우저를 사용하세요.', 'error');
+            connectBtn.disabled = true;
+        } else {
+            log('Web Bluetooth API 사용 가능', 'success');
+            log('펌웨어 업데이트 준비 완료', 'info');
+        }
+    </script>
+</body>
+</html>
