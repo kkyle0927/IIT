@@ -1,0 +1,1018 @@
+/**
+ ******************************************************************************
+ * @file    xm_drv.c
+ * @author  HyundoKim
+ * @brief   [Device Layer] IMU Hub ↔ XM10 통신 드라이버 (AGR_PnP V2 내장)
+ * @version 3.0
+ * @date    Dec 8, 2025
+ *
+ * @details
+ * IMU Hub Module이 XM10(Master)과 FDCAN으로 통신하기 위한 드라이버입니다.
+ * AGR_PnP V2를 내장하여 System Layer Link 없이 독립적으로 동작합니다.
+ * 
+ * [주요 변경사항 V3.0]
+ * - AGR_PnP 인스턴스 내장 (xm_imu_hub_link_v2 제거)
+ * - Public API 추가 (IsConnected, GetNmtState, RunPeriodic)
+ * - 콜백 구조체 제거 (AGR_PnP 콜백으로 통합)
+ * - 하위 호환성 변수 제거 (s_valid_mask_a/b)
+ * 
+ * [데이터 흐름 - BareMetal 최적화]
+ * - PDO Tx: s_tx_data.imu[] → BuildTPDO → FDCAN Tx (1kHz)
+ * - PDO/Heartbeat Rx: ISR에서 직접 변수 업데이트 (volatile)
+ * - SDO Rx: ISR에서 직접 처리 + 응답 전송 (단발성 데이터)
+ *
+ * @copyright Copyright (c) 2025 Angel Robotics Co., Ltd. All rights reserved.
+ ******************************************************************************
+ */
+
+#include "xm_drv.h"
+#include "agr_dop.h"
+#include "agr_dop_node_id.h"
+#include "agr_nmt.h"
+#include "agr_pnp.h"
+#include "ioif_agrb_tim.h"
+#include "ioif_agrb_fdcan.h"
+#include <string.h>
+
+/**
+ *-----------------------------------------------------------
+ * PRIVATE DEFINITIONS AND MACROS
+ *-----------------------------------------------------------
+ */
+
+/** @brief Heartbeat 타임아웃 (ms) */
+#define XM_DRV_HEARTBEAT_TIMEOUT_MS     1000
+
+/** @brief PDO 페이로드 최대 크기 */
+#define XM_DRV_PDO_MAX_SIZE             64
+
+/**
+ *-----------------------------------------------------------
+ * PRIVATE ENUMERATIONS AND TYPES
+ *-----------------------------------------------------------
+ */
+
+/**
+ *-----------------------------------------------------------
+ * PULBIC (GLOBAL) VARIABLES
+ *-----------------------------------------------------------
+ */
+
+/**
+ *------------------------------------------------------------
+ * STATIC (PRIVATE) VARIABLES
+ *------------------------------------------------------------
+ */
+
+/* ===== AGR_NMT 인스턴스 (CANopen 표준) ===== */
+static AGR_NMT_Inst_t s_nmt;  /**< NMT State Machine (Boot-up, Heartbeat, NMT Command 처리) */
+
+/* ===== AGR_PnP 인스턴스 (V3.0: 내장) ===== */
+static AGR_PnP_Inst_t s_pnp_inst;  /**< PnP 인스턴스 (Slave) */
+
+/* ===== Rx 데이터 (XM10 → IMU Hub) ===== */
+static XM_RxData_t s_rx_data;  /**< XM10으로부터 받은 모든 데이터 (SDO/PDO) */
+
+/* ===== Tx 데이터 (IMU Hub → XM10, cm_drv 패턴) ===== */
+static XM_TxData_t s_tx_data;  /**< 송신 데이터 (PDO + SDO 통합 관리) */
+
+/* ===== FDCAN Tx 함수 포인터 (Dependency Injection) ===== */
+static int (*s_tx_func)(uint32_t can_id, const uint8_t* data, uint8_t len) = NULL;
+
+/**
+ * Forward declarations (OD Entry WriteCb)
+ */
+static void _OnPdoMappingA_Set(void);
+static void _OnPdoMappingB_Set(void);
+
+/* 
+ * ✅ CANopen 표준 WriteCb 활용
+ * 
+ * [WriteCb는 SDO Download (Write) 완료 후에만 호출됨]
+ * - PDO Mapping: SDO로 전송 (CAN ID 0x600) → WriteCb 호출 ✅
+ * 
+ * [별도 프로토콜 메시지는 AGR_NMT가 처리]
+ * - Boot-up: CAN ID 0x700 + Node ID → AGR_NMT_ProcessMessage ✅
+ * - NMT: CAN ID 0x000 → AGR_NMT_ProcessMessage ✅
+ * - Heartbeat: CAN ID 0x700 + Node ID → AGR_NMT_ProcessMessage ✅
+ */
+
+/* ===== PDO Mapping 데이터 ===== */
+static uint8_t s_pdo_mapping_a[64];      /**< PDO Mapping A (Group A: IMU 0,1,2) */
+static uint8_t s_pdo_mapping_b[64];      /**< PDO Mapping B (Group B: IMU 3,4,5) */
+
+/* ===== PDO 메타데이터 (OD에 등록됨) ===== */
+static XM_Drv_PdoMetadata_t s_pdo_metadata = {0};  /**< PDO Metadata: Timestamp (24-bit) + Valid Mask (8-bit), 4B total */
+
+/* 
+ * ===== Object Dictionary 정의 ===== 
+ * 
+ * [CANopen 표준 OD 영역 구분 (CiA 301)]
+ * ┌────────────────────────────────────────────────────────┐
+ * │ 0x0000 ~ 0x0FFF: Data Type Definitions (표준)          │
+ * │ 0x1000 ~ 0x1FFF: Communication Profile (표준)          │
+ * │ 0x2000 ~ 0x5FFF: Manufacturer Specific (제조사 정의) ✅ │
+ * │ 0x6000 ~ 0x9FFF: Device Profile (CiA 401, 402 등)      │
+ * │ 0xA000 ~ 0xFFFF: Reserved                              │
+ * └────────────────────────────────────────────────────────┘
+ * 
+ * [중요] CANopen 메시지 타입별 처리
+ * ┌─────────────────────────────────────────────────────────┐
+ * │ NMT, Boot-up, Heartbeat → 별도 CAN ID (SDO 아님)        │
+ * │ - CAN ID 0x000: NMT Command                             │
+ * │ - CAN ID 0x700 + Node ID: Boot-up, Heartbeat           │
+ * │ → AGR_NMT_ProcessMessage()가 처리 ✅                     │
+ * │                                                         │
+ * │ SDO, PDO → OD Entry를 통해 처리                          │
+ * │ - CAN ID 0x600 + Node ID: SDO Request                  │
+ * │ - CAN ID 0x180/0x280 + Node ID: PDO                    │
+ * │ → AGR_DOP_ProcessRxMessage()가 처리 ✅                   │
+ * └─────────────────────────────────────────────────────────┘
+ */
+static const AGR_OD_Entry_t s_od_entries[] = {
+    // Index,   SubIdx, Type,            Size, Access,         DataPtr,                      WriteCb
+    
+    /* ===== 0x2000 ~ 0x5FFF: Manufacturer Specific (Angel Robotics) ===== */
+    
+    /* 센서 상태 (Read Only) */
+    { 0x2000,   0x00,   AGR_TYPE_UINT8,  1,    AGR_ACCESS_RO, &s_rx_data.imu_connected_mask, NULL },  /* IMU Connected Mask (bit0~5: IMU0~5) */
+    
+    /* PDO Mapping (Write Only) */
+    { 0x2010,   0x00,   AGR_TYPE_BLOB,   64,   AGR_ACCESS_WO, s_pdo_mapping_a,               _OnPdoMappingA_Set },  /* PDO Mapping A (Group A: IMU 0,1,2) */
+    { 0x2011,   0x00,   AGR_TYPE_BLOB,   64,   AGR_ACCESS_WO, s_pdo_mapping_b,               _OnPdoMappingB_Set },  /* PDO Mapping B (Group B: IMU 3,4,5) */
+    
+    /* ===== Tx: IMU Hub → XM10 (상태 데이터 - SDO) ===== */
+    { 0x3100,   0x00,   AGR_TYPE_UINT8,  1,    AGR_ACCESS_RO, &s_tx_data.calibration_status, NULL },
+    { 0x3101,   0x00,   AGR_TYPE_UINT16, 2,    AGR_ACCESS_RO, &s_tx_data.error_code,         NULL },
+    { 0x3102,   0x00,   AGR_TYPE_BLOB,   6,    AGR_ACCESS_RO, &s_tx_data.sensor_health,      NULL },
+    
+    /* ===== Tx: IMU Hub → XM10 (IMU 데이터 - PDO/SDO) ===== */
+    /* 
+     * Object Dictionary 구조:
+     * 
+     * ========== PDO Metadata (Index 0x3000) ==========
+     * Index 0x3000: PDO Metadata (4 bytes, BLOB)
+     *   SubIndex 0x00: Timestamp (3B) + Valid Mask (1B)
+     *     - Byte 0-2: Frame Timestamp (24-bit, ms)
+     *     - Byte 3:   IMU Valid Mask (bit0~5 = IMU 0~5)
+     * 
+     * ========== IMU Data (Index 0x6000~0x6005) ==========
+     * Index: 0x6000~0x6005 (IMU 0~5)
+     * 
+     * SubIndex (개별 항목, int16, 2 bytes):
+     *   0x00~0x03: Quaternion (q[0~3])
+     *   0x10~0x12: Euler (rpy[0~2])
+     *   0x20~0x22: Accel (a[0~2])
+     *   0x30~0x32: Gyro (g[0~2])
+     *   0x40~0x42: Mag (m[0~2])
+     * 
+     * SubIndex (뭉탱이, BLOB):
+     *   0x50: q[4] (8B)
+     *   0x51: rpy[3] (6B)
+     *   0x52: a[3] (6B)
+     *   0x53: g[3] (6B)
+     *   0x54: m[3] (6B)
+     * 
+     * SubIndex (조합, BLOB):
+     *   0x60: {q,a,g} (20B) - 기본 세트
+     *   0x61: {q,a,g,m} (26B)
+     *   0x62: {q,rpy,a,g,m} (32B) - 전체
+     */
+    
+    /* ========== PDO Metadata (Index 0x3000) ========== */
+    { 0x3000, 0x00, AGR_TYPE_BLOB, 4, AGR_ACCESS_RO, &s_pdo_metadata, NULL },  /* Metadata: Timestamp(3B) + Valid Mask(1B) */
+    
+    /* ========== IMU 0 (Index 0x6000) ========== */
+    /* 개별 항목 */
+    { 0x6000, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].q[0],    NULL },
+    { 0x6000, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].q[1],    NULL },
+    { 0x6000, 0x02, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].q[2],    NULL },
+    { 0x6000, 0x03, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].q[3],    NULL },
+    // { 0x6000, 0x10, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].rpy[0],  NULL },
+    // { 0x6000, 0x11, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].rpy[1],  NULL },
+    // { 0x6000, 0x12, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].rpy[2],  NULL },
+    { 0x6000, 0x20, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].a[0],    NULL },
+    { 0x6000, 0x21, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].a[1],    NULL },
+    { 0x6000, 0x22, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].a[2],    NULL },
+    { 0x6000, 0x30, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].g[0],    NULL },
+    { 0x6000, 0x31, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].g[1],    NULL },
+    { 0x6000, 0x32, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].g[2],    NULL },
+    // { 0x6000, 0x40, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].m[0],    NULL },
+    // { 0x6000, 0x41, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].m[1],    NULL },
+    // { 0x6000, 0x42, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].m[2],    NULL },
+    /* 뭉탱이 */
+    { 0x6000, 0x50, AGR_TYPE_BLOB,  8, AGR_ACCESS_RO, &s_tx_data.imu[0].q,       NULL },
+    // { 0x6000, 0x51, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[0].rpy,     NULL },
+    { 0x6000, 0x52, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[0].a,       NULL },
+    { 0x6000, 0x53, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[0].g,       NULL },
+    // { 0x6000, 0x54, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[0].m,       NULL },
+    /* 조합 */
+    { 0x6000, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[0].q,       NULL },  // {q,a,g}
+    { 0x6000, 0x61, AGR_TYPE_BLOB, 26, AGR_ACCESS_RO, &s_tx_data.imu[0].q,       NULL },  // {q,a,g,m}
+    { 0x6000, 0x62, AGR_TYPE_BLOB, 32, AGR_ACCESS_RO, &s_tx_data.imu[0].q,       NULL },  // {q,rpy,a,g,m}
+    
+    /* ========== IMU 1 (Index 0x6001) ========== */
+    { 0x6001, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].q[0],    NULL },
+    { 0x6001, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].q[1],    NULL },
+    { 0x6001, 0x02, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].q[2],    NULL },
+    { 0x6001, 0x03, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].q[3],    NULL },
+    // { 0x6001, 0x10, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].rpy[0],  NULL },
+    // { 0x6001, 0x11, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].rpy[1],  NULL },
+    // { 0x6001, 0x12, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].rpy[2],  NULL },
+    { 0x6001, 0x20, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].a[0],    NULL },
+    { 0x6001, 0x21, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].a[1],    NULL },
+    { 0x6001, 0x22, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].a[2],    NULL },
+    { 0x6001, 0x30, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].g[0],    NULL },
+    { 0x6001, 0x31, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].g[1],    NULL },
+    { 0x6001, 0x32, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].g[2],    NULL },
+    // { 0x6001, 0x40, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].m[0],    NULL },
+    // { 0x6001, 0x41, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].m[1],    NULL },
+    // { 0x6001, 0x42, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[1].m[2],    NULL },
+    { 0x6001, 0x50, AGR_TYPE_BLOB,  8, AGR_ACCESS_RO, &s_tx_data.imu[1].q,       NULL },
+    // { 0x6001, 0x51, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[1].rpy,     NULL },
+    { 0x6001, 0x52, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[1].a,       NULL },
+    { 0x6001, 0x53, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[1].g,       NULL },
+    // { 0x6001, 0x54, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[1].m,       NULL },
+    { 0x6001, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[1].q,       NULL },
+    { 0x6001, 0x61, AGR_TYPE_BLOB, 26, AGR_ACCESS_RO, &s_tx_data.imu[1].q,       NULL },
+    { 0x6001, 0x62, AGR_TYPE_BLOB, 32, AGR_ACCESS_RO, &s_tx_data.imu[1].q,       NULL },
+    
+    /* ========== IMU 2 (Index 0x6002) ========== */
+    { 0x6002, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].q[0],    NULL },
+    { 0x6002, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].q[1],    NULL },
+    { 0x6002, 0x02, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].q[2],    NULL },
+    { 0x6002, 0x03, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].q[3],    NULL },
+    // { 0x6002, 0x10, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].rpy[0],  NULL },
+    // { 0x6002, 0x11, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].rpy[1],  NULL },
+    // { 0x6002, 0x12, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].rpy[2],  NULL },
+    { 0x6002, 0x20, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].a[0],    NULL },
+    { 0x6002, 0x21, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].a[1],    NULL },
+    { 0x6002, 0x22, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].a[2],    NULL },
+    { 0x6002, 0x30, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].g[0],    NULL },
+    { 0x6002, 0x31, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].g[1],    NULL },
+    { 0x6002, 0x32, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].g[2],    NULL },
+    // { 0x6002, 0x40, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].m[0],    NULL },
+    // { 0x6002, 0x41, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].m[1],    NULL },
+    // { 0x6002, 0x42, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[2].m[2],    NULL },
+    { 0x6002, 0x50, AGR_TYPE_BLOB,  8, AGR_ACCESS_RO, &s_tx_data.imu[2].q,       NULL },
+    // { 0x6002, 0x51, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[2].rpy,     NULL },
+    { 0x6002, 0x52, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[2].a,       NULL },
+    { 0x6002, 0x53, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[2].g,       NULL },
+    // { 0x6002, 0x54, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[2].m,       NULL },
+    { 0x6002, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[2].q,       NULL },
+    { 0x6002, 0x61, AGR_TYPE_BLOB, 26, AGR_ACCESS_RO, &s_tx_data.imu[2].q,       NULL },
+    { 0x6002, 0x62, AGR_TYPE_BLOB, 32, AGR_ACCESS_RO, &s_tx_data.imu[2].q,       NULL },
+    
+    /* ========== IMU 3 (Index 0x6003) ========== */
+    { 0x6003, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].q[0],    NULL },
+    { 0x6003, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].q[1],    NULL },
+    { 0x6003, 0x02, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].q[2],    NULL },
+    { 0x6003, 0x03, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].q[3],    NULL },
+    // { 0x6003, 0x10, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].rpy[0],  NULL },
+    // { 0x6003, 0x11, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].rpy[1],  NULL },
+    // { 0x6003, 0x12, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].rpy[2],  NULL },
+    { 0x6003, 0x20, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].a[0],    NULL },
+    { 0x6003, 0x21, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].a[1],    NULL },
+    { 0x6003, 0x22, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].a[2],    NULL },
+    { 0x6003, 0x30, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].g[0],    NULL },
+    { 0x6003, 0x31, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].g[1],    NULL },
+    { 0x6003, 0x32, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].g[2],    NULL },
+    // { 0x6003, 0x40, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].m[0],    NULL },
+    // { 0x6003, 0x41, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].m[1],    NULL },
+    // { 0x6003, 0x42, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[3].m[2],    NULL },
+    { 0x6003, 0x50, AGR_TYPE_BLOB,  8, AGR_ACCESS_RO, &s_tx_data.imu[3].q,       NULL },
+    // { 0x6003, 0x51, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[3].rpy,     NULL },
+    { 0x6003, 0x52, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[3].a,       NULL },
+    { 0x6003, 0x53, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[3].g,       NULL },
+    // { 0x6003, 0x54, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[3].m,       NULL },
+    { 0x6003, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[3].q,       NULL },
+    { 0x6003, 0x61, AGR_TYPE_BLOB, 26, AGR_ACCESS_RO, &s_tx_data.imu[3].q,       NULL },
+    { 0x6003, 0x62, AGR_TYPE_BLOB, 32, AGR_ACCESS_RO, &s_tx_data.imu[3].q,       NULL },
+    
+    /* ========== IMU 4 (Index 0x6004) ========== */
+    { 0x6004, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].q[0],    NULL },
+    { 0x6004, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].q[1],    NULL },
+    { 0x6004, 0x02, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].q[2],    NULL },
+    { 0x6004, 0x03, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].q[3],    NULL },
+    // { 0x6004, 0x10, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].rpy[0],  NULL },
+    // { 0x6004, 0x11, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].rpy[1],  NULL },
+    // { 0x6004, 0x12, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].rpy[2],  NULL },
+    { 0x6004, 0x20, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].a[0],    NULL },
+    { 0x6004, 0x21, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].a[1],    NULL },
+    { 0x6004, 0x22, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].a[2],    NULL },
+    { 0x6004, 0x30, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].g[0],    NULL },
+    { 0x6004, 0x31, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].g[1],    NULL },
+    { 0x6004, 0x32, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].g[2],    NULL },
+    // { 0x6004, 0x40, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].m[0],    NULL },
+    // { 0x6004, 0x41, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].m[1],    NULL },
+    // { 0x6004, 0x42, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[4].m[2],    NULL },
+    { 0x6004, 0x50, AGR_TYPE_BLOB,  8, AGR_ACCESS_RO, &s_tx_data.imu[4].q,       NULL },
+    // { 0x6004, 0x51, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[4].rpy,     NULL },
+    { 0x6004, 0x52, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[4].a,       NULL },
+    { 0x6004, 0x53, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[4].g,       NULL },
+    // { 0x6004, 0x54, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[4].m,       NULL },
+    { 0x6004, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[4].q,       NULL },
+    { 0x6004, 0x61, AGR_TYPE_BLOB, 26, AGR_ACCESS_RO, &s_tx_data.imu[4].q,       NULL },
+    { 0x6004, 0x62, AGR_TYPE_BLOB, 32, AGR_ACCESS_RO, &s_tx_data.imu[4].q,       NULL },
+    
+    /* ========== IMU 5 (Index 0x6005) ========== */
+    { 0x6005, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].q[0],    NULL },
+    { 0x6005, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].q[1],    NULL },
+    { 0x6005, 0x02, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].q[2],    NULL },
+    { 0x6005, 0x03, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].q[3],    NULL },
+    // { 0x6005, 0x10, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].rpy[0],  NULL },
+    // { 0x6005, 0x11, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].rpy[1],  NULL },
+    // { 0x6005, 0x12, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].rpy[2],  NULL },
+    { 0x6005, 0x20, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].a[0],    NULL },
+    { 0x6005, 0x21, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].a[1],    NULL },
+    { 0x6005, 0x22, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].a[2],    NULL },
+    { 0x6005, 0x30, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].g[0],    NULL },
+    { 0x6005, 0x31, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].g[1],    NULL },
+    { 0x6005, 0x32, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].g[2],    NULL },
+    // { 0x6005, 0x40, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].m[0],    NULL },
+    // { 0x6005, 0x41, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].m[1],    NULL },
+    // { 0x6005, 0x42, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[5].m[2],    NULL },
+    { 0x6005, 0x50, AGR_TYPE_BLOB,  8, AGR_ACCESS_RO, &s_tx_data.imu[5].q,       NULL },
+    // { 0x6005, 0x51, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[5].rpy,     NULL },
+    { 0x6005, 0x52, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[5].a,       NULL },
+    { 0x6005, 0x53, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[5].g,       NULL },
+    // { 0x6005, 0x54, AGR_TYPE_BLOB,  6, AGR_ACCESS_RO, &s_tx_data.imu[5].m,       NULL },
+    { 0x6005, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[5].q,       NULL },
+    { 0x6005, 0x61, AGR_TYPE_BLOB, 26, AGR_ACCESS_RO, &s_tx_data.imu[5].q,       NULL },
+    { 0x6005, 0x62, AGR_TYPE_BLOB, 32, AGR_ACCESS_RO, &s_tx_data.imu[5].q,       NULL },
+};
+
+static const AGR_OD_Table_t s_od_table = {
+    .entries = s_od_entries,
+    .entry_count = AGR_OD_ENTRY_COUNT(s_od_entries)
+};
+
+/* ===== DOP Context ===== */
+static AGR_DOP_Ctx_t s_dop_ctx;
+
+/**
+ *------------------------------------------------------------
+ * STATIC (PRIVATE) FUNCTION PROTOTYPES
+ *------------------------------------------------------------
+ */
+
+/* AGR_PnP 콜백 */
+static void _PnP_OnConnected(uint8_t master_node_id);
+static void _PnP_OnDisconnected(uint8_t master_node_id);
+static void _PnP_OnNmtChange(uint8_t master_node_id, AGR_NMT_State_t old_state, AGR_NMT_State_t new_state);
+static AGR_PnP_RecoveryAction_t _PnP_OnError(uint8_t master_node_id, AGR_PnP_Error_t error_code);
+
+/* FDCAN Tx Wrapper */
+static int _Drv_TxFunc(uint32_t can_id, const uint8_t* data, uint8_t len);
+
+/* CANopen 프로토콜 콜백 */
+static void _OnSdoRequest(const AGR_SDO_Msg_t* request, AGR_SDO_Msg_t* response);
+static void _OnPdoReceived(uint32_t cob_id, const uint8_t* data, uint8_t len);
+
+/**
+ *------------------------------------------------------------
+ * PUBLIC FUNCTIONS
+ *------------------------------------------------------------
+ */
+
+/**
+ * @brief XM Driver 초기화 (CANopen 표준 기반)
+ * @param tx_func FDCAN 전송 함수 (Dependency Injection)
+ * @return 0: 성공, <0: 실패
+ * 
+ * @details
+ * [초기화 순서]
+ * 1. AGR_NMT 초기화 (XM10 Heartbeat 모니터링)
+ * 2. AGR_DOP 초기화 (SDO, PDO 처리)
+ * 3. AGR_PnP 초기화 (OnConnected, OnDisconnected 추상화)
+ */
+int XM_Drv_Init(int (*tx_func)(uint32_t, const uint8_t*, uint8_t))
+{
+    if (tx_func == NULL) {
+        return -1;
+    }
+    
+    /* Tx 함수 저장 */
+    s_tx_func = tx_func;
+    
+    /* 변수 초기화 */
+    memset(&s_nmt, 0, sizeof(AGR_NMT_Inst_t));
+    memset(&s_pnp_inst, 0, sizeof(AGR_PnP_Inst_t));
+    
+    /* 프레임 메타데이터 초기화 */
+    memset(&s_pdo_metadata, 0, sizeof(XM_Drv_PdoMetadata_t));
+    
+    /* Rx 데이터 초기화 (XM10 → IMU Hub) */
+    memset(&s_rx_data, 0, sizeof(XM_RxData_t));
+    s_rx_data.imu_connected_mask = 0;
+    
+    /* Tx 데이터 초기화 (IMU Hub → XM10) */
+    memset(&s_tx_data, 0, sizeof(XM_TxData_t));
+    s_tx_data.calibration_status = 0;
+    s_tx_data.error_code = 0;
+    
+    /* ===== 1. AGR_NMT 초기화 (CANopen 표준) ===== */
+    AGR_NMT_InitEx(&s_nmt, 
+                   5000,                   /* Heartbeat Timeout: 5s */
+                   AGR_NODE_ID_XM,         /* XM10 Node ID (0x02) - Master 모니터링 */
+                   NULL,                   /* 상태 변경 콜백 (AGR_PnP가 처리) */
+                   NULL,                   /* Timeout 콜백 (AGR_PnP가 처리) */
+                   NULL);                  /* User Context */
+    
+    /* ===== 2. AGR_DOP 초기화 (SDO, PDO 처리) ===== */
+    int ret = AGR_DOP_Init(&s_dop_ctx, &s_od_table, AGR_NODE_ID_IMU_HUB, _Drv_TxFunc);
+    if (ret != 0) {
+        return ret;
+    }
+    
+    /* 통신 대상 Node ID 설정 (XM10) */
+    AGR_DOP_SetTargetNodeId(&s_dop_ctx, AGR_NODE_ID_XM);
+    
+    /* SDO/PDO 콜백 설정 (AGR_DOP) */
+    s_dop_ctx.on_sdo_request = _OnSdoRequest;  /* SDO는 DOP가 먼저 받음 */
+    s_dop_ctx.on_pdo_received = _OnPdoReceived;
+    
+    /* AGR_PnP 설정 (Slave) */
+    AGR_PnP_Config_t pnp_config = {
+        .role = AGR_PNP_ROLE_SLAVE,
+        .my_node_id = AGR_NODE_ID_IMU_HUB,
+        .tx_func = _Drv_TxFunc,
+        .master = {
+            .node_id = AGR_NODE_ID_XM,
+            .heartbeat_timeout = 5000  /* 5s */
+        },
+        .callbacks = {
+            .on_connected = _PnP_OnConnected,
+            .on_disconnected = _PnP_OnDisconnected,
+            .on_bootup = NULL,        /* Slave는 Boot-up 수신 안함 */
+            .on_nmt_change = _PnP_OnNmtChange,
+            .on_run_pre_op = NULL,    /* Slave는 Pre-Op 로직 없음 */
+            .on_error = _PnP_OnError
+        }
+    };
+    
+    /* AGR_PnP 초기화 */
+    ret = AGR_PnP_Init(&s_pnp_inst, &pnp_config, IOIF_TIM_GetTick);
+    if (ret != 0) {
+        return ret;
+    }
+    
+    /* Master 등록 */
+    AGR_PnP_Master_t xm_master = {
+        .node_id = AGR_NODE_ID_XM,
+        .heartbeat_timeout = 5000  /* 5s */
+    };
+    AGR_PnP_RegisterMaster(&s_pnp_inst, &xm_master);
+    
+    /* Boot-up 전송 */
+    AGR_PnP_SendBootup(&s_pnp_inst);
+    
+    return 0;
+}
+
+/**
+ * @brief XM10 연결 상태 확인 (V3.0: Public API)
+ * @return true: 연결됨 (OPERATIONAL + Heartbeat OK)
+ */
+bool XM_Drv_IsConnected(void)
+{
+    return AGR_PnP_IsMasterConnected(&s_pnp_inst);
+}
+
+/**
+ * @brief XM10 NMT 상태 조회 (V3.0: Public API)
+ * @return NMT 상태
+ */
+AGR_NMT_State_t XM_Drv_GetNmtState(void)
+{
+    return AGR_PnP_GetMyState(&s_pnp_inst);
+}
+
+/**
+ * @brief 주기 실행 (CANopen 표준)
+ * @details 
+ * Main Loop 또는 Low-Priority Task에서 호출합니다.
+ * 
+ * [처리 항목]
+ * 1. AGR_NMT Heartbeat Timeout 체크
+ * 2. AGR_PnP 주기 처리 (OnDisconnected 콜백)
+ */
+void XM_Drv_RunPeriodic(void)
+{
+    uint32_t current_ms = IOIF_TIM_GetTick();
+    
+    /* 1. CANopen NMT Heartbeat Timeout 체크 */
+    AGR_NMT_CheckTimeout(&s_nmt, current_ms);
+    
+    /* 2. AGR_PnP 주기 처리 (하위 호환성) */
+    AGR_PnP_RunPeriodic(&s_pnp_inst);
+}
+
+/**
+ * @brief CAN 메시지 처리 (CANopen 표준 기반)
+ * @details 
+ * ISR (canfd_rx_handler)에서 직접 호출됩니다.
+ * 
+ * [CANopen 표준 메시지 처리 흐름]
+ * 1. CAN ID 기반 분기 (효율적)
+ * 2. AGR_NMT: NMT, Boot-up, Heartbeat (CAN ID 0x000, 0x700)
+ * 3. AGR_DOP: SDO, PDO (CAN ID 0x600, 0x180/0x280)
+ * 
+ * @param can_id CAN ID (11-bit or 29-bit)
+ * @param data   데이터 버퍼
+ * @param len    데이터 길이
+ */
+void XM_Drv_ProcessCANMessage(uint32_t can_id, const uint8_t* data, uint8_t len)
+{
+    if (data == NULL) {
+        return;
+    }
+    
+    uint32_t current_ms = IOIF_TIM_GetTick();
+    
+    /* ===== CAN ID 기반 분기 (CANopen 표준) ===== */
+    
+    /* 1. NMT Command (CAN ID 0x000) */
+    if (can_id == 0x000) {
+        AGR_NMT_ProcessMessage(&s_nmt, (uint16_t)can_id, data, len, current_ms);
+        return;
+    }
+    
+    /* 2. Boot-up / Heartbeat (CAN ID 0x700 + Node ID) */
+    uint16_t fnc_code = can_id & 0x780;  /* Function Code 추출 */
+    if (fnc_code == 0x700) {
+        AGR_NMT_ProcessMessage(&s_nmt, (uint16_t)can_id, data, len, current_ms);
+        return;
+    }
+    
+    /* 3. SDO Request (CAN ID 0x600 + Node ID) */
+    if (fnc_code == 0x600) {
+        AGR_DOP_ProcessRxMessage(&s_dop_ctx, can_id, data, len);
+        return;
+    }
+    
+    /* 4. PDO (CAN ID 0x180/0x280 + Node ID) */
+    if (fnc_code == 0x180 || fnc_code == 0x280) {
+        AGR_DOP_ProcessRxMessage(&s_dop_ctx, can_id, data, len);
+        return;
+    }
+    
+    /* 5. Unknown Message (로그 또는 무시) */
+    /* 알 수 없는 메시지 타입 */
+}
+
+/**
+ * @brief XM10 Heartbeat 수신 여부 확인 (Deprecated - use XM_Drv_IsConnected)
+ * @deprecated AGR_PnP가 Heartbeat를 관리합니다. XM_Drv_IsConnected() 사용 권장
+ */
+bool XM_Drv_CheckAndClearHeartbeat(void)
+{
+    /* AGR_PnP가 관리하므로 항상 true 반환 (하위 호환성) */
+    return AGR_PnP_IsMasterConnected(&s_pnp_inst);
+}
+
+/**
+ * @brief XM10의 NMT 상태 조회 (Deprecated - use XM_Drv_GetNmtState)
+ * @deprecated AGR_PnP_GetMyState() 사용 권장
+ */
+uint8_t XM_Drv_GetXmNmtState(void)
+{
+    return (uint8_t)AGR_PnP_GetMyState(&s_pnp_inst);
+}
+
+/**
+ * @brief SDO Request 처리 (Link Layer에서 호출)
+ * @details AGR_PnP V2에서 SDO Request를 받으면 이 함수로 위임됨
+ */
+void XM_Drv_HandleSDORequest(const AGR_SDO_Msg_t* request, AGR_SDO_Msg_t* response)
+{
+    if (request == NULL || response == NULL) {
+        return;
+    }
+    
+    /* 내부 콜백으로 위임 (OD 처리) */
+    _OnSdoRequest(request, response);
+}
+
+void XM_Drv_UpdateImuData(uint8_t imu_index, const XM_Drv_ImuData_t* data)
+{
+    if (imu_index >= XM_DRV_IMU_COUNT || data == NULL) {
+        return;
+    }
+    
+    /* IMU 데이터 복사 */
+    memcpy(&s_tx_data.imu[imu_index], data, sizeof(XM_Drv_ImuData_t));
+}
+
+void XM_Drv_SetFrameTimestamp(uint32_t time_ms)
+{
+    /* 24-bit timestamp를 3 bytes로 분리 */
+    s_pdo_metadata.timestamp_low  = (time_ms >> 0) & 0xFF;
+    s_pdo_metadata.timestamp_mid  = (time_ms >> 8) & 0xFF;
+    s_pdo_metadata.timestamp_high = (time_ms >> 16) & 0xFF;
+}
+
+void XM_Drv_ClearValidMask(void)
+{
+    s_pdo_metadata.valid_mask = 0;  /* PDO Metadata의 valid_mask 클리어 */
+}
+
+int XM_Drv_SendTPDO1(void)
+{
+    if (s_dop_ctx.tx_func == NULL) {
+        return -1;
+    }
+    
+    /* 
+     * [동적 PDO Mapping 사용 - TPDO1]
+     * XM10이 PnP 단계에서 설정한 PDO Mapping에 따라 전송합니다.
+     * AGR_DOP_EncodeTxPDON()이 s_dop_ctx.tx_pdo_map[0]를 참조하여
+     * 필요한 데이터만 선택적으로 인코딩합니다.
+     */
+    
+    /* PDO Payload 동적 구성 (TPDO1) */
+    uint8_t pdo_buf[64];  /* CAN FD 최대 크기 */
+    int len = AGR_DOP_EncodeTxPDON(&s_dop_ctx, 1, pdo_buf, sizeof(pdo_buf));
+    
+    if (len <= 0) {
+        return -2;  /* PDO Mapping이 비어있거나 에러 */
+    }
+    
+    /* CAN 전송 */
+    uint32_t can_id = AGR_DOP_GetTPDOCANID(AGR_NODE_ID_IMU_HUB, 1);
+    return s_dop_ctx.tx_func(can_id, pdo_buf, (uint8_t)len);
+}
+
+int XM_Drv_SendTPDO2(void)
+{
+    if (s_dop_ctx.tx_func == NULL) {
+        return -1;
+    }
+    
+    /* 
+     * [동적 PDO Mapping 사용 - TPDO2]
+     * XM10이 PnP 단계에서 설정한 PDO Mapping에 따라 전송합니다.
+     * AGR_DOP_EncodeTxPDON()이 s_dop_ctx.tx_pdo_map[1]를 참조하여
+     * 필요한 데이터만 선택적으로 인코딩합니다.
+     */
+    
+    /* PDO Payload 동적 구성 (TPDO2) */
+    uint8_t pdo_buf[64];  /* CAN FD 최대 크기 */
+    int len = AGR_DOP_EncodeTxPDON(&s_dop_ctx, 2, pdo_buf, sizeof(pdo_buf));
+    
+    if (len <= 0) {
+        return -2;  /* PDO Mapping이 비어있거나 에러 */
+    }
+    
+    /* CAN 전송 */
+    uint32_t can_id = AGR_DOP_GetTPDOCANID(AGR_NODE_ID_IMU_HUB, 2);
+    return s_dop_ctx.tx_func(can_id, pdo_buf, (uint8_t)len);
+}
+
+int XM_Drv_SendBootup(void)
+{
+    if (s_dop_ctx.tx_func == NULL) {
+        return -1;
+    }
+    
+    /* CANopen 표준: Boot-up은 NMT State = 0x00으로 전송 */
+    uint8_t bootup_state = 0x00;
+    uint32_t can_id = AGR_DOP_GetHeartbeatCANID(AGR_NODE_ID_IMU_HUB);  /* 0x708 */
+    
+    return s_dop_ctx.tx_func(can_id, &bootup_state, 1);
+}
+
+int XM_Drv_SendHeartbeat(void)
+{
+    if (s_dop_ctx.tx_func == NULL) {
+        return -1;
+    }
+    
+    uint8_t state = (uint8_t)AGR_NMT_GetState(&s_nmt);
+    uint32_t can_id = AGR_DOP_GetHeartbeatCANID(AGR_NODE_ID_IMU_HUB);
+    
+    return s_dop_ctx.tx_func(can_id, &state, 1);
+}
+
+void XM_Drv_SetPDOInhibitTime(uint8_t pdo_num, uint32_t inhibit_time_us)
+{
+    AGR_DOP_SetPDOInhibitTime(&s_dop_ctx, pdo_num, inhibit_time_us);
+}
+
+void XM_Drv_DisablePDOInhibit(uint8_t pdo_num)
+{
+    AGR_DOP_DisablePDOInhibit(&s_dop_ctx, pdo_num);
+}
+
+void XM_Drv_CheckTimeout(uint32_t current_ms)
+{
+    AGR_NMT_CheckTimeout(&s_nmt, current_ms);
+}
+
+void XM_Drv_SetImuConnectedMask(uint8_t mask)
+{
+    s_rx_data.imu_connected_mask = mask;
+    s_pdo_metadata.valid_mask = mask;  /* OD 0x3000.0x00에 반영 (TPDO에 포함됨) */
+}
+
+uint8_t XM_Drv_GetImuConnectedMask(void)
+{
+    return s_rx_data.imu_connected_mask;
+}
+
+/**
+ * @brief FDCAN Rx 데이터 가져오기 (Main Loop용)
+ * @details 
+ * XM10으로부터 받은 모든 데이터를 안전하게 읽어옵니다.
+ * ISR에서 업데이트된 구조체를 Critical Section으로 보호하며 복사합니다.
+ */
+bool XM_Drv_GetRxData(XM_RxData_t* out_data)
+{
+    if (out_data == NULL) {
+        return false;
+    }
+    
+    /* Critical Section: ISR과 Main Loop 간 동기화 */
+    __disable_irq();
+    memcpy(out_data, &s_rx_data, sizeof(XM_RxData_t));
+    __enable_irq();
+    
+    return true;
+}
+
+/**
+ * @brief Tx 데이터 가져오기 (디버깅/모니터링용)
+ */
+bool XM_Drv_GetTxData(XM_TxData_t* out_data)
+{
+    if (out_data == NULL) {
+        return false;
+    }
+    
+    /* Tx 데이터는 Main Loop에서만 업데이트되므로 보호 불필요 */
+    memcpy(out_data, &s_tx_data, sizeof(XM_TxData_t));
+    
+    return true;
+}
+
+/**
+ *------------------------------------------------------------
+ * STATIC FUNCTIONS
+ *------------------------------------------------------------
+ */
+
+/**
+ * @brief FDCAN Tx Wrapper (Dependency Injection)
+ */
+static int _Drv_TxFunc(uint32_t can_id, const uint8_t* data, uint8_t len)
+{
+    if (s_tx_func != NULL) {
+        return s_tx_func(can_id, data, len);
+    }
+    return -1;
+}
+
+/**
+ * @brief XM10 연결 완료 콜백 (AGR_PnP)
+ */
+static void _PnP_OnConnected(uint8_t master_node_id)
+{
+    (void)master_node_id;
+    
+    /* LED 제어는 core_process에서 처리 */
+}
+
+/**
+ * @brief XM10 연결 끊김 콜백 (AGR_PnP)
+ */
+static void _PnP_OnDisconnected(uint8_t master_node_id)
+{
+    (void)master_node_id;
+    
+    /* LED 제어는 core_process에서 처리 */
+}
+
+/**
+ * @brief NMT 상태 변경 콜백 (AGR_PnP)
+ */
+static void _PnP_OnNmtChange(uint8_t master_node_id, AGR_NMT_State_t old_state, AGR_NMT_State_t new_state)
+{
+    (void)master_node_id;
+    (void)old_state;
+    (void)new_state;
+    
+    /* 필요시 상태 변경 로그 */
+}
+
+/**
+ * @brief OD Entry 조회 헬퍼 함수
+ */
+static const AGR_OD_Entry_t* _FindODEntry(uint16_t index, uint8_t subindex)
+{
+    for (uint32_t i = 0; i < sizeof(s_od_entries) / sizeof(s_od_entries[0]); i++) {
+        if (s_od_entries[i].index == index && s_od_entries[i].subindex == subindex) {
+            return &s_od_entries[i];
+        }
+    }
+    return NULL;
+}
+
+/**
+ * @brief SDO Request 처리 콜백 (AGR_DOP)
+ * 
+ * [CANopen 표준 WriteCb 방식]
+ * 1. OD Entry 조회 (_FindODEntry)
+ * 2. 데이터 Write (memcpy to data_ptr)
+ * 3. WriteCb 호출 (entry->write_cb) ✅
+ * 4. Response 생성
+ * 
+ * [장점]
+ * - OD Entry 추가 시 if-else 불필요
+ * - WriteCb만 추가하면 확장 가능
+ * - CANopen 표준 구조
+ * 
+ * [호출 경로]
+ * ISR: XM_Drv_ProcessCANMessage 
+ *   → AGR_PnP_ProcessMessage (NMT, Boot-up, Heartbeat)
+ *   → AGR_DOP_ProcessRxMessage (SDO, PDO)
+ *   → s_dop_ctx.on_sdo_request (이 함수)
+ *   → WriteCb 호출 (_OnPdoMappingA_Set 등) ✅
+ */
+static void _OnSdoRequest(const AGR_SDO_Msg_t* request, AGR_SDO_Msg_t* response)
+{
+    const AGR_OD_Entry_t* entry = _FindODEntry(request->index, request->subindex);
+    
+    if (entry == NULL) {
+        /* OD Entry 없음 → Abort */
+        response->cs = 0x80;  /* Abort Transfer */
+        return;
+    }
+    
+    /* ===== CANopen Download (Write) 요청 처리 ===== */
+    if ((request->cs & 0xE0) == 0x20) {  /* Download Initiate Request */
+        if (entry->access == AGR_ACCESS_WO || entry->access == AGR_ACCESS_RW) {
+            /* 1. 데이터 Write */
+            memcpy(entry->data_ptr, request->data, request->data_len);
+            
+            /* 2. WriteCb 호출 ✅ (CANopen 표준) */
+            if (entry->on_write != NULL) {
+                entry->on_write();
+            }
+            
+            /* 3. Response 생성 */
+            response->cs = AGR_SDO_CS_DOWNLOAD_INIT_RSP;
+            response->index = request->index;
+            response->subindex = request->subindex;
+            response->data_len = 0;
+            return;
+        }
+    }
+    
+    /* ===== CANopen Upload (Read) 요청 처리 ===== */
+    else if ((request->cs & 0xE0) == 0x40) {  /* Upload Initiate Request */
+        if (entry->access == AGR_ACCESS_RO || entry->access == AGR_ACCESS_RW) {
+            /* 1. 데이터 Read */
+            memcpy(response->data, entry->data_ptr, entry->size);
+            
+            /* 2. Response 생성 (Expedited Upload) */
+            uint8_t n = 4 - entry->size;  /* n = 4 - data_len */
+            response->cs = 0x43 | (n << 2);  /* Expedited Upload */
+            response->index = request->index;
+            response->subindex = request->subindex;
+            response->data_len = entry->size;
+            return;
+        }
+    }
+    
+    /* 접근 권한 없음 → Abort */
+    response->cs = 0x80;
+}
+
+/**
+ * @brief 에러 발생 콜백 (AGR_PnP)
+ */
+static AGR_PnP_RecoveryAction_t _PnP_OnError(uint8_t master_node_id, AGR_PnP_Error_t error_code)
+{
+    (void)master_node_id;
+    (void)error_code;
+    
+    /* IMU Hub는 재시도 전략 사용 */
+    return AGR_PNP_RECOVERY_RETRY;
+}
+
+static void _OnPdoReceived(uint32_t cob_id, const uint8_t* data, uint8_t len)
+{
+    (void)cob_id;
+    (void)data;
+    (void)len;
+    
+    /* 현재 IMU Hub는 RPDO를 사용하지 않음 */
+}
+
+/**
+ * @brief PDO Mapping A 설정 콜백 (OD Entry 0x2010 WriteCb)
+ * @note XM10이 SDO를 통해 PDO Mapping A를 설정하면 자동 호출됩니다.
+ */
+static void _OnPdoMappingA_Set(void)
+{
+    /* Group A PDO Mapping 설정 → TPDO1 */
+    AGR_DOP_ClearTxPDOMapN(&s_dop_ctx, 1);
+    
+    /* s_pdo_mapping_a는 이미 _OnSdoRequest에서 memcpy로 복사됨 */
+    AGR_DOP_ApplyTxPDOMapFromSDON(&s_dop_ctx, 1, s_pdo_mapping_a, 64);
+}
+
+/**
+ * @brief PDO Mapping B 설정 콜백 (OD Entry 0x2011 WriteCb)
+ * @note XM10이 SDO를 통해 PDO Mapping B를 설정하면 자동 호출됩니다.
+ */
+static void _OnPdoMappingB_Set(void)
+{
+    /* Group B PDO Mapping 설정 → TPDO2 */
+    AGR_DOP_ClearTxPDOMapN(&s_dop_ctx, 2);
+    
+    /* s_pdo_mapping_b는 이미 _OnSdoRequest에서 memcpy로 복사됨 */
+    AGR_DOP_ApplyTxPDOMapFromSDON(&s_dop_ctx, 2, s_pdo_mapping_b, 64);
+}
+
+/* 
+ * ✅ CANopen 표준 처리 흐름 (V3.0)
+ * 
+ * [프로토콜별 처리]
+ * 1. Boot-up (CAN ID 0x700 + Node ID)
+ *    → AGR_PnP_ProcessMessage()
+ *    → _PnP_OnBootup()
+ * 
+ * 2. NMT (CAN ID 0x000)
+ *    → AGR_NMT_ProcessMessage()
+ *    → _PnP_OnNmtChange()
+ * 
+ * 3. Heartbeat (CAN ID 0x700 + Node ID)
+ *    → AGR_PnP_ProcessMessage()
+ *    → Heartbeat Timeout 체크
+ * 
+ * 4. SDO (CAN ID 0x600 + Node ID)
+ *    → AGR_DOP_ProcessRxMessage()
+ *    → _OnSdoRequest()
+ *    → OD Entry 조회
+ *    → WriteCb 호출 (_OnPdoMappingA_Set 등) ✅
+ * 
+ * 5. PDO (CAN ID 0x180/0x280 + Node ID)
+ *    → AGR_DOP_ProcessRxMessage()
+ *    → _OnPdoReceived()
+ */
+
+/* ===== SDO Tx Helper Functions ===== */
+
+/**
+ * @brief XM10에 캘리브레이션 상태 전송
+ */
+int XM_Drv_SendCalibrationStatus(uint8_t status)
+{
+    /* 내부 변수 업데이트 */
+    s_tx_data.calibration_status = status;
+    
+    /* XM10에 SDO 전송 */
+    return AGR_DOP_SendSDOWrite(&s_dop_ctx, 
+                                0x3001,  // OD Index
+                                0,       // Subindex
+                                &status, 
+                                1);
+}
+
+/**
+ * @brief XM10에 에러 코드 전송
+ */
+int XM_Drv_SendErrorCode(uint16_t error_code)
+{
+    /* 내부 변수 업데이트 */
+    s_tx_data.error_code = error_code;
+    
+    /* XM10에 SDO 전송 */
+    return AGR_DOP_SendSDOWrite(&s_dop_ctx, 
+                                0x3002, 
+                                0, 
+                                &error_code, 
+                                sizeof(uint16_t));
+}
+
+/**
+ * @brief XM10에 센서 건강 상태 전송
+ */
+int XM_Drv_SendSensorHealth(const uint8_t health[6])
+{
+    if (health == NULL) {
+        return -1;
+    }
+    
+    /* 내부 변수 업데이트 */
+    memcpy(s_tx_data.sensor_health, health, 6);
+    
+    /* XM10에 SDO 전송 */
+    return AGR_DOP_SendSDOWrite(&s_dop_ctx, 
+                                0x3003, 
+                                0, 
+                                s_tx_data.sensor_health, 
+                                6);
+}
+
