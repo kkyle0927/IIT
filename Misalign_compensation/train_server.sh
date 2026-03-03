@@ -19,16 +19,17 @@
 # =========================================================================================
 # [CRITICAL NOTICE - 수정 금지 / 변경 시 확인 필수]
 # * 이 파일은 SLURM 학습 제출 스크립트입니다.
-# * 어떤 이유로든 이 파일(train.sh)의 내용을 수정해야 한다면, 반드시 수정하기 전에 사용자에게
+# * 어떤 이유로든 이 파일(train_server.sh)의 내용을 수정해야 한다면, 반드시 수정하기 전에 사용자에게
 #   한국어(Korean)로 변경하려는 내용과 이유를 설명하고 명시적인 허락을 받아야 합니다.
 # * 사용자가 "수정해"라고 말하더라도, 이 주석을 상기하며 "정말로 수정하시겠습니까?
 #   이 주석에 따르면 변경 전 재확인이 필요합니다."라고 한 번 더 되물어 확인받으십시오.
 # * 안전 장치를 무시하고 임의로 변경하지 마십시오.
-# -----------------------------------------------------------------------------------------
+# =========================================================================================
+
+# =========================================================================================
 # [GPU 독점 방지 정책 - MUST FOLLOW]
-# * chanyoungko(현재 사용자)의 작업이 서버의 전체 GPU(4개)를 모두 점유하면 안 됩니다.
+# * chanyoung(현재 사용자)가 시스템의 전체 GPU(4개)를 모두 독점하면 안 됩니다.
 # * 다른 사용자가 GPU를 사용하지 않더라도 최대 3개까지만 사용합니다.
-# * 타 사용자와 함께 사용하여 시스템 전체가 차는 것은 허용하되, 혼자 4개를 다 쓰는 것은 금지합니다.
 # * 이 정책은 TUI에서 config 다중 선택 + GPU 할당 시 스스로 준수해야 합니다.
 # =========================================================================================
 
@@ -82,7 +83,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
             local box_height=$((list_height + 8))
 
             local result
-            result=$(whiptail --title "Misalign Compensation Config Selector" \
+            result=$(whiptail --title "Misalign_compensation Config Selector" \
                 --checklist "학습할 config를 선택하세요.\nSPACE: 선택/해제, ENTER: 확인" \
                 "$box_height" 78 "$list_height" \
                 "${checklist_args[@]}" \
@@ -97,7 +98,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
         else
             # Fallback: 텍스트 모드
             echo "========================================================"
-            echo "  Misalign Compensation Config Selector"
+            echo "  Misalign_compensation Config Selector"
             echo "========================================================"
             echo "번호를 공백으로 구분하여 입력하세요 (예: 1 3 5). 'all' = 전체 선택"
             echo ""
@@ -134,8 +135,6 @@ if [ -z "$SLURM_JOB_ID" ]; then
         # * 1 GPU당 15GB 메모리 제한은 시스템 안정성을 위한 핵심 조치입니다.
         # * 이 값을 변경하려면 사용자에게 반드시 확인을 받으십시오.
         # ============================================================
-        # 각 job은 항상 1 GPU / 15G RAM / 8 CPUs 를 사용합니다.
-        # 여기서 선택하는 GPU 수 = 동시에 실행할 job 수 (병렬 수)
         if command -v whiptail &>/dev/null; then
             MAX_PARALLEL=$(whiptail --title "GPU Selection" \
                 --menu "동시에 사용할 GPU 수를 선택하세요.\n(각 job은 1 GPU 사용, 선택한 수만큼 병렬 실행)" \
@@ -190,7 +189,6 @@ if [ -z "$SLURM_JOB_ID" ]; then
 
             local dep_arg=""
             if [ "$slot" -ge "$MAX_PARALLEL" ]; then
-                # slot번째 이전 job이 끝나면 시작 (슬라이딩 윈도우 방식)
                 local dep_idx=$((slot - MAX_PARALLEL))
                 dep_arg="--dependency=afterany:${submitted_ids[$dep_idx]}"
             fi
@@ -225,7 +223,7 @@ fi
 # [SLURM JOB EXECUTION]
 # 아래 코드는 SLURM에 의해 실행됩니다. (sbatch가 할당한 GPU/메모리 사용)
 # =========================================================================================
-CONFIG_PATH="${1:?ERROR: config 경로가 지정되지 않았습니다. 사용법: sbatch train.sh <config.yaml>}"
+CONFIG_PATH="${1:?ERROR: config 경로가 지정되지 않았습니다. 사용법: sbatch train_server.sh <config.yaml>}"
 
 source /opt/miniconda3/etc/profile.d/conda.sh
 conda activate IIT
@@ -242,5 +240,5 @@ python model_training.py --config "$CONFIG_PATH"
 echo "Job finished at $(date)"
 
 # ================== USAGE ==================
-# Interactive:  ./train.sh          (TUI로 config 선택 후 sbatch 자동 제출)
-# Direct:       sbatch train.sh configs/baseline.yaml
+# Interactive:  ./train_server.sh          (TUI로 config 선택 후 sbatch 자동 제출)
+# Direct:       sbatch train_server.sh configs/baseline.yaml
