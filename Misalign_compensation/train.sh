@@ -82,7 +82,8 @@ if [ -n "$NON_INTERACTIVE" ]; then
 fi
 
 # ================= ENVIRONMENT SETUP =================
-source /opt/miniconda3/etc/profile.d/conda.sh
+# [MODIFIED] Using Windows Conda Path for Git Bash compatibility
+source "C:/Users/ChanyoungKo/anaconda3/etc/profile.d/conda.sh"
 conda activate IIT
 
 echo "Job started on $(hostname) at $(date)"
@@ -103,7 +104,11 @@ pip install psutil pyyaml > /dev/null 2>&1
 
 
 python - <<EOF
-import os, time, glob, subprocess, resource, psutil, queue
+import os, time, glob, subprocess, psutil, queue
+try:
+    import resource
+except ImportError:
+    resource = None
 
 # [CONFIG] Dynamic GPU Count from SLURM
 try:
@@ -146,7 +151,8 @@ def get_limits():
     return int(15 * 1024 * 1024 * 1024), 16
 
 def set_limits(ram_limit):
-    resource.setrlimit(resource.RLIMIT_AS, (ram_limit, ram_limit))
+    if resource is not None:
+        resource.setrlimit(resource.RLIMIT_AS, (ram_limit, ram_limit))
 
 def main():
     # Load all experiment configs (Recursive)
@@ -197,11 +203,11 @@ def main():
                     
                     f = open(log, "w")
                     p = subprocess.Popen(
-                        ["python", "model_training.py", "--config", cfg],
+                        ["C:/Users/ChanyoungKo/anaconda3/envs/IIT/python.exe", "model_training.py", "--config", cfg],
                         env=env,
                         stdout=f,
                         stderr=subprocess.STDOUT,
-                        preexec_fn=lambda: set_limits(ram_limit)
+                        preexec_fn=(lambda: set_limits(ram_limit)) if os.name != "nt" else None
                     )
                     
                     running[fid] = p

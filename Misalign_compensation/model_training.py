@@ -446,6 +446,30 @@ def extract_condition_data_v2(
             # (A) Standard Load Inputs (Explicit)
             valid_trial = True
 
+            # [NEW] Pre-calculate Robot Thigh Angle Calibration Offsets
+            robot_offset_L = 0.0
+            robot_offset_R = 0.0
+            try:
+                # Load variables
+                robot_l = trial_group['robot']['left']['hip_angle'][:]
+                robot_r = trial_group['robot']['right']['hip_angle'][:]
+                mocap_hip_l = trial_group['mocap']['kin_q']['hip_flexion_l'][:]
+                mocap_hip_r = trial_group['mocap']['kin_q']['hip_flexion_r'][:]
+                mocap_pelvis = trial_group['mocap']['kin_q']['pelvis_list'][:]
+                
+                # MoCap Thigh Angle = hip_flexion - pelvis_list
+                mocap_thigh_l = mocap_hip_l - mocap_pelvis
+                mocap_thigh_r = mocap_hip_r - mocap_pelvis
+                
+                # Offset calculating using first 100 samples (1s)
+                calib_len = min(100, len(robot_l), len(mocap_thigh_l), len(robot_r), len(mocap_thigh_r))
+                if calib_len > 0:
+                    robot_offset_L = np.mean(mocap_thigh_l[:calib_len]) - np.mean(robot_l[:calib_len])
+                    robot_offset_R = np.mean(mocap_thigh_r[:calib_len]) - np.mean(robot_r[:calib_len])
+            except KeyError:
+                pass
+
+
             
             # Helper to get base data
             def get_data_from_group(g, path):
@@ -554,6 +578,13 @@ def extract_condition_data_v2(
                         col_data = grp[v_name][:]
                         if input_lpf_cutoff is not None:
                             col_data = butter_lowpass_filter(col_data, input_lpf_cutoff, fs, input_lpf_order)
+                            
+                        # [NEW] Apply calibration offset for Robot Thigh Angle
+                        if 'robot' in gpath and 'hip_angle' in v_name:
+                            if 'left' in gpath:
+                                col_data = col_data + robot_offset_L
+                            elif 'right' in gpath:
+                                col_data = col_data + robot_offset_R
                     
                     # 2. Derived Logic (Velocity/Acceleration/Contact)
                     elif v_name.endswith('_dot') or v_name.endswith('_ddot'):
@@ -819,6 +850,16 @@ def extract_condition_data_v2(
                 for v in vars:
                     if v not in grp: valid_out = False; break
                     d = grp[v][:]
+                    
+                    # [NEW] MoCap Thigh Angle Output 
+                    # Use (hip_flexion - pelvis_list) as target
+                    if 'mocap' in gpath and 'kin_q' in gpath and v in ['hip_flexion_l', 'hip_flexion_r']:
+                        try:
+                            p_list = trial_group['mocap']['kin_q']['pelvis_list'][:]
+                            d = d - p_list
+                        except KeyError:
+                            pass
+                            
                     d = np.nan_to_num(d).reshape(-1, 1)
                     extracted_outs.append(d)
             
@@ -2328,7 +2369,7 @@ if __name__ == "__main__":
     # Check if base_config.yaml exists and if the current config is not base_config itself
     if os.path.exists(base_config_path_str) and (args.config is None or Path(args.config).name != "baseline.yaml"):
         print(f"Loading base config from {base_config_path_str}...")
-        with open(base_config_path_str, 'r') as bf:
+        with open(base_config_path_str, 'r', encoding='utf-8') as bf:
             base_config = yaml.safe_load(bf)
         print(f"[INFO] Loaded base defaults from {base_config_path_str}")
     else:
@@ -2348,7 +2389,7 @@ if __name__ == "__main__":
             # If yf IS base_config.yaml, merged will be identical to base_config.
             # This is fine, it means we run the base experiment.
             
-            with open(yf, 'r') as f:
+            with open(yf, 'r', encoding='utf-8') as f:
                 cfg = yaml.safe_load(f)
                 
             # Merge with defaults (RECURSIVELY)

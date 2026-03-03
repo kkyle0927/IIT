@@ -3,13 +3,13 @@ import os
 import copy
 
 def load_yaml(path):
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
 
 def save_yaml(path, data):
     # print(f"Generating {path}...")
-    with open(path, 'w') as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
+    with open(path, 'w', encoding='utf-8') as f:
+        yaml.dump(data, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
 def main():
     base_path = "configs/baseline.yaml"
@@ -21,7 +21,7 @@ def main():
     
     # Base Inputs (Euler + Hip)
     # Note: baseline.yaml already has these as default now
-    inputs_base = base['input_vars'] 
+    inputs_base = base['shared']['input_vars'] 
 
     def make_exp(name, updates):
         cfg = copy.deepcopy(base)
@@ -29,8 +29,14 @@ def main():
         
         # Helper to update nested dicts
         for k, v in updates.items():
-            if isinstance(v, dict) and k in cfg and isinstance(cfg[k], dict):
-                cfg[k].update(v)
+            if k == 'input_vars':
+                cfg['shared']['input_vars'] = v
+            elif k == 'model':
+                cfg['shared']['model'].update(v)
+            elif k == 'data':
+                cfg['shared']['data'].update(v)
+            elif k == 'train':
+                cfg['02_train']['train'].update(v)
             else:
                 cfg[k] = v
         
@@ -67,16 +73,16 @@ def main():
     # 5. Yaw Only (Trunk Rotation)
     inputs_yaw = [
         ["derived/euler", ["yaw"]],
-        ["robot/left", ["hip_angle"]],
-        ["robot/right", ["hip_angle"]]
+        ["robot/left", ["hip_angle", "torque"]],
+        ["robot/right", ["hip_angle", "torque"]]
     ]
     make_exp("exp_yaw_only", {"input_vars": inputs_yaw})
     
     # 6. Roll/Pitch Only (No Yaw)
     inputs_rp = [
         ["derived/euler", ["roll", "pitch"]],
-        ["robot/left", ["hip_angle"]],
-        ["robot/right", ["hip_angle"]]
+        ["robot/left", ["hip_angle", "torque"]],
+        ["robot/right", ["hip_angle", "torque"]]
     ]
     make_exp("exp_roll_pitch_only", {"input_vars": inputs_rp})
     

@@ -370,7 +370,7 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         print(f"[ERROR] Config file not found in {local_config} or {original_config_path}. Skipping.")
         return None
     
-    with open(config_to_load, 'r') as f:
+    with open(config_to_load, 'r', encoding='utf-8') as f:
         cfg = yaml.safe_load(f)
     
     print(f"\n{'='*60}")
@@ -1284,7 +1284,7 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
     cfg = None
     if local_config.exists():
         print(f"  -> Using local config: {local_config}")
-        with open(local_config, 'r') as f_cfg: cfg = yaml.safe_load(f_cfg)
+        with open(local_config, 'r', encoding='utf-8') as f_cfg: cfg = yaml.safe_load(f_cfg)
     elif global_config.exists():
         print(f"  -> Local config missing. Using global: {global_config}")
         with open(global_config, 'r') as f_cfg: cfg = yaml.safe_load(f_cfg)
@@ -1577,7 +1577,7 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
                 ax0 = axes[0, col_idx]
                 ax0.plot(t, t_0, color='black', alpha=0.7, label='True (Left)')
                 if r_plot is not None:
-                     ax0.plot(t[:len(r_plot)], r_plot, color='green', alpha=0.5, label='Robot (Raw)')
+                     ax0.plot(t[:len(r_plot)], r_plot, color='green', alpha=0.5, label='Robot (Calibrated)')
                 
                 ax0.plot(t, p_0, color='red', alpha=0.9, linestyle='--', label='Compensated')
                 ax0.set_title(f"{lv_name} (Left Hip)")
@@ -1737,7 +1737,7 @@ def analyze_automated(target_dir, filter_pattern=None):
             # Find ckpt and config
             model_path = exp_path / "model.pt"
             config_path = exp_path / "config.yaml"
-            with open(config_path, 'r') as f:
+            with open(config_path, 'r', encoding='utf-8') as f:
                 import yaml
                 cfg = yaml.safe_load(f)
             

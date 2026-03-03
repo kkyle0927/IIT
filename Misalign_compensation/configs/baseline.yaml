@@ -16,31 +16,18 @@ shared:
   # ---------------------------------------------------------------------------
   # [1] 데이터 소스 정의 - 다중 HDF5 파일 통합
   # ---------------------------------------------------------------------------
-  # 각 데이터셋은 접두사로 구분됩니다 (m1_ = milestone1, m2_ = milestone2)
+  # 각 데이터셋은 접두사로 구분됩니다 (m2_ = milestone2)
   data_sources:
-    milestone1:
-      path: "./combined_data_milestone1.h5"
-      prefix: "m1_"
-      exclude_subjects: ["S001", "S002", "S003"]  # mocap/forceplate 없는 피험자 제외
     milestone2:
-      path: "./combined_data.h5"
+      path: "C:/Github/IIT/SpeedEstimation/combined_data.h5"
       prefix: "m2_"
       exclude_subjects: []
 
   # ---------------------------------------------------------------------------
   # [2] 피험자 목록 (통합된 16명)
   # ---------------------------------------------------------------------------
-  # milestone1: S004-S011 (8명), milestone2: S001-S008 (8명)
+  # milestone2: S001-S008 (8명)
   subjects: &SUBJECTS
-    # milestone1 피험자 (S004-S011)
-    - "m1_S004"
-    - "m1_S005"
-    - "m1_S006"
-    - "m1_S007"
-    - "m1_S008"
-    - "m1_S009"
-    - "m1_S010"
-    - "m1_S011"
     # milestone2 피험자 (S001-S008)
     - "m2_S001"
     - "m2_S002"
@@ -55,10 +42,6 @@ shared:
   # [3] 조건 (Conditions) - 모든 데이터셋의 조건 명시
   # ---------------------------------------------------------------------------
   conditions: &CONDITIONS
-    # milestone1 conditions
-    - "level_08mps"
-    - "level_12mps"
-    - "level_16mps"
     # milestone2 conditions
     - "level_075mps"
     - "level_100mps"
@@ -83,6 +66,9 @@ shared:
     # Robot Hip Joint Angle (2개)
     - ["robot/left", ["hip_angle"]]
     - ["robot/right", ["hip_angle"]]
+    # Robot Torque (2개)
+    - ["robot/left", ["torque"]]
+    - ["robot/right", ["torque"]]
 
   # ---------------------------------------------------------------------------
   # [5] 출력 변수 정의
@@ -103,6 +89,7 @@ shared:
     normalize: true        # 입력 정규화 활성화
     time_window_output: 1  # 단일 스칼라 출력
     use_complementary_filter_euler: true # 상보 필터(Euler Angle) 사용 여부 (기본 false)
+    calibrate_robot_thigh: true # Robot Thigh Angle 보정 (자동 활성화됨)
 
   # ---------------------------------------------------------------------------
   # [8] 모델 구조 정의
@@ -174,7 +161,7 @@ shared:
       test: ["m2_S008"]   # Test: 1명
       # 나머지 14명은 자동으로 Training
     save_to: null
-    loso_subjects: ["m1_S004", "m2_S008", "m1_S011"]
+    loso_subjects: ["m2_S008", "m2_S001", "m2_S005"]
 
   data: *DATA_CONFIG
 
