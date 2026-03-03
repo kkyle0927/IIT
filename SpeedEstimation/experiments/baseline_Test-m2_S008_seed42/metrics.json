@@ -1,23 +1,16 @@
 {
-    "test_huber": 0.015914942411335824,
-    "test_mae": 0.03871788829565048,
-    "test_rmse": 0.06315924227237701,
-    "n_params": 401181,
-    "model_size_mb": 1.5304,
-    "host_latency_ms": 2.5152,
-    "host_max_freq_hz": 397.58,
+    "test_huber": 0.015709203295326147,
+    "test_mae": 0.010542823933064938,
+    "test_rmse": 0.02885955199599266,
+    "n_params": 409025,
+    "model_size_mb": 1.5603,
+    "host_latency_ms": 2.4344,
+    "host_max_freq_hz": 410.78,
     "config": {
+        "exp_name": "baseline",
+        "cv_mode": "loso",
         "shared": {
             "data_sources": {
-                "milestone1": {
-                    "path": "./combined_data_milestone1.h5",
-                    "prefix": "m1_",
-                    "exclude_subjects": [
-                        "S001",
-                        "S002",
-                        "S003"
-                    ]
-                },
                 "milestone2": {
                     "path": "./combined_data.h5",
                     "prefix": "m2_",
@@ -25,14 +18,6 @@
                 }
             },
             "subjects": [
-                "m1_S004",
-                "m1_S005",
-                "m1_S006",
-                "m1_S007",
-                "m1_S008",
-                "m1_S009",
-                "m1_S010",
-                "m1_S011",
                 "m2_S001",
                 "m2_S002",
                 "m2_S003",
@@ -43,9 +28,6 @@
                 "m2_S008"
             ],
             "conditions": [
-                "level_08mps",
-                "level_12mps",
-                "level_16mps",
                 "level_075mps",
                 "level_100mps",
                 "level_125mps",
@@ -91,12 +73,22 @@
                 [
                     "robot/back_imu",
                     [
-                        "accel_x",
-                        "accel_y",
-                        "accel_z",
-                        "gyro_x",
-                        "gyro_y",
-                        "gyro_z"
+                        "roll",
+                        "pitch",
+                        "yaw",
+                        "vel_forward"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "torque"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "torque"
                     ]
                 ],
                 [
@@ -104,7 +96,8 @@
                     [
                         "x",
                         "y",
-                        "z"
+                        "z",
+                        "contact_l"
                     ]
                 ],
                 [
@@ -112,7 +105,15 @@
                     [
                         "x",
                         "y",
-                        "z"
+                        "z",
+                        "contact_r"
+                    ]
+                ],
+                [
+                    "sub_info",
+                    [
+                        "height",
+                        "weight"
                     ]
                 ]
             ],
@@ -138,7 +139,8 @@
                 "time_window_output": 1
             },
             "model": {
-                "type": "TCN",
+                "type": "TCN_GRU",
+                "gru_hidden": 32,
                 "channels": [
                     32,
                     32,
@@ -154,12 +156,15 @@
                     64
                 ],
                 "head_dropout": 0.5,
-                "model_norm": "layer",
+                "model_norm": "batch",
                 "use_input_norm": true,
-                "norm_type": "layer",
+                "input_norm_type": "instance",
                 "gating_signal": null,
                 "attention_type": null,
-                "attention_heads": 0
+                "attention_heads": 0,
+                "ar_feedback": {
+                    "enable": false
+                }
             }
         },
         "02_train": {
@@ -178,7 +183,8 @@
                 "use_gait_phase": false
             },
             "model": {
-                "type": "TCN",
+                "type": "TCN_GRU",
+                "gru_hidden": 32,
                 "channels": [
                     32,
                     32,
@@ -194,12 +200,15 @@
                     64
                 ],
                 "head_dropout": 0.5,
-                "model_norm": "layer",
+                "model_norm": "batch",
                 "use_input_norm": true,
-                "norm_type": "layer",
+                "input_norm_type": "instance",
                 "gating_signal": null,
                 "attention_type": null,
-                "attention_heads": 0
+                "attention_heads": 0,
+                "ar_feedback": {
+                    "enable": false
+                }
             },
             "loader": {
                 "batch_size": 128,
@@ -254,9 +263,9 @@
                 },
                 "save_to": null,
                 "loso_subjects": [
-                    "m1_S004",
-                    "m2_S008",
-                    "m1_S011"
+                    "m2_S003",
+                    "m2_S006",
+                    "m2_S008"
                 ]
             },
             "data": {
@@ -275,17 +284,8 @@
             },
             "scaler_path": "./runs_tcn/scaler.npz"
         },
-        "exp_name": "baseline",
-        "cv_mode": "loso",
+        "data_path": "./combined_data.h5",
         "subjects": [
-            "m1_S004",
-            "m1_S005",
-            "m1_S006",
-            "m1_S007",
-            "m1_S008",
-            "m1_S009",
-            "m1_S010",
-            "m1_S011",
             "m2_S001",
             "m2_S002",
             "m2_S003",
@@ -295,11 +295,7 @@
             "m2_S007",
             "m2_S008"
         ],
-        "data_path": "./combined_data.h5",
         "conditions": [
-            "level_08mps",
-            "level_12mps",
-            "level_16mps",
             "level_075mps",
             "level_100mps",
             "level_125mps",

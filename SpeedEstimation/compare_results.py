@@ -3,25 +3,34 @@ import os
 import sys
 import glob
 import json
+import resource
+
+# --- Resource Constraints (train.sh 기준과 동일: 1 GPU / 15 GB RAM / 16 CPU) ---
+# 1. GPU: index 0 only
+os.environ["CUDA_VISIBLE_DEVICES"]     = "0"
+# 2. Thread limits (OpenMP / MKL / NumExpr)
+os.environ["OMP_NUM_THREADS"]          = "16"
+os.environ["MKL_NUM_THREADS"]          = "16"
+os.environ["NUMEXPR_NUM_THREADS"]      = "16"
+os.environ["KMP_DUPLICATE_LIB_OK"]     = "TRUE"
+# 3. RAM hard limit: 15 GB (same as train.sh get_limits())
+_RAM_LIMIT = 15 * 1024 * 1024 * 1024
+resource.setrlimit(resource.RLIMIT_AS, (_RAM_LIMIT, _RAM_LIMIT))
+# ---------------------------------------------------------------------------------
+
 import torch
 import numpy as np
 import pandas as pd
 import matplotlib
-import os
-
-# --- Resource Constraints (User Request: 1/4 System) ---
-# Limit to 1 GPU (Index 0)
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 # Check for display, otherwise use Agg backend (headless)
 if os.environ.get('DISPLAY', '') == '':
     print('No display found. Using non-interactive Agg backend.')
     matplotlib.use('Agg')
 
-# Limit CPU Threads to 16 (approx 1/4 of 64 cores)
+# PyTorch thread limit
 torch.set_num_threads(16)
-print(f"[INFO] Resources optimized: 1 GPU, 16 CPU Threads max.")
-# --------------------------------------------------------
+print(f"[INFO] Resources optimized: 1 GPU, 15 GB RAM, 16 CPU Threads max.")
 
 import argparse
 import matplotlib.pyplot as plt
@@ -68,7 +77,7 @@ def get_data_sources_from_config(cfg):
     return sources
 from SpeedEstimator_TCN_MLP_experiments import (
     TCN_MLP, StanceGatedTCN, AttentionTCN, TCN_GRU_Head, LazyWindowDataset, build_nn_dataset, build_nn_dataset_multi,
-    make_subject_selection, CONDITION_SELECTION
+    make_subject_selection, CONDITION_SELECTION, extract_condition_data_v2
 )
 import SpeedEstimator_TCN_MLP_experiments as main_script
 
@@ -204,31 +213,6 @@ def calculate_smoothness(y_pred, series_offsets=None):
     diff = np.diff(y_pred, axis=0)
     jitter = np.std(diff)
     return jitter
-
-def resolve_cfg(cfg):
-    """Ensures input_vars, output_vars etc. are in the root of the cfg dictionary."""
-    if 'input_vars' not in cfg:
-        # Check shared
-        if 'shared' in cfg:
-            cfg['input_vars'] = cfg['shared'].get('input_vars')
-            cfg['output_vars'] = cfg['shared'].get('output_vars')
-            if 'data' in cfg['shared']:
-                 if 'time_window_input' not in cfg: cfg['time_window_input'] = cfg['shared']['data'].get('window_size')
-                 if 'time_window_output' not in cfg: cfg['time_window_output'] = cfg['shared']['data'].get('time_window_output')
-                 if 'stride' not in cfg: cfg['stride'] = cfg['shared']['data'].get('stride')
-        # Check 01_construction
-        if not cfg.get('input_vars') and '01_construction' in cfg:
-            cfg['input_vars'] = cfg['01_construction'].get('inputs')
-            cfg['output_vars'] = cfg['01_construction'].get('outputs')
-            if 'include_subjects' in cfg['01_construction']: cfg['subjects'] = cfg['01_construction']['include_subjects']
-            if 'include_conditions' in cfg['01_construction']: cfg['conditions'] = cfg['01_construction']['include_conditions']
-    
-    if 'conditions' not in cfg and 'shared' in cfg:
-        cfg['conditions'] = cfg['shared'].get('conditions', [])
-    if 'subjects' not in cfg and 'shared' in cfg:
-        cfg['subjects'] = cfg['shared'].get('subjects', [])
-        
-    return cfg
 
 def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg, 
                           window_size, window_output, stride_eval, est_tick_ranges):
@@ -414,13 +398,69 @@ def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg,
 
     return y_pred, y_true, offsets
 
-def load_and_evaluate(exp_dir, device, return_seqs=False):
+def _sequential_ar_inference(model, X_list, Y_list, window_size, window_output,
+                              stride_eval, est_tick_ranges, ar_k, device):
+    """
+    AR 모델 전용 순차 추론.
+    각 윈도우에서 이전 모델 예측값을 AR 채널로 사용 (cold start = zeros).
+    반환: (y_pred_raw, y_true_raw) — apply_post_processing 입력과 동일한 형식.
+    """
+    import numpy as np
+    max_la = max(est_tick_ranges) if est_tick_ranges else window_output
+    all_preds, all_trues = [], []
+
+    for X_s, Y_s in zip(X_list, Y_list):
+        if isinstance(X_s, torch.Tensor):
+            X_s = X_s.numpy()
+        if isinstance(Y_s, torch.Tensor):
+            Y_s = Y_s.numpy()
+        T = X_s.shape[0]
+        valid_end = T - window_size - max_la + 1
+        if valid_end <= 0:
+            continue
+
+        prev_ar = torch.zeros(1, ar_k, device=device)  # cold start
+
+        for t in range(0, valid_end, stride_eval):
+            x_win = torch.from_numpy(X_s[t:t + window_size]).float().unsqueeze(0).to(device)  # (1, T, D)
+            ar_ch = prev_ar.unsqueeze(1).expand(1, window_size, ar_k)   # (1, T, ar_k)
+            x_ar = torch.cat([x_win, ar_ch], dim=-1)
+
+            with torch.no_grad():
+                out = model(x_ar)  # (1, H, D_out) or (1, D_out)
+
+            # Update AR channel: use first-horizon prediction
+            if out.dim() == 3:
+                prev_ar = out[0:1, 0, :ar_k].detach()   # (1, ar_k)
+            else:
+                prev_ar = out[0:1, :ar_k].detach()       # (1, ar_k)
+
+            all_preds.append(out.cpu().numpy())
+
+            # Ground truth at first prediction target
+            if est_tick_ranges:
+                tgt_idx = t + window_size + est_tick_ranges[0] - 1
+            else:
+                tgt_idx = t + window_size
+            if tgt_idx < T:
+                all_trues.append(Y_s[tgt_idx:tgt_idx + 1])  # (1, D_out)
+
+    if not all_preds:
+        return np.zeros((0,)), np.zeros((0,))
+    return np.concatenate(all_preds, axis=0), np.concatenate(all_trues, axis=0)
+
+
+def load_and_evaluate(exp_dir, device, return_seqs=False, return_extras=False):
     """
     Loads model and config, rebuilds test dataset, runs inference.
-    
+
     [REFACTORED] Training 스크립트(SpeedEstimator_TCN_MLP_experiments.py)의
     config 해석, 데이터 로딩, normalization, 모델 초기화 경로를 정확히 재사용합니다.
-    
+
+    Args:
+      return_extras: if True, also return 'model', 'cfg', 'c_in_vars', 'c_out_vars',
+                     'scaler' (mean, scale), 'test_sub' for downstream reuse.
+
     참조:
       - Config 해석: train_experiment() line 1335-1349 + CV loop line 1833-1905
       - 모델 초기화: train_experiment() line 1275-1410
@@ -479,6 +519,8 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     # [FIX-CORRECTION] Training script DOES load baseline.yaml implicitly (lines 2595-2632).
     # So we MUST load it here too for partial configs like 'exp_single_ema_a080'.
     base_config_path = Path("configs/baseline.yaml")
+    if not base_config_path.exists():
+        base_config_path = Path("config_backups/baseline.yaml")
     cfg = {}
     
     def deep_merge(base, override):
@@ -769,25 +811,25 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     model.load_state_dict(ckpt["state_dict"] if "state_dict" in ckpt else ckpt, strict=False)
     model.eval()
     
-    y_preds = []
-    y_trues = []
-    
-    with torch.no_grad():
-        for xb, yb in loader:
-            xb = xb.to(device)
-            
-            # [NEW] AR Feedback Inference: append zero channel
-            if ar_enable:
-                B, T_in, _ = xb.shape
-                prev_channel = torch.zeros(B, T_in, ar_k, device=device)
-                xb = torch.cat([xb, prev_channel], dim=-1)
-                
-            out = model(xb)
-            y_preds.append(out.cpu().numpy())
-            y_trues.append(yb.cpu().numpy())
-            
-    y_pred_raw = np.concatenate(y_preds, axis=0)
-    y_true_raw = np.concatenate(y_trues, axis=0)
+    if ar_enable:
+        # [AR Feedback] Sequential inference: each window uses previous model prediction as AR channel
+        print(f"[EVAL] AR Feedback: running sequential inference (ar_k={ar_k})")
+        y_pred_raw, y_true_raw = _sequential_ar_inference(
+            model, X_list, Y_list, window_size, window_output,
+            stride_eval, est_tick_ranges, ar_k, device
+        )
+    else:
+        # Standard batch inference
+        y_preds = []
+        y_trues = []
+        with torch.no_grad():
+            for xb, yb in loader:
+                xb = xb.to(device)
+                out = model(xb)
+                y_preds.append(out.cpu().numpy())
+                y_trues.append(yb.cpu().numpy())
+        y_pred_raw = np.concatenate(y_preds, axis=0)
+        y_true_raw = np.concatenate(y_trues, axis=0)
     
     y_pred, y_true, offsets = apply_post_processing(
         y_pred_raw, y_true_raw, X_list, Y_list, cfg,
@@ -835,7 +877,19 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     if return_seqs:
         ret["y_true_seq"] = y_true
         ret["y_pred_seq"] = y_pred
-        
+
+    if return_extras:
+        ret["model"] = model
+        ret["cfg"] = cfg
+        ret["c_in_vars"] = c_in_vars
+        ret["c_out_vars"] = c_out_vars
+        ret["test_sub"] = test_sub
+        # scaler info
+        if scaler_path.exists():
+            scaler = np.load(scaler_path)
+            ret["scaler_mean"] = scaler['mean']
+            ret["scaler_scale"] = scaler['scale']
+
     return ret
 
 def parse_vars(var_list_from_yaml):
@@ -849,12 +903,31 @@ def parse_vars(var_list_from_yaml):
             parsed.append((gpath, vars))
     return parsed
 
+# Feature groups for importance plot labeling (new experiment groups A-E)
+_EXTRA_FEATURE_GROUPS = {
+    'global_acc': ['global_acc_x', 'global_acc_y', 'global_acc_z'],
+    'global_gyr': ['global_gyr_x', 'global_gyr_y', 'global_gyr_z'],
+    'global_vel': ['global_vel_y', 'global_vel_treadmill'],
+    'gait':       ['gait_phase_l', 'gait_phase_r', 'contact_l', 'contact_r', 'stride_freq_l', 'stride_freq_r'],
+    'sub_info':   ['height', 'weight'],
+    'torque':     ['torque'],
+    'thigh':      ['thigh_angle'],
+    'hip':        ['hip_angle'],
+}
+
+
 def get_feature_names(cfg, input_vars):
     """Reconstruct feature names based on config and input variables."""
     feature_names = []
     for gpath, vars in input_vars:
-        # Determine prefix based on group path (Mirroring main script logic)
         gpath_lower = gpath.lower()
+
+        # sub_info: anthropometric constants
+        if gpath == 'sub_info':
+            for v in vars:
+                feature_names.append(f"SubInfo_{v}")
+            continue
+
         if 'back_imu' in gpath_lower:
             prefix = "IMU"
         elif 'robot' in gpath_lower:
@@ -870,70 +943,29 @@ def get_feature_names(cfg, input_vars):
             prefix = "Deg"
         else:
             prefix = gpath.split('/')[-1]
-            
+
         for v in vars:
-            # Clean up individual variable names
+            # Global IMU vars
+            if v.startswith('global_'):
+                feature_names.append(f"IMU_Global_{v[7:]}")
+                continue
+            # Gait phase / contact
+            if v in ('gait_phase_l', 'gait_phase_r', 'contact_l', 'contact_r'):
+                tag = 'Phase' if 'gait_phase' in v else 'Contact'
+                side = 'L' if v.endswith('_l') else 'R'
+                feature_names.append(f"Gait_{tag}_{side}")
+                continue
             v_clean = v.replace('ankle_angle', 'Ankle').replace('knee_angle', 'Knee').replace('hip_', 'Hip_')
             v_clean = v_clean.replace('flexion', 'Flex').replace('adduction', 'Add').replace('rotation', 'Rot')
             v_clean = v_clean.replace('_l', '_L').replace('_r', '_R')
             feature_names.append(f"{prefix}_{v_clean}")
-            
+
     # Add gait phase if enabled in config
     if cfg.get("02_train", {}).get("data", {}).get("use_gait_phase") or cfg.get("use_gait_phase"):
         feature_names.append("GaitPhase_L")
         feature_names.append("GaitPhase_R")
-        
+
     return feature_names
-
-def calculate_permutation_importance(model, test_loader, feature_names, device):
-    """Calculate MAE-based permutation importance."""
-    print("Collecting data for Permutation Importance analysis...")
-    X_batches = []
-    Y_batches = []
-    for xb, yb in test_loader:
-        X_batches.append(xb)
-        Y_batches.append(yb)
-        
-    if not X_batches:
-        return np.array([])
-        
-    X_tensor = torch.cat(X_batches, dim=0).to(device)
-    Y_tensor = torch.cat(Y_batches, dim=0).to(device)
-    
-    criterion = torch.nn.L1Loss() # MAE
-    model.eval()
-    
-    def get_loss(x_in, y_in):
-        with torch.no_grad():
-            batch_size = 1024
-            N = x_in.size(0)
-            running_loss = 0.0
-            for i in range(0, N, batch_size):
-                xb = x_in[i:i+batch_size]
-                yb = y_in[i:i+batch_size]
-                pred = model(xb)
-                # Reshape if necessary (Horizon handling)
-                if pred.ndim == 3 and yb.ndim == 2: yb = yb.unsqueeze(1)
-                elif pred.ndim == 2 and yb.ndim == 3: pred = pred.unsqueeze(1)
-                running_loss += criterion(pred, yb).item() * xb.size(0)
-            return running_loss / N
-
-    base_mae = get_loss(X_tensor, Y_tensor)
-    importances = []
-    
-    for i in range(X_tensor.shape[2]):
-        original_col = X_tensor[:, :, i].clone()
-        perm_idx = torch.randperm(X_tensor.size(0), device=device)
-        X_tensor[:, :, i] = X_tensor[perm_idx, :, i]
-        
-        perm_mae = get_loss(X_tensor, Y_tensor)
-        importances.append(perm_mae - base_mae)
-        
-        X_tensor[:, :, i] = original_col
-        print(f"  [{i+1}/{X_tensor.shape[2]}] {feature_names[i]}: +{importances[-1]:.6f}", end='\r')
-    
-    print()
-    return np.array(importances)
 
 def plot_feature_importance(importances, feature_names, save_path, title="Feature Importance"):
     """Plot horizontal bar chart of feature importance."""
@@ -1117,174 +1149,6 @@ def main():
 
     print("Multi-model comparison complete.")
 
-def analyze_single_folder(folder_path):
-    print(f"\n[Auto Analysis] Processing: {folder_path}")
-    
-    config_path = os.path.join(folder_path, "config_dump.yaml")
-    if not os.path.exists(config_path):
-        yamls = glob.glob(os.path.join(folder_path, "*.yaml"))
-        if yamls: config_path = yamls[0]
-        else:
-            print("  -> No config found. Skipping.")
-            return
-
-    import yaml
-    with open(config_path, 'r') as f:
-        cfg = yaml.safe_load(f)
-
-    if "01_construction" in cfg:
-        input_vars = cfg.get("inputs") or cfg["01_construction"]["inputs"]
-        out_groups = cfg.get("outputs") or cfg["01_construction"]["outputs"]
-        output_vars_flat = []
-        for item in out_groups:
-            if isinstance(item, list) and len(item) == 2:
-                gpath, vars = item
-                output_vars_flat.extend([f"{gpath}/{v}" for v in vars])
-            else:
-                output_vars_flat.append(item)
-        data_path = cfg.get("data_path") or cfg["01_construction"].get("src_h5") or cfg["shared"].get("src_h5")
-        window = cfg.get("time_window_input") or cfg.get("shared", {}).get("data", {}).get("window_size", 100)
-        stride = cfg.get("stride") or cfg.get("shared", {}).get("data", {}).get("stride", 10)
-        est_tick_ranges = cfg.get("est_tick_ranges")
-    else:
-        input_vars = cfg["input_vars"]
-        out_groups = cfg["output_vars"]
-        output_vars_flat = out_groups # Assume flat if old? Or grouped? Old format was flat strings usually.
-        # But extract_v2 expects grouped. Old code used extract_v1?
-        # Let's assume input_vars/output_vars are correct structure for the extractor used.
-        # If old format uses extract_v2, it must be grouped.
-        data_path = cfg["data_path"]
-        window = cfg["time_window_input"]
-        stride = cfg.get("stride", 1)
-        est_tick_ranges = cfg.get("est_tick_ranges", None)
-
-    model_path = os.path.join(folder_path, "model.pt")
-    if not os.path.exists(model_path):
-        print("  -> No model found. Skipping.")
-        return
-        
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    flat_in = []
-    for item in input_vars:
-        if isinstance(item, list): flat_in.extend([f"{item[0]}/{v}" for v in item[1]])
-        else: flat_in.append(item)
-    in_dim = len(flat_in)
-    out_dim = len(output_vars_flat) # Use flat
-    model_cfg = cfg.get("02_train", {}).get("model") or cfg.get("model", {})
-    tcn_ch = model_cfg.get("channels") or cfg.get("tcn_channels", [32, 32, 64, 64])
-    k_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 4)
-    print(f"[DEBUG] Model CFG keys: {list(model_cfg.keys())}")
-    print(f"[DEBUG] Extracted Kernel Size: {k_size}")
-    dropout = float(model_cfg.get("dropout") or cfg.get("dropout_p", 0.3))
-    head_dropout = model_cfg.get("head_dropout")
-    
-    hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", [64, 32])
-    
-    norm_type = model_cfg.get("model_norm", "layer")
-
-    try:
-        model = TCN_MLP(
-            in_dim, out_dim, 
-            horizon=1, 
-            channels=tcn_ch, 
-            kernel_size=k_size, 
-            dropout=dropout,
-            head_dropout=head_dropout,
-            tcn_norm=norm_type,
-            mlp_norm=norm_type,
-            mlp_hidden=hidden, 
-            use_input_norm=cfg.get("shared", {}).get("data", {}).get("normalize", True)
-        ).to(device)
-        model.load_state_dict(torch.load(model_path, map_location=device), strict=False)
-        model.eval()
-    except Exception as e:
-        print(f"  -> Model load failed: {e}")
-        return
-
-    if not os.path.exists(data_path): 
-        if os.path.exists("combined_data.h5"): data_path = "combined_data.h5"
-    
-    conditions = ['accel_sine', 'decline_5deg', 'incline_10deg', 'level_075mps', 'level_100mps', 'level_125mps', 'stopandgo']
-    import re
-    match = re.search(r"Test-(S\d+)", folder_path)
-    test_subjs = [match.group(1)] if match else ["S008"]
-
-    save_dir = os.path.join("compare_result", os.path.basename(folder_path))
-    os.makedirs(save_dir, exist_ok=True)
-    print(f"  -> Saving plots to: {save_dir}")
-    
-    # [NEW] Check Overfitting
-    plot_training_curves(Path(folder_path), Path(save_dir))
-    
-    results = []
-    for subj in test_subjs:
-        for cond in conditions:
-            try:
-                X_list, Y_list = build_nn_dataset(
-                    data_path, [subj], [cond], 
-                    input_vars, out_groups, # Use GROUPED OUTPUTS
-                    window, 1, stride, # 1 dummy output window
-                    est_tick_ranges=est_tick_ranges
-                )
-                
-                # [FIX] Apply Scaler Logic (Same as analyze_detailed_single)
-                scaler_path = folder_path / "scaler.npz"
-                if not scaler_path.exists():
-                     if "scaler_path" in cfg and cfg["scaler_path"]:
-                          p = Path(cfg["scaler_path"])
-                          if p.exists(): scaler_path = p
-                          
-                if scaler_path.exists():
-                    try:
-                        scaler = np.load(scaler_path)
-                        mean = scaler['mean']
-                        scale = scaler['scale']
-                        for i in range(len(X_list)):
-                            X_list[i] = (X_list[i] - mean) / (scale + 1e-8)
-                        # print(f"    -> Scaler applied for {subj}/{cond}")
-                    except: pass
-                
-                if len(X_list) == 0: continue
-
-                ds = LazyWindowDataset(X_list, Y_list, window, 1, stride, est_tick_ranges=est_tick_ranges)
-                if len(ds) == 0: continue
-                
-                dl = DataLoader(ds, batch_size=1024, shuffle=False)
-                
-                preds, targets = [], []
-                with torch.no_grad():
-                    for bx, by in dl:
-                        bx = bx.to(device)
-                        p = model(bx)
-                        if isinstance(p, list): p = p[0]
-                        preds.append(p.cpu().numpy())
-                        targets.append(by.numpy())
-                preds = np.concatenate(preds)
-                targets = np.concatenate(targets)
-                mae = np.mean(np.abs(preds - targets))
-                rmse = np.sqrt(np.mean((preds - targets)**2))
-                
-                results.append({'subj': subj, 'cond': cond, 'mae': mae, 'rmse': rmse})
-
-                plt.figure(figsize=(10, 4))
-                plt.plot(targets[:1000].squeeze(), label='GT', color='black', alpha=0.6)
-                plt.plot(preds[:1000].squeeze(), label='Pred', color='red', alpha=0.7)
-                plt.title(f"[{subj}] {cond} | MAE={mae:.4f}")
-                plt.legend()
-                plt.tight_layout()
-                plt.savefig(os.path.join(save_dir, f"{subj}_{cond}.png"))
-                plt.close()
-                print(f"    -> {subj}/{cond}: MAE={mae:.4f}")
-            except Exception as e:
-                print(f"   -> Error on {subj}/{cond}: {e}")
-    
-    # Save Summary CSV
-    import pandas as pd
-    if results:
-        df = pd.DataFrame(results)
-        df.to_csv(os.path.join(save_dir, "summary.csv"), index=False)
-        print(f"  -> Summary saved to {save_dir}/summary.csv")
-
 def plot_training_curves(exp_dir, save_dir):
     """
     Plots Train vs Val loss from train_log.csv to detect overfitting.
@@ -1413,65 +1277,81 @@ def plot_trajectory(y_true, y_pred, title, save_path, series_offsets=None):
     plt.close()
 
 
-def plot_detailed_condition_trajectories(exp_path, save_dir, device):
+def plot_detailed_condition_trajectories(exp_path, save_dir, device,
+                                         preloaded_model=None, preloaded_cfg=None,
+                                         preloaded_c_in_vars=None, preloaded_c_out_vars=None,
+                                         preloaded_scaler=None):
     """
     Generates 2x3 grid plots (Levels x Zooms) for each condition.
     Copied/Refactored from analyze_detailed_single to be reusable.
+    If preloaded_model/cfg are provided, skips redundant config parsing and model loading.
     """
     print(f"[INFO] Generating Detailed Grid Plots for {exp_path.name}...")
     import yaml, re, h5py
     from torch.utils.data import DataLoader
-    
+
     folder_name = exp_path.name
-    
-    # 1. Load Config
-    exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
-    exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
-    original_config_path = Path(f"configs/{exp_name}.yaml")
-    cfg = None
-    if original_config_path.exists():
-        with open(original_config_path, 'r') as f_cfg: cfg = yaml.safe_load(f_cfg)
+
+    # ---- Use preloaded data if available, otherwise load from scratch ----
+    if preloaded_cfg is not None and preloaded_model is not None:
+        cfg = preloaded_cfg
+        c_in_vars = preloaded_c_in_vars
+        c_out_vars = preloaded_c_out_vars
+        model = preloaded_model
+        mean, scale = (preloaded_scaler if preloaded_scaler else (None, None))
+        _skip_model_load = True
     else:
-        config_path = exp_path / "config.yaml"
-        if not config_path.exists():
-            print("  -> Config not found, skipping detailed plots.")
-            return
-        with open(config_path) as f_cfg: cfg = yaml.safe_load(f_cfg)
+        _skip_model_load = False
 
-    # 2. Parse Variables
-    def _parse_vars_local(var_list_from_yaml):
-        if not var_list_from_yaml: return []
-        parsed = []
-        for item in var_list_from_yaml:
-            if isinstance(item, (list, tuple)) and len(item) == 2:
-                parsed.append((item[0], item[1]))
-        return parsed
+        # 1. Load Config
+        exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
+        exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
+        original_config_path = Path(f"configs/{exp_name}.yaml")
+        cfg = None
+        if original_config_path.exists():
+            with open(original_config_path, 'r') as f_cfg: cfg = yaml.safe_load(f_cfg)
+        else:
+            config_path = exp_path / "config.yaml"
+            if not config_path.exists():
+                print("  -> Config not found, skipping detailed plots.")
+                return
+            with open(config_path) as f_cfg: cfg = yaml.safe_load(f_cfg)
 
-    # input_vars / output_vars
-    curr_input_vars = cfg.get("input_vars")
-    curr_output_vars = cfg.get("output_vars")
-    if not curr_input_vars and 'shared' in cfg: curr_input_vars = cfg['shared'].get('input_vars')
-    if not curr_output_vars and 'shared' in cfg: curr_output_vars = cfg['shared'].get('output_vars')
-    if not curr_input_vars and '01_construction' in cfg: curr_input_vars = cfg['01_construction'].get('inputs')
-    if not curr_output_vars and '01_construction' in cfg: curr_output_vars = cfg['01_construction'].get('outputs')
-    
-    c_in_vars = _parse_vars_local(curr_input_vars)
-    c_out_vars = _parse_vars_local(curr_output_vars)
-    
-    # 3. Data Parameters
+        # 2. Parse Variables
+        def _parse_vars_local(var_list_from_yaml):
+            if not var_list_from_yaml: return []
+            parsed = []
+            for item in var_list_from_yaml:
+                if isinstance(item, (list, tuple)) and len(item) == 2:
+                    parsed.append((item[0], item[1]))
+            return parsed
+
+        curr_input_vars = cfg.get("input_vars")
+        curr_output_vars = cfg.get("output_vars")
+        if not curr_input_vars and 'shared' in cfg: curr_input_vars = cfg['shared'].get('input_vars')
+        if not curr_output_vars and 'shared' in cfg: curr_output_vars = cfg['shared'].get('output_vars')
+        if not curr_input_vars and '01_construction' in cfg: curr_input_vars = cfg['01_construction'].get('inputs')
+        if not curr_output_vars and '01_construction' in cfg: curr_output_vars = cfg['01_construction'].get('outputs')
+
+        c_in_vars = _parse_vars_local(curr_input_vars)
+        c_out_vars = _parse_vars_local(curr_output_vars)
+
+        mean, scale = None, None
+
+    # 3. Data Parameters (always needed for per-condition loading)
     train_cfg_section = cfg.get("02_train", {})
     data_cfg = train_cfg_section.get("data", {})
     if not data_cfg: data_cfg = cfg.get("data", {})
-    
+
     window_size = data_cfg.get("window_size") or cfg.get("window_size", 200)
     window_output = data_cfg.get("window_output") or data_cfg.get("time_window_output") or cfg.get("window_output", 1)
     est_tick_ranges = data_cfg.get("est_tick_ranges") if data_cfg else cfg.get("est_tick_ranges")
-    
+
     # LPF
     curr_lpf_cutoff = cfg.get("lpf_cutoff")
     if curr_lpf_cutoff is None and 'shared' in cfg: curr_lpf_cutoff = cfg['shared'].get('lpf_cutoff')
     eval_lpf = curr_lpf_cutoff or 0.5
-    
+
     curr_lpf_order = cfg.get("lpf_order")
     if curr_lpf_order is None and 'shared' in cfg: curr_lpf_order = cfg['shared'].get('lpf_order')
     curr_lpf_order = curr_lpf_order or 4
@@ -1479,7 +1359,7 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
     # 4. Identify Subject and Data Path
     match = re.search(r"Test-((?:m\d+_)?S\d+)", folder_name)
     test_sub = match.group(1) if match else "S001"
-    
+
     prefix_found, real_sub = parse_subject_prefix(test_sub)
     data_sources = get_data_sources_from_config(cfg)
     if prefix_found and prefix_found in data_sources:
@@ -1492,60 +1372,58 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
         print(f"  -> Data path {data_path} not found. Skipping.")
         return
 
-    # 5. Load Model
-    model_path = exp_path / "model.pt"
-    if not model_path.exists(): return
-    
-    # Reconstruct Model (Partial duplication of load_and_evaluate logic)
-    input_dim = 0
-    # Count vars:
-    count = 0
-    for g, vs in c_in_vars: count += len(vs)
-    # Add Gait Phase?
-    use_gait_ph = cfg.get("02_train", {}).get("data", {}).get("use_gait_phase") or cfg.get("use_gait_phase")
-    if use_gait_ph: count += 2 # L/R
-    input_dim = count
-    
-    # Output dim
-    out_dim = 0
-    for g, vs in c_out_vars: out_dim += len(vs)
-    if out_dim == 0: out_dim = 1 # Fallback
-    
-    model_cfg = train_cfg_section.get("model")
-    if not model_cfg: model_cfg = data_cfg if "channels" in data_cfg else cfg.get("model", {})
-    
-    tcn_channels = model_cfg.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
-    kernel_size = model_cfg.get("kernel_size") or cfg.get("kernel_size", 3)
-    dropout_p = float(model_cfg.get("dropout") or cfg.get("dropout_p", 0.5))
-    head_dropout = model_cfg.get("head_dropout", dropout_p)
-    mlp_hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden", 128)
-    use_input_norm = cfg.get("data", {}).get("normalize", True)
-    model_norm_type = model_cfg.get("model_norm", None)
-    
-    horizon = len(est_tick_ranges) if est_tick_ranges else window_output
-    
-    model_type = model_cfg.get("type", "TCN")
-    common_args = dict(input_dim=input_dim, output_dim=out_dim, horizon=horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, head_dropout=head_dropout, mlp_hidden=mlp_hidden, use_input_norm=use_input_norm, tcn_norm=model_norm_type, mlp_norm=model_norm_type)
+    if not _skip_model_load:
+        # 5. Load Model
+        model_path = exp_path / "model.pt"
+        if not model_path.exists(): return
 
-    if model_type == "StanceGatedTCN":
-        model = StanceGatedTCN(**common_args, gating_dim=model_cfg.get("gating_dim", 1))
-    elif model_type == "AttentionTCN":
-        model = AttentionTCN(**common_args, attention_type=model_cfg.get("attention_type", "temporal"), attention_heads=model_cfg.get("attention_heads", 4))
-    else:
-        model = TCN_MLP(**common_args)
-        
-    ckpt = torch.load(model_path, map_location=device)
-    model.load_state_dict(ckpt['state_dict'] if 'state_dict' in ckpt else ckpt, strict=False)
-    model.to(device)
-    model.eval()
+        input_dim = 0
+        count = 0
+        for g, vs in c_in_vars: count += len(vs)
+        use_gait_ph = cfg.get("02_train", {}).get("data", {}).get("use_gait_phase") or cfg.get("use_gait_phase")
+        if use_gait_ph: count += 2
+        input_dim = count
 
-    # Scaler
-    scaler_path = exp_path / "scaler.npz"
-    mean, scale = None, None
-    if scaler_path.exists():
-        s_data = np.load(scaler_path)
-        mean = s_data['mean']
-        scale = s_data['scale']
+        out_dim = 0
+        for g, vs in c_out_vars: out_dim += len(vs)
+        if out_dim == 0: out_dim = 1
+
+        model_cfg_d = train_cfg_section.get("model")
+        if not model_cfg_d: model_cfg_d = data_cfg if "channels" in data_cfg else cfg.get("model", {})
+
+        tcn_channels = model_cfg_d.get("channels") or cfg.get("tcn_channels", (64, 64, 128))
+        kernel_size = model_cfg_d.get("kernel_size") or cfg.get("kernel_size", 3)
+        dropout_p = float(model_cfg_d.get("dropout") or cfg.get("dropout_p", 0.5))
+        head_dropout = model_cfg_d.get("head_dropout", dropout_p)
+        mlp_hidden = model_cfg_d.get("head_hidden") or cfg.get("mlp_hidden", 128)
+        use_input_norm = cfg.get("data", {}).get("normalize", True)
+        model_norm_type = model_cfg_d.get("model_norm", None)
+
+        horizon = len(est_tick_ranges) if est_tick_ranges else window_output
+
+        model_type = model_cfg_d.get("type", "TCN")
+        common_args = dict(input_dim=input_dim, output_dim=out_dim, horizon=horizon, channels=tcn_channels, kernel_size=kernel_size, dropout=dropout_p, head_dropout=head_dropout, mlp_hidden=mlp_hidden, use_input_norm=use_input_norm, tcn_norm=model_norm_type, mlp_norm=model_norm_type)
+
+        if model_type == "StanceGatedTCN":
+            model = StanceGatedTCN(**common_args, gating_dim=model_cfg_d.get("gating_dim", 1))
+        elif model_type == "AttentionTCN":
+            model = AttentionTCN(**common_args, attention_type=model_cfg_d.get("attention_type", "temporal"), attention_heads=model_cfg_d.get("attention_heads", 4))
+        elif model_type == "TCN_GRU":
+            model = TCN_GRU_Head(**common_args, gru_hidden=model_cfg_d.get("gru_hidden", 32))
+        else:
+            model = TCN_MLP(**common_args)
+
+        ckpt = torch.load(model_path, map_location=device)
+        model.load_state_dict(ckpt['state_dict'] if 'state_dict' in ckpt else ckpt, strict=False)
+        model.to(device)
+        model.eval()
+
+        # Scaler
+        scaler_path = exp_path / "scaler.npz"
+        if scaler_path.exists():
+            s_data = np.load(scaler_path)
+            mean = s_data['mean']
+            scale = s_data['scale']
 
     # 6. Plot Loop
     from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
@@ -1792,270 +1670,171 @@ def analyze_automated(target_dir, filter_pattern=None):
         return
 
     print(f"[AUTO] Found {len(valid_dirs)} experiments to analyze.")
-    
-    # 1. Collect Metrics for ALL
-    results = []
-    for exp_path in valid_dirs:
-        try:
-            res = load_and_evaluate(exp_path, device, return_seqs=False)
-            if res:
-                results.append({
-                    "name": exp_path.name,
-                    "path": exp_path,
-                    "mae": res["mae"],
-                    "rmse": res["rmse"],
-                    "r2": res.get("r2", 0.0)
-                })
-        except Exception as e:
-            print(f"[ERROR] Failed to evaluate {exp_path.name}: {e}")
-            import traceback
-            traceback.print_exc()
-            
-    # 2. [NEW] Create base report directory
+
+    # ==========================================================================
+    # SINGLE PASS: Evaluate + generate all plots in one loop (no duplicate calls)
+    # ==========================================================================
+    import time as _time
+    _t0_total = _time.time()
+
     base_output_dir = Path("compare_result")
     base_output_dir.mkdir(exist_ok=True, parents=True)
-    
-    # Extract metrics for summary table
-    mae_values = [r["mae"] for r in results]
-    rmse_values = [r["rmse"] for r in results]
-    
-    # 3. Process each fold independently
-    print(f"\n[INFO] Generating detailed reports for {len(results)} results...")
-    for idx, result in enumerate(results, 1):
-        fold_name = result["name"]
-        exp_path = result["path"]
-        
-        # Determine unique experiment name based on parent folder
-        exp_id = exp_path.parent.name if fold_name.startswith("fold_") else result.get("name", "unknown")
+
+    results = []
+    eval_cache = {}  # name -> full result dict (model, cfg, seqs, etc.)
+
+    for idx, exp_path in enumerate(valid_dirs, 1):
+        _t0_item = _time.time()
+        fold_name = exp_path.name
+        exp_id = exp_path.parent.name if fold_name.startswith("fold_") else fold_name
         fold_output_dir = base_output_dir / exp_id / fold_name
         fold_output_dir.mkdir(exist_ok=True, parents=True)
-        
-        print(f"[{idx}/{len(results)}] Processing: {exp_id} -> {fold_name}")
-        
+
+        print(f"\n[{idx}/{len(valid_dirs)}] Processing: {exp_id} -> {fold_name}")
+
         try:
-            # 3a. Training curves
+            # --- ONE call to load_and_evaluate (replaces two separate calls) ---
+            res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+            if not res:
+                continue
+
+            results.append({
+                "name": fold_name,
+                "path": exp_path,
+                "mae": res["mae"],
+                "rmse": res["rmse"],
+                "r2": res.get("r2", 0.0)
+            })
+
+            # 1) Training curves (cheap — reads log file only)
             plot_training_curves(exp_path, fold_output_dir)
-            
-            # 3b. Trajectory plot
-            res_with_seqs = load_and_evaluate(exp_path, device, return_seqs=True)
-            if res_with_seqs and "y_true_seq" in res_with_seqs and "y_pred_seq" in res_with_seqs:
+
+            # 2) Trajectory plot (reuse cached sequences)
+            if "y_true_seq" in res and "y_pred_seq" in res:
                 traj_plot_path = fold_output_dir / "trajectory.png"
                 plot_trajectory(
-                    res_with_seqs["y_true_seq"],
-                    res_with_seqs["y_pred_seq"],
+                    res["y_true_seq"],
+                    res["y_pred_seq"],
                     f"Trajectory: {exp_id} ({fold_name})",
                     traj_plot_path,
-                    series_offsets=res_with_seqs.get("series_offsets")
+                    series_offsets=res.get("series_offsets")
                 )
                 print(f"  [SAVED] Trajectory plot: {traj_plot_path}")
-            
-            # 3c. [NEW] Detailed Grid Plots (Refactored)
-            plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
 
-            # 5c. [NEW] Feature Importance - For EVERY fold
+            # 3) Detailed Grid Plots — pass pre-loaded model + config
+            _scaler = None
+            if "scaler_mean" in res:
+                _scaler = (res["scaler_mean"], res["scaler_scale"])
+            plot_detailed_condition_trajectories(
+                exp_path, fold_output_dir, device,
+                preloaded_model=res.get("model"),
+                preloaded_cfg=res.get("cfg"),
+                preloaded_c_in_vars=res.get("c_in_vars"),
+                preloaded_c_out_vars=res.get("c_out_vars"),
+                preloaded_scaler=_scaler
+            )
+
+            # 4) Feature Importance — reuse pre-loaded model + cfg
             if (fold_output_dir / "feature_importance.png").exists():
                 print(f"  -> Feature Importance already exists for {fold_name}. Skipping.")
-                continue
-
-            # Requires loading model and data
-            print(f"  -> Calculating Feature Importance for {fold_name}...")
-            # We already have main_script (SpeedEstimator_TCN_MLP_experiments)
-            # Find ckpt and config
-            model_path = exp_path / "model.pt"
-            config_path = exp_path / "config.yaml"
-            with open(config_path, 'r') as f:
-                import yaml
-                cfg = yaml.safe_load(f)
-            
-            # Reconstruction Logic from load_and_evaluate
-            raw_input_vars = cfg.get("01_construction", {}).get("inputs") or cfg.get("shared", {}).get("input_vars")
-            if not raw_input_vars: 
-                raw_input_vars = [] # Fallback
-            input_vars = parse_vars(raw_input_vars)
-            
-            f_names = get_feature_names(cfg, input_vars)
-            
-            # Load Model
-            ckpt = torch.load(model_path, map_location=device)
-            # Reconstruct model architecture
-            m_type = cfg.get("model", {}).get("type", "TCN")
-            m_cfg = cfg.get("02_train", {}).get("model", {})
-            if not m_cfg: m_cfg = cfg.get("model", {})
-            
-            in_dim = len(f_names) # Corrected input dimension based on constructed names
-            out_dim = 1 # Regression default
-            horizon = len(cfg.get("02_train", {}).get("data", {}).get("est_tick_ranges", [5]))
-            
-            if m_type == "StanceGatedTCN":
-                model_c = StanceGatedTCN
-            elif m_type == "AttentionTCN":
-                model_c = AttentionTCN
             else:
-                model_c = TCN_MLP
-                
-            model = model_c(
-                input_dim=in_dim,
-                output_dim=out_dim,
-                horizon=horizon,
-                channels=m_cfg.get("channels", [64, 64, 128]),
-                kernel_size=m_cfg.get("kernel_size", 3),
-                dropout=m_cfg.get("dropout", 0.1),
-                head_dropout=m_cfg.get("head_dropout", 0.1),
-                mlp_hidden=m_cfg.get("head_hidden", [128]),
-                use_input_norm=m_cfg.get("use_input_norm", True),
-                input_norm_type=m_cfg.get("input_norm_type", m_cfg.get("model_norm") or "layer"),
-                tcn_norm=m_cfg.get("model_norm"),
-                mlp_norm=m_cfg.get("model_norm")
-            )
-            model.load_state_dict(ckpt['state_dict'], strict=False)
-            model.to(device)
-            
-            # Use original test loader logic from main_script or similar
-            # Since load_and_evaluate already did it, we can just grab data?
-            # No, load_and_evaluate doesn't return the raw loader.
-            # Let's recreate a small loader just for this.
-            import re
-            match = re.search(r"Test-((?:m\d+_)?S\d+)", fold_name)
-            sub_name = result.get("test_sub") or (match.group(1) if match else (fold_name[5:] if fold_name.startswith("fold_") else fold_name))
-            
-            # [FIXED] Robust Data Loading using manual extraction
-            # 1. Determine Data Path (Multi-dataset support)
-            prefix_found, real_sub = parse_subject_prefix(sub_name)
-            data_sources = get_data_sources_from_config(cfg)
-            if prefix_found and prefix_found in data_sources:
-                data_path = data_sources[prefix_found]['path']
-            else:
-                data_path = cfg.get("data_path", "combined_data.h5")
-                if not os.path.exists(data_path): data_path = "combined_data.h5"
+                print(f"  -> Calculating Feature Importance for {fold_name}...")
+                _fi_model = res.get("model")
+                _fi_cfg = res.get("cfg")
+                _fi_c_in_vars = res.get("c_in_vars")
 
-            # 2. Determine Conditions
-            actual_conds = []
-            with h5py.File(data_path, 'r') as f_check:
-                if real_sub in f_check:
-                    available_conds = list(f_check[real_sub].keys())
-                else:
-                    print(f"  [WARN] Subject {real_sub} not found in {data_path}.")
-                    available_conds = []
+                if _fi_model and _fi_cfg and _fi_c_in_vars:
+                    raw_input_vars = _fi_cfg.get("01_construction", {}).get("inputs") or _fi_cfg.get("shared", {}).get("input_vars")
+                    if not raw_input_vars: raw_input_vars = []
+                    input_vars = parse_vars(raw_input_vars)
+                    f_names = get_feature_names(_fi_cfg, input_vars)
 
-                # Use shared conditions if available
-                cond_cfg = cfg.get("conditions")
-                if not cond_cfg and "shared" in cfg: cond_cfg = cfg["shared"].get("conditions")
-                if not cond_cfg: cond_cfg = []
-
-                for c in cond_cfg:
-                    if c in available_conds:
-                        actual_conds.append(c)
-                    elif c == 'level':
-                        actual_conds.extend([ac for ac in available_conds if ac.startswith('level_')])
+                    sub_name = res.get("test_sub", "")
+                    prefix_found, real_sub = parse_subject_prefix(sub_name)
+                    data_sources = get_data_sources_from_config(_fi_cfg)
+                    if prefix_found and prefix_found in data_sources:
+                        data_path = data_sources[prefix_found]['path']
                     else:
-                        matches = [ac for ac in available_conds if ac.startswith(c)]
-                        if matches: actual_conds.extend(matches)
-            actual_conds = list(dict.fromkeys(actual_conds))
+                        data_path = _fi_cfg.get("data_path", "combined_data.h5")
+                        if not os.path.exists(data_path): data_path = "combined_data.h5"
 
-            # 3. Extract Data
-            print(f"  [DEBUG] Loading data from {data_path} for {real_sub} (Conditions: {len(actual_conds)})")
-            
-            # LPF Params from config
-            eval_lpf = cfg.get("shared", {}).get("lpf_cutoff", 0.5)
-            curr_lpf_order = cfg.get("shared", {}).get("lpf_order", 4)
+                    actual_conds = []
+                    with h5py.File(data_path, 'r') as f_check:
+                        if real_sub in f_check:
+                            available_conds = list(f_check[real_sub].keys())
+                        else:
+                            available_conds = []
+                        cond_cfg = _fi_cfg.get("conditions")
+                        if not cond_cfg and "shared" in _fi_cfg: cond_cfg = _fi_cfg["shared"].get("conditions")
+                        if not cond_cfg: cond_cfg = []
+                        for c in cond_cfg:
+                            if c in available_conds: actual_conds.append(c)
+                            elif c == 'level': actual_conds.extend([ac for ac in available_conds if ac.startswith('level_')])
+                            else: actual_conds.extend([ac for ac in available_conds if ac.startswith(c)])
+                    actual_conds = list(dict.fromkeys(actual_conds))
 
-            X_imp_list = []
-            Y_imp_list = []
-            
-            with h5py.File(data_path, 'r') as f_imp:
-                for cond in actual_conds:
-                     if cond not in f_imp[real_sub]: continue
-                     try:
-                         # Ensure extract_condition_data_v2 is available
-                         from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
-                         x_list, y_list = extract_condition_data_v2(
-                            f_imp, real_sub, cond, 
-                            [(item[0], item[1]) for item in input_vars], 
-                            [(item[0], item[1]) for item in parse_vars(cfg.get("shared", {}).get("output_vars"))],
-                            lpf_cutoff=eval_lpf,
-                            lpf_order=curr_lpf_order,
-                            fs=100
-                         )
-                         X_imp_list.extend(x_list)
-                         Y_imp_list.extend(y_list)
-                     except Exception as e:
-                         print(f"  [WARN] Skipping {cond}: {e}")
-            
-            if not X_imp_list:
-                print("  [WARN] No data loaded for importance. Skipping.")
-                continue
+                    eval_lpf = _fi_cfg.get("shared", {}).get("lpf_cutoff", 0.5)
+                    curr_lpf_order = _fi_cfg.get("shared", {}).get("lpf_order", 4)
 
-            X_test = np.concatenate(X_imp_list, axis=0) # (N, T, D)
-            Y_test = np.concatenate(Y_imp_list, axis=0)
+                    from SpeedEstimator_TCN_MLP_experiments import extract_condition_data_v2
+                    X_imp_list, Y_imp_list = [], []
+                    with h5py.File(data_path, 'r') as f_imp:
+                        for cond in actual_conds:
+                            if cond not in f_imp[real_sub]: continue
+                            try:
+                                x_list, y_list = extract_condition_data_v2(
+                                    f_imp, real_sub, cond,
+                                    [(item[0], item[1]) for item in input_vars],
+                                    [(item[0], item[1]) for item in parse_vars(_fi_cfg.get("shared", {}).get("output_vars"))],
+                                    lpf_cutoff=eval_lpf, lpf_order=curr_lpf_order, fs=100
+                                )
+                                X_imp_list.extend(x_list)
+                                Y_imp_list.extend(y_list)
+                            except Exception as e:
+                                print(f"  [WARN] Skipping {cond}: {e}")
 
-            # 4. Apply Scaler
-            scaler_path = exp_path / "scaler.npz"
-            if scaler_path.exists():
-                s_data = np.load(scaler_path)
-                m = s_data['mean']
-                s = s_data['scale'] if 'scale' in s_data else s_data.get('std', 1.0)
-                # X_test is (N, T, D). Broadcasting works if m is (D,)
-                X_test = (X_test - m) / (s + 1e-8)
-            else:
-                print("  [WARN] No scaler found. Using raw data.")
+                    if X_imp_list:
+                        X_test = np.concatenate(X_imp_list, axis=0)
+                        Y_test = np.concatenate(Y_imp_list, axis=0)
 
-            imp_ds = LazyWindowDataset(
-                [X_test], [Y_test], 
-                cfg.get("shared", {}).get("data", {}).get("window_size", 200),
-                horizon, cfg.get("shared", {}).get("data", {}).get("stride_inf", 1),
-                target_mode="sequence", est_tick_ranges=cfg.get("02_train", {}).get("data", {}).get("est_tick_ranges", [5])
-            )
-            imp_loader = DataLoader(imp_ds, batch_size=1024, shuffle=False, num_workers=0)
-            
-            # Determine Loss Function for Importance
-            # Default to MSE if not specified, but try to match training loss
-            train_cfg = cfg.get("02_train", {}).get("train", {})
-            loss_name = train_cfg.get("loss", "mse").lower()
-            huber_delta = float(train_cfg.get("huber_delta", 1.0))
-            
-            if loss_name == "huber":
-                criterion = torch.nn.HuberLoss(delta=huber_delta, reduction='sum')
-                print(f"  [IMP] Using Huber Loss (delta={huber_delta}) for Importance")
-            elif loss_name in ["mae", "l1"]:
-                criterion = torch.nn.L1Loss(reduction='sum')
-                print(f"  [IMP] Using L1 Loss (MAE) for Importance")
-            else:
-                criterion = torch.nn.MSELoss(reduction='sum')
-                print(f"  [IMP] Using MSE Loss for Importance")
+                        if "scaler_mean" in res:
+                            X_test = (X_test - res["scaler_mean"]) / (res["scaler_scale"] + 1e-8)
 
-            imps = calculate_permutation_importance(model, imp_loader, device=device, criterion=criterion, batch_size=1024)
-            plot_feature_importance(imps, f_names, fold_output_dir / "feature_importance.png", title=f"Importance ({loss_name}): {fold_name}")
-            
+                        _fi_data_cfg = _fi_cfg.get("02_train", {}).get("data", {})
+                        imp_ds = LazyWindowDataset(
+                            [X_test], [Y_test],
+                            _fi_data_cfg.get("window_size", 200),
+                            len(_fi_data_cfg.get("est_tick_ranges", [5])),
+                            _fi_data_cfg.get("stride_inf", 1),
+                            target_mode="sequence",
+                            est_tick_ranges=_fi_data_cfg.get("est_tick_ranges", [5])
+                        )
+                        imp_loader = DataLoader(imp_ds, batch_size=1024, shuffle=False, num_workers=0)
+
+                        train_cfg = _fi_cfg.get("02_train", {}).get("train", {})
+                        loss_name = train_cfg.get("loss", "mse").lower()
+                        huber_delta = float(train_cfg.get("huber_delta", 1.0))
+                        if loss_name == "huber":
+                            criterion = torch.nn.HuberLoss(delta=huber_delta, reduction='sum')
+                        elif loss_name in ["mae", "l1"]:
+                            criterion = torch.nn.L1Loss(reduction='sum')
+                        else:
+                            criterion = torch.nn.MSELoss(reduction='sum')
+
+                        imps = calculate_permutation_importance(_fi_model, imp_loader, device=device, criterion=criterion, batch_size=1024)
+                        plot_feature_importance(imps, f_names, fold_output_dir / "feature_importance.png", title=f"Importance ({loss_name}): {fold_name}")
+
+            _elapsed = _time.time() - _t0_item
+            print(f"  [DONE] {fold_name} in {_elapsed:.1f}s")
+
         except Exception as e:
-            print(f"  [ERROR] Failed to generate plots for {fold_name}: {e}")
+            print(f"  [ERROR] Failed to process {fold_name}: {e}")
             import traceback
             traceback.print_exc()
-    
-def plot_model_comparison(results):
-    names = [r["name"] for r in results]
-    maes = [r["mae"] for r in results]
-    
-    idx = np.argsort(maes)
-    names = [names[i] for i in idx]
-    maes = [maes[i] for i in idx]
-    
-    plt.figure(figsize=(10, 6 + len(results)*0.2))
-    plt.barh(range(len(results)), maes, color='skyblue')
-    plt.yticks(range(len(results)), names)
-    plt.xlabel("Test MAE (m/s) - Lower is Better")
-    plt.title(f"Model Comparison (N={len(results)})")
-    
-    for i, v in enumerate(maes):
-        plt.text(v, i, f" {v:.4f}", va='center')
-        
-    plt.tight_layout()
-    os.makedirs("compare_result", exist_ok=True)
-    plt.savefig("compare_result/model_comparison.png")
-    print("Saved compare_result/model_comparison.png")
 
-
-
-
+    _total_elapsed = _time.time() - _t0_total
+    print(f"\n[AUTO] All {len(valid_dirs)} experiments processed in {_total_elapsed:.0f}s ({_total_elapsed/60:.1f}min)")
+    
 # -----------------------------------------------------------------------------
 # Detailed Single Model Analysis (Feature Importance included)
 # -----------------------------------------------------------------------------
@@ -2087,6 +1866,8 @@ def analyze_detailed_single(exp_path):
     
     # Load base config (baseline.yaml) first, just like training
     base_config_path = Path("configs/baseline.yaml")
+    if not base_config_path.exists():
+        base_config_path = Path("config_backups/baseline.yaml")
     cfg = {}
     
     def deep_merge(base, override):
@@ -2274,7 +2055,8 @@ def analyze_detailed_single(exp_path):
     else:
         horizon = window_output
 
-    model = TCN_MLP(
+    model_type = model_cfg.get("type", "TCN")
+    common_args = dict(
         input_dim=input_dim,
         output_dim=Y[0].shape[1],
         horizon=horizon,
@@ -2284,10 +2066,19 @@ def analyze_detailed_single(exp_path):
         head_dropout=head_dropout,
         mlp_hidden=mlp_hidden,
         use_input_norm=use_input_norm,
-        tcn_norm=model_norm_type, 
+        tcn_norm=model_norm_type,
         mlp_norm=model_norm_type
-    ).to(device)
-    
+    )
+    if model_type == "StanceGatedTCN":
+        model = StanceGatedTCN(**common_args, gating_dim=model_cfg.get("gating_dim", 1))
+    elif model_type == "AttentionTCN":
+        model = AttentionTCN(**common_args, attention_type=model_cfg.get("attention_type", "temporal"), attention_heads=model_cfg.get("attention_heads", 4))
+    elif model_type == "TCN_GRU":
+        model = TCN_GRU_Head(**common_args, gru_hidden=model_cfg.get("gru_hidden", 32))
+    else:
+        model = TCN_MLP(**common_args)
+    model.to(device)
+
     model_path = exp_path / "model.pt"
     ckpt = torch.load(model_path, map_location=device)
     model.load_state_dict(ckpt['state_dict'] if 'state_dict' in ckpt else ckpt, strict=False)
@@ -2390,18 +2181,6 @@ def analyze_detailed_single(exp_path):
     print(f"Saved {plot_dir}/feature_importance.png ({num_features} features)")
     print(f"Saved compare_result/{folder_name}_importance.png ({num_features} features)")
 
-def generate_feature_names(c_in_vars):
-    names = []
-    for gpath, vars in c_in_vars:
-        if 'Back_imu' in gpath or 'back_imu' in gpath: prefix = "IMU"
-        elif 'robot/left' in gpath: prefix = "Robot_L"
-        elif 'robot/right' in gpath: prefix = "Robot_R"
-        elif 'forceplate' in gpath: prefix = f"GRF_{'L' if 'left' in gpath else 'R'}"
-        elif 'kin_q' in gpath: prefix = "Kin"
-        else: prefix = gpath.split('/')[-1]
-        for v in vars: names.append(f"{prefix}_{v}")
-    return names
-
 def calculate_permutation_importance(model, loader, device, criterion, batch_size=2048):
     """
     Calculate Permutation Feature Importance with Batched Inference to Prevent OOM.
@@ -2495,16 +2274,6 @@ def calculate_permutation_importance(model, loader, device, criterion, batch_siz
         print(f"Importance = {importance:.6f}")
         
     return np.array(importances)
-
-def parse_vars(var_list):
-    # Helper to ensure [ (grp, [vars]) ] structure
-    # If list of [grp, [vars]], return as is
-    if not var_list: return []
-    if isinstance(var_list[0], (list, tuple)) and len(var_list[0]) == 2 and isinstance(var_list[0][1], list):
-        return var_list
-    # Handle flat list if necessary? Default to assume correct structure from config
-    return var_list
-
 
 def get_category(name):
     name = name.lower()
