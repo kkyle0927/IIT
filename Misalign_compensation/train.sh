@@ -218,7 +218,7 @@ def main():
         time.sleep(5)
         
     print("[SCHEDULER] All training jobs finished. Starting comparison...")
-    subprocess.run(["python", "compare_results.py", "--auto"])
+    subprocess.run(["C:/Users/ChanyoungKo/anaconda3/envs/IIT/python.exe", "compare_results.py", "--auto"])
 
 if __name__ == "__main__": main()
 EOF
