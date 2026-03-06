@@ -1,0 +1,20 @@
+이전 다양한 yaml 파일들에 대해서 학습한 결과를 기준으로 가장 좋은 것만 뽑아서 baseline.yaml 을 업데이트 해줘.
+그리고 테스트에 사용했던 나머지 yaml 파일들과 trained model 파일들, 그리고 log 들은 전부 삭제해줘.
+그리고 새로 만들어진 baseline.yaml 파일을 기준으로 몇가지씩만 또 바꿔가면서 테스팅해보고싶은데 아래 항목들에 대해서 테스팅 할 수 있게 다양한 yaml 파일들을 만들어주고, 이 yaml 파일들과 호환되게 SpeedEstimator_TCN_MLP_experiments.py와 compare_results.py 파일을 수정해줘.
+-  현재 입력값으로 그냥 backIMU 의 accX, accY, accZ, gyrX, gyrY, gyrZ 를 roll pitch yaw vel_forward로 단순하게 바꿔서 넣어주는거 같은데, 그렇게 하지 말고, 처음에 1초간의 데이터가 서있을때의 데이터이기 때문에 그때를 기준으로 IMU의 orientation을 잡고, global coordinate에서 회전하는 것을 고려해서 global coordinate에서의 acc, gyr 값으로 변환해줘. 이 값을 input feature로 test 해줘
+- 위에서 변환한것처럼 local trunkIMU의 acc와 gyr를 그대로 input feature 로 하는게 아니라 이걸 이용해서 실시간으로 global 좌표계에서의 acc,gyr로 변환한 다음에 이걸 이용해서 speed를 계산하거나 angular velocity 값을 넣어줘. 즉, sensor 값을 global 좌표계에서의 값으로 변환한 다음에 가공해서 input feature로 써보자는거야. global 좌표계에서 진행방향의 acc값을 적분해서 속도로 만들어서 input feature로 해봐도 되고, 아무튼 이러한 후가공을 해서 input feature로 다양한 것들을 넣어보고, 그 중 의미있는 가공을 찾고싶어.
+- 위의 내용들을 할 때 treadmill에서 보행 시 측정되는 trunkIMU다보니까 보행 방향 acc값이 포함이 안될텐데, lv~/trial_01/treadmill/left/speed_leftbelt 혹은 lv~/trial_01/treadmill/right/speed_leftbelt의 미분값을 IMU acc를 global coordinate 기준으로 변환한 값에 더해서도 위의 option들을 해보는 방법도 해봐줘.
+- forceplate의 값을 이용해서 heel strike를 계산한 이후에 gait phase 값을 추가해서 input feature에 추가해봐.
+- forceplate 값을 이용해서 foot contact을 input feature에 추가해보고 성능을 보고싶어. 추가로, foot contact 에 따라서 swing 인 부분에서 얻어지는 데이터에 대해서는 model에 영향이 안가도록 gating 해주는 것도 테스팅해보고싶어.
+- 위의 작업들 하는데, 좌표계에 대한 추가 설명이 필요하면 요청하도록 해.
+- 현재 학습 데이터로 쓰는 것들이 다양한 assist_level에 대해서도 하고 있는게 맞나 싶은데, 확인해봐. 예를 들어서, S~~/incline_10deg 에는 lv0, lv4, lv7 이렇게 다양한 경로가 있고, S~~/accel_sine 에는 lv0밖에 없어. 이 다양한 케이스에 대해서 모두 고려해서 해주고, input feature에 만약에 ~~/trial_01/robot/left/torque 나 ~~/trial_01/robot/right/torque 가 안들어가면 포함해줘.
+- 현재 input feature 중에 ~~/trial_01/robot/left/hip_angle / ~~/trial_01/robot/right/hip_angle 이 쓰일텐데 얘네 hip_angle 말고 동일한 위치에 thigh_angle이 있으니까 그걸 활용해봐.
+- batch normalization 혹은 layer normalization을 이것저것 추가해보자
+- S~~/sub_info의 height나 weight 정보를 이용해서 normalization할 수 있는 부분을 해보고싶음. 피험자간 variability를 최소화하고 싶어서 그래.
+
+위에 대하여 각각 yaml을 만들고, 어떤 것이 좋은 성능으로 이끄는 지 확인해보고싶어. 계획 아주 철저하게 잘 짜줘
+
+오가노이드 33000 뚫으면 38000까지도 가능
+
+파가야 25불 물려있음 답 없음 물타기도 쫌...
+쿠팡18불 지키면서 트렌드라인 돌파하는지 보자. 지금 18불이고 기다리는중. 우측면 돌파 기다림
