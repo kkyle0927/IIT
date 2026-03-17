@@ -21,11 +21,6 @@ shared:
   - decline_5deg
   - incline_10deg
   - stopandgo
-  level_selection:
-    include:
-    - lv0
-    - lv4
-    - lv7
   input_vars:
   - - derived/euler
     - - roll
@@ -71,11 +66,11 @@ shared:
     - 64
     - 128
     kernel_size: 5
-    dropout: 0.15
+    dropout: 0.2
     use_norm: true
     head_hidden:
     - 64
-    head_dropout: 0.15
+    head_dropout: 0.2
     model_norm: layer
     gating_signal: null
     attention_type: null
@@ -111,6 +106,7 @@ shared:
     cos_T0: 10
     cos_Tmult: 1
     eta_min: 1.0e-05
+    augment_noise_std: 0.05
 03_eval:
   split:
     mode: loso
@@ -132,6 +128,6 @@ shared:
   train:
     device: cuda
   scaler_path: ./runs_tcn/scaler.npz
-exp_name: baseline
+exp_name: exp_A4_quat_noise_005
 cv_mode: loso
 subjects: *id004

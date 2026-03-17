@@ -29,6 +29,17 @@ import seaborn as sns
 from pathlib import Path
 from torch.utils.data import DataLoader
 from scipy import signal
+from config_utils import (
+    get_config_conditions,
+    get_config_input_vars,
+    get_config_output_vars,
+    get_data_sources,
+    get_est_tick_ranges,
+    get_primary_data_path,
+    get_train_data_config,
+    get_window_size,
+    normalize_experiment_config,
+)
 
 # -----------------------------------------------------------------------------
 # Argument Parsing
@@ -58,51 +69,32 @@ def parse_subject_prefix(s):
     if s.startswith("m3_"): return "m3_", s[3:]
     return None, s
 
-def get_data_sources_from_config(cfg):
-    sources = {}
-    raw_sources = cfg.get("shared", {}).get("data_sources", {}) or cfg.get("data_sources", {})
-    if not isinstance(raw_sources, dict): return {}
-    for key, val in raw_sources.items():
-        if isinstance(val, dict) and 'prefix' in val:
-            sources[val['prefix']] = val
-    return sources
 from model_training import (
-    TCN_MLP, StanceGatedTCN, AttentionTCN, LazyWindowDataset, build_nn_dataset, build_nn_dataset_multi,
+    TCN_MLP, StanceGatedTCN, AttentionTCN, TCN_GRU, LazyWindowDataset, build_nn_dataset, build_nn_dataset_multi,
     make_subject_selection, CONDITION_SELECTION
 )
 import model_training as main_script
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+def find_config_by_exp_name(exp_name, config_root="configs"):
+    matches = sorted(Path(config_root).rglob(f"{exp_name}.yaml"))
+    return matches[0] if matches else None
+
 def list_experiments(exp_root="experiments"):
     root = Path(exp_root)
     if not root.exists():
         print(f"Directory {root} does not exist.")
         return []
-    
-    # [NEW] Support hierarchical structure: experiments/{exp_name}/fold_{subject}/
-    # Search for model.pt in both:
-    # 1. Direct children (old flat structure)
-    # 2. Grandchildren (new nested structure)
-    exp_dirs = []
-    
-    for item in root.iterdir():
-        if not item.is_dir():
-            continue
-        
-        # Check if this is a fold directory (has model.pt)
-        if (item / "model.pt").exists():
-            exp_dirs.append(item)
-        else:
-            # Check if this is an experiment group (has fold_* subdirectories)
-            for fold_dir in item.iterdir():
-                if fold_dir.is_dir() and (fold_dir / "model.pt").exists():
-                    exp_dirs.append(fold_dir)
-    
-    exp_dirs.sort(key=lambda x: x.name)
-    return exp_dirs
 
-def select_experiments(exp_dirs):
+    exp_dirs = sorted({p.parent for p in root.rglob("model.pt")})
+    return sorted(exp_dirs, key=lambda x: str(x))
+
+def select_experiments(exp_dirs, auto=False):
+    if auto:
+        return exp_dirs
+        
     print("\n=== Available Experiments ===")
     for i, d in enumerate(exp_dirs):
         print(f"{i:3d}: {d.name}")
@@ -200,29 +192,7 @@ def calculate_smoothness(y_pred, series_offsets=None):
     return jitter
 
 def resolve_cfg(cfg):
-    """Ensures input_vars, output_vars etc. are in the root of the cfg dictionary."""
-    if 'input_vars' not in cfg:
-        # Check shared
-        if 'shared' in cfg:
-            cfg['input_vars'] = cfg['shared'].get('input_vars')
-            cfg['output_vars'] = cfg['shared'].get('output_vars')
-            if 'data' in cfg['shared']:
-                 if 'time_window_input' not in cfg: cfg['time_window_input'] = cfg['shared']['data'].get('window_size')
-                 if 'time_window_output' not in cfg: cfg['time_window_output'] = cfg['shared']['data'].get('time_window_output')
-                 if 'stride' not in cfg: cfg['stride'] = cfg['shared']['data'].get('stride')
-        # Check 01_construction
-        if not cfg.get('input_vars') and '01_construction' in cfg:
-            cfg['input_vars'] = cfg['01_construction'].get('inputs')
-            cfg['output_vars'] = cfg['01_construction'].get('outputs')
-            if 'include_subjects' in cfg['01_construction']: cfg['subjects'] = cfg['01_construction']['include_subjects']
-            if 'include_conditions' in cfg['01_construction']: cfg['conditions'] = cfg['01_construction']['include_conditions']
-    
-    if 'conditions' not in cfg and 'shared' in cfg:
-        cfg['conditions'] = cfg['shared'].get('conditions', [])
-    if 'subjects' not in cfg and 'shared' in cfg:
-        cfg['subjects'] = cfg['shared'].get('subjects', [])
-        
-    return cfg
+    return normalize_experiment_config(cfg)
 
 def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg, 
                           window_size, window_output, stride_eval, est_tick_ranges):
@@ -232,6 +202,7 @@ def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg,
     """
     output_dim = y_pred_raw.shape[-1]
     
+    print(f"[DEBUG] apply_post_processing start: X_list={len(X_list)} trials")
     # 1. Sequence Overlap Averaging
     if y_pred_raw.ndim == 3 and est_tick_ranges is None and window_output > 1:
         print(f"[EVAL] Applying Sequence Overlap Averaging (H={window_output})...")
@@ -272,6 +243,7 @@ def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg,
             y_true = y_true_raw
             offsets = [0]
     else:
+        print(f"[DEBUG] Single point mode branch started.")
         # Single point mode
         y_pred = y_pred_raw
         y_true = y_true_raw
@@ -284,6 +256,7 @@ def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg,
             limit = length - window_size - max_lookahead + 1
             num_samples = len(range(0, limit, stride_eval)) if limit > 0 else 0
             curr += num_samples
+        print(f"[DEBUG] Single point mode branch finished. len(offsets)={len(offsets)}")
 
     # 2. Post-Processing LPF
     post_cfg = cfg.get("03_eval", {}).get("post_process", {})
@@ -307,10 +280,12 @@ def apply_post_processing(y_pred_raw, y_true_raw, X_list, Y_list, cfg,
                 trial_preds.append(segment)
         if trial_preds:
             y_pred = np.concatenate(trial_preds, axis=0)
+            
+    print(f"[DEBUG] apply_post_processing finished.")
         
     return y_pred, y_true, offsets
 
-def load_and_evaluate(exp_dir, device, return_seqs=False):
+def load_and_evaluate(exp_dir, device, return_seqs=False, return_extras=False):
     """
     Loads model and config, rebuilds test dataset, runs inference.
     
@@ -357,13 +332,13 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
             return None
     
     local_config = exp_path / "config.yaml"
-    original_config_path = Path(f"configs/{exp_name}.yaml")
+    original_config_path = find_config_by_exp_name(exp_name)
     
     config_to_load = None
     if local_config.exists():
         config_to_load = local_config
         print(f"[INFO] Using local config: {local_config}")
-    elif original_config_path.exists():
+    elif original_config_path and original_config_path.exists():
         config_to_load = original_config_path
         print(f"[WARN] Local config not found. Using global: {original_config_path}")
     else:
@@ -371,9 +346,10 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         return None
     
     with open(config_to_load, 'r', encoding='utf-8') as f:
-        cfg = yaml.safe_load(f)
+        cfg = normalize_experiment_config(yaml.safe_load(f))
     
-    print(f"\n{'='*60}")
+    print(f"\n{'='*60}", flush=True)
+    print(f"[EVAL] Starting evaluation for {folder_name}", flush=True)
     print(f"[EVAL] {folder_name}")
     print(f"[EVAL] Valid Config: {config_to_load}")
     
@@ -383,16 +359,8 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     # Step 3: Config 파싱 - Training CV loop (line 1833-1905)과 동일한 경로
     # =========================================================================
     # input_vars / output_vars (Training line 1833-1840)
-    curr_input_vars = cfg.get("input_vars")
-    curr_output_vars = cfg.get("output_vars")
-    if not curr_input_vars and 'shared' in cfg:
-        curr_input_vars = cfg['shared'].get('input_vars')
-    if not curr_output_vars and 'shared' in cfg:
-        curr_output_vars = cfg['shared'].get('output_vars')
-    if not curr_input_vars and '01_construction' in cfg:
-        curr_input_vars = cfg['01_construction'].get('inputs')
-    if not curr_output_vars and '01_construction' in cfg:
-        curr_output_vars = cfg['01_construction'].get('outputs')
+    curr_input_vars = get_config_input_vars(cfg)
+    curr_output_vars = get_config_output_vars(cfg)
     
     if not curr_input_vars or not curr_output_vars:
         print(f"Skipping {folder_name}: Missing input/output vars in config.")
@@ -412,32 +380,16 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     c_out_vars = parse_vars(curr_output_vars)
     
     # subjects / conditions (Training line 1842-1846)
-    if not cfg.get('subjects') and 'shared' in cfg:
-        cfg['subjects'] = cfg['shared'].get('subjects', [])
-    if not cfg.get('conditions') and 'shared' in cfg:
-        cfg['conditions'] = cfg['shared'].get('conditions', [])
-    
-    curr_cond_names = cfg.get("conditions", [])
+    curr_cond_names = get_config_conditions(cfg)
     
     # =========================================================================
     # Step 4: Data 파라미터 - Training과 동일 (line 1848-1860)
     # =========================================================================
     # window_size (Training line 1849-1851)
-    curr_window = cfg.get("time_window_input")
-    if not curr_window and 'shared' in cfg and 'data' in cfg['shared']:
-        curr_window = cfg['shared']['data'].get('window_size')
-    if not curr_window:
-        curr_window = 200  # Default
+    curr_window = get_window_size(cfg, default=200)
     
     # est_tick_ranges (Training line 1853-1856, 1858-1860)
-    curr_est_tick_ranges = cfg.get("est_tick_ranges")
-    if not curr_est_tick_ranges and 'shared' in cfg and 'data' in cfg['shared']:
-        val = cfg['shared']['data'].get('est_tick_ranges')
-        if val is not None:
-            curr_est_tick_ranges = val
-        else:
-            y_delay = cfg['shared']['data'].get('y_delay', 5)
-            curr_est_tick_ranges = [y_delay] if isinstance(y_delay, int) else y_delay
+    curr_est_tick_ranges = get_est_tick_ranges(cfg)
     if curr_est_tick_ranges:
         cfg["est_tick_ranges"] = curr_est_tick_ranges
     
@@ -445,7 +397,7 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     # Dataset logic (eval uses stride=1)
     
     # Data flags (Training line 1968-1971)
-    data_cfg_now = cfg.get("02_train", {}).get("data", {})
+    data_cfg_now = get_train_data_config(cfg)
     use_phys_vel = data_cfg_now.get("use_physical_velocity_model", False)
     use_gait_ph  = data_cfg_now.get("use_gait_phase", False)
     use_cf = data_cfg_now.get("use_complementary_filter_euler", False)
@@ -456,7 +408,7 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     # Step 5: train_experiment 내부와 동일한 data_cfg 파싱 (line 1335-1349)
     # =========================================================================
     train_cfg_section = cfg.get("02_train", {})
-    data_cfg = train_cfg_section.get("data", {})
+    data_cfg = get_train_data_config(cfg)
     if not data_cfg: data_cfg = cfg.get("data", {})
     
     # Training line 1341-1344: 정확한 windowing 파라미터
@@ -473,26 +425,47 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     print(f"[EVAL] Data: win_in={window_size}, win_out={window_output}, stride_train={data_stride}, stride_eval={stride_eval}")
     print(f"[EVAL] est_tick_ranges={est_tick_ranges}")
     
-    # =========================================================================
-    # Step 6: 데이터 로딩 (Training CV loop line 1994-2002과 동일)
-    # =========================================================================
+    # Explicitly inject data_sources so build_nn_dataset_multi can find them
+    srcs = get_data_sources(cfg)
+    if srcs:
+        if 'shared' not in cfg: cfg['shared'] = {}
+        cfg['shared']['data_sources'] = srcs
+
+    # [NEW] Residual Learning Mode Detection
+    use_residual = data_cfg_now.get("residual_target", False)
+    use_calib_thigh = data_cfg_now.get("calibrate_robot_thigh", False)
+
     print(f"[EVAL] Loading Test Data for Subject {test_sub}...")
-    
-    X_list, Y_list = main_script.build_nn_dataset_multi(
-        cfg, 
-        [test_sub],
-        curr_cond_names,
-        c_in_vars, c_out_vars,
-        window_size,       # Training과 동일한 window_size (YAML에서)
-        window_output,     # Training과 동일한 window_output (YAML에서)
-        stride_eval,       # Evaluation은 stride=1
+    if use_residual:
+        print(f"[EVAL] Residual target mode detected — will restore to absolute values after inference.")
+
+    common_build_args = dict(
+        config=cfg,
+        sub_names=[test_sub],
+        cond_names=curr_cond_names,
+        input_vars=c_in_vars, output_vars=c_out_vars,
+        time_window_input=window_size,
+        time_window_output=window_output,
+        stride=stride_eval,
         subject_selection=None,
         condition_selection=CONDITION_SELECTION,
         est_tick_ranges=est_tick_ranges,
         use_physical_velocity_model=use_phys_vel,
         use_gait_phase=use_gait_ph,
-        use_complementary_filter_euler=use_cf
+        use_complementary_filter_euler=use_cf,
+        calibrate_robot_thigh=use_calib_thigh
     )
+
+    X_list, Y_list = main_script.build_nn_dataset_multi(
+        **common_build_args, residual_target=use_residual
+    )
+
+    # If residual mode, also load absolute targets for restoration
+    Y_abs_list = None
+    if use_residual:
+        _, Y_abs_list = main_script.build_nn_dataset_multi(
+            **common_build_args, residual_target=False
+        )
     
     if not X_list:
         print(f"[ERROR] No test data found for {test_sub}. Check prefixes and data_sources.")
@@ -515,6 +488,7 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     
     # =========================================================================
     # Step 8: Dataset 생성 - Training line 1357-1359와 동일
+    # DataLoader 대신 간단한 Numpy Batch Generator 사용 (고착 방지)
     # =========================================================================
     ds = LazyWindowDataset(
         X_list, Y_list, 
@@ -522,7 +496,21 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         target_mode="sequence", 
         est_tick_ranges=est_tick_ranges
     )
-    loader = DataLoader(ds, batch_size=1024, shuffle=False, num_workers=0)
+    
+    # Simple DataLoader replacement
+    def memory_safe_loader(dataset, batch_size=1024):
+        total = len(dataset)
+        for i in range(0, total, batch_size):
+            end = min(i + batch_size, total)
+            batch_x = []
+            batch_y = []
+            for j in range(i, end):
+                x, y = dataset[j]
+                batch_x.append(x)
+                batch_y.append(y)
+            yield torch.stack(batch_x), torch.stack(batch_y)
+            
+    loader = memory_safe_loader(ds, batch_size=1024)
     
     # =========================================================================
     # Step 9: 모델 초기화 - train_experiment (line 1275-1410)과 동일
@@ -598,22 +586,27 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     
     model.to(device)
     
-    # =========================================================================
-    # Step 10: Weights 로드 및 Inference
-    # =========================================================================
-    ckpt = torch.load(model_path, map_location=device)
+    # Step 10: State Dict 로드 - Training line 2085-2086과 동일
+    import warnings
+    print(f"[DEBUG] Loading {model_path} onto {device}...")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=FutureWarning)
+        ckpt = torch.load(model_path, map_location=device, weights_only=False)
+    print(f"[DEBUG] Load complete.")
     model.load_state_dict(ckpt["state_dict"] if "state_dict" in ckpt else ckpt, strict=False)
     model.eval()
     
     y_preds = []
     y_trues = []
     
+    print(f"[DEBUG] Starting evaluate DataLoader loop...")
     with torch.no_grad():
-        for xb, yb in loader:
+        for b_idx, (xb, yb) in enumerate(loader):
             xb = xb.to(device)
             out = model(xb)
             y_preds.append(out.cpu().numpy())
             y_trues.append(yb.cpu().numpy())
+    print(f"[DEBUG] Finished evaluate DataLoader loop.")
             
     y_pred_raw = np.concatenate(y_preds, axis=0)
     y_true_raw = np.concatenate(y_trues, axis=0)
@@ -623,8 +616,41 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
         window_size, window_output, stride_eval, est_tick_ranges
     )
 
+    # [NEW] Residual → Absolute Restoration
+    if use_residual and Y_abs_list:
+        print(f"[EVAL] Restoring residual predictions to absolute thigh angles...")
+        # Compute robot_ref = Y_abs - Y_res per trial (= calibrated robot thigh)
+        robot_ref_list = [Y_abs_list[i] - Y_list[i] for i in range(len(Y_list))]
+        # Extract robot_ref at same window positions using LazyWindowDataset
+        ds_ref = LazyWindowDataset(
+            X_list, robot_ref_list,
+            window_size, window_output, stride_eval,
+            target_mode="sequence", est_tick_ranges=est_tick_ranges
+        )
+        ref_values = []
+        for j in range(len(ds_ref)):
+            _, ref_y = ds_ref[j]
+            ref_values.append(ref_y.numpy() if hasattr(ref_y, 'numpy') else ref_y)
+        robot_ref_raw = np.stack(ref_values)
+        # Apply same post-processing to robot_ref
+        robot_ref, _, _ = apply_post_processing(
+            robot_ref_raw, robot_ref_raw, X_list, robot_ref_list, cfg,
+            window_size, window_output, stride_eval, est_tick_ranges
+        )
+        # Squeeze robot_ref to match y_pred shape (prevent broadcasting OOM)
+        if robot_ref.ndim == 3 and robot_ref.shape[1] == 1:
+            robot_ref = robot_ref[:, 0, :]
+        if y_pred.ndim == 3 and y_pred.shape[1] == 1:
+            y_pred = y_pred[:, 0, :]
+        if y_true.ndim == 3 and y_true.shape[1] == 1:
+            y_true = y_true[:, 0, :]
+        # Restore to absolute values
+        y_pred = y_pred + robot_ref
+        y_true = y_true + robot_ref
+        print(f"[EVAL] Residual restoration complete. y_pred range: [{y_pred.min():.2f}, {y_pred.max():.2f}]")
+
     print(f"[EVAL] Final y_pred shape: {y_pred.shape}")
-    
+
     # =========================================================================
     # Step 11: Metric 계산 (Re-calculation after averaging/filtering)
     # =========================================================================
@@ -664,6 +690,19 @@ def load_and_evaluate(exp_dir, device, return_seqs=False):
     if return_seqs:
         ret["y_true_seq"] = y_true
         ret["y_pred_seq"] = y_pred
+
+    if return_extras:
+        ret["model"] = model
+        ret["cfg"] = cfg
+        ret["c_in_vars"] = c_in_vars
+        ret["c_out_vars"] = c_out_vars
+        ret["X_list"] = X_list
+        ret["Y_list"] = Y_list
+        ret["scaler_mean"] = mean if scaler_path.exists() else None
+        ret["scaler_scale"] = scale if scaler_path.exists() else None
+        ret["window_size"] = window_size
+        ret["est_tick_ranges"] = est_tick_ranges
+        ret["test_sub"] = test_sub
         
     return ret
 
@@ -714,56 +753,6 @@ def get_feature_names(cfg, input_vars):
         
     return feature_names
 
-def calculate_permutation_importance(model, test_loader, feature_names, device):
-    """Calculate MAE-based permutation importance."""
-    print("Collecting data for Permutation Importance analysis...")
-    X_batches = []
-    Y_batches = []
-    for xb, yb in test_loader:
-        X_batches.append(xb)
-        Y_batches.append(yb)
-        
-    if not X_batches:
-        return np.array([])
-        
-    X_tensor = torch.cat(X_batches, dim=0).to(device)
-    Y_tensor = torch.cat(Y_batches, dim=0).to(device)
-    
-    criterion = torch.nn.L1Loss() # MAE
-    model.eval()
-    
-    def get_loss(x_in, y_in):
-        with torch.no_grad():
-            batch_size = 1024
-            N = x_in.size(0)
-            running_loss = 0.0
-            for i in range(0, N, batch_size):
-                xb = x_in[i:i+batch_size]
-                yb = y_in[i:i+batch_size]
-                pred = model(xb)
-                # Reshape if necessary (Horizon handling)
-                if pred.ndim == 3 and yb.ndim == 2: yb = yb.unsqueeze(1)
-                elif pred.ndim == 2 and yb.ndim == 3: pred = pred.unsqueeze(1)
-                running_loss += criterion(pred, yb).item() * xb.size(0)
-            return running_loss / N
-
-    base_mae = get_loss(X_tensor, Y_tensor)
-    importances = []
-    
-    for i in range(X_tensor.shape[2]):
-        original_col = X_tensor[:, :, i].clone()
-        perm_idx = torch.randperm(X_tensor.size(0), device=device)
-        X_tensor[:, :, i] = X_tensor[perm_idx, :, i]
-        
-        perm_mae = get_loss(X_tensor, Y_tensor)
-        importances.append(perm_mae - base_mae)
-        
-        X_tensor[:, :, i] = original_col
-        print(f"  [{i+1}/{X_tensor.shape[2]}] {feature_names[i]}: +{importances[-1]:.6f}", end='\r')
-    
-    print()
-    return np.array(importances)
-
 def plot_feature_importance(importances, feature_names, save_path, title="Feature Importance"):
     """Plot horizontal bar chart of feature importance."""
     if len(importances) == 0: return
@@ -786,12 +775,24 @@ def plot_feature_importance(importances, feature_names, save_path, title="Featur
     print(f"  [SAVED] Feature Importance plot: {save_path}")
 
 def main():
+    print("[DEBUG] Entered main()", flush=True)
+    args = get_args()
+    print(f"[DEBUG] Args parsed: {args}", flush=True)
+    
     exp_dirs = list_experiments()
     if not exp_dirs:
         print("No experiments found.")
         return
 
-    selected = select_experiments(exp_dirs)
+    # Filter with --filter if provided
+    if args.filter:
+        import fnmatch
+        exp_dirs = [d for d in exp_dirs if fnmatch.fnmatch(d.name, args.filter)]
+        if not exp_dirs:
+             print(f"No experiments found matching filter {args.filter}")
+             return
+
+    selected = select_experiments(exp_dirs, auto=args.auto)
     if not selected:
         print("None selected.")
         return
@@ -959,33 +960,21 @@ def analyze_single_folder(folder_path):
 
     import yaml
     with open(config_path, 'r') as f:
-        cfg = yaml.safe_load(f)
+        cfg = normalize_experiment_config(yaml.safe_load(f))
 
-    if "01_construction" in cfg:
-        input_vars = cfg.get("inputs") or cfg["01_construction"]["inputs"]
-        out_groups = cfg.get("outputs") or cfg["01_construction"]["outputs"]
-        output_vars_flat = []
-        for item in out_groups:
-            if isinstance(item, list) and len(item) == 2:
-                gpath, vars = item
-                output_vars_flat.extend([f"{gpath}/{v}" for v in vars])
-            else:
-                output_vars_flat.append(item)
-        data_path = cfg.get("data_path") or cfg["01_construction"].get("src_h5") or cfg["shared"].get("src_h5")
-        window = cfg.get("time_window_input") or cfg.get("shared", {}).get("data", {}).get("window_size", 100)
-        stride = cfg.get("stride") or cfg.get("shared", {}).get("data", {}).get("stride", 10)
-        est_tick_ranges = cfg.get("est_tick_ranges")
-    else:
-        input_vars = cfg["input_vars"]
-        out_groups = cfg["output_vars"]
-        output_vars_flat = out_groups # Assume flat if old? Or grouped? Old format was flat strings usually.
-        # But extract_v2 expects grouped. Old code used extract_v1?
-        # Let's assume input_vars/output_vars are correct structure for the extractor used.
-        # If old format uses extract_v2, it must be grouped.
-        data_path = cfg["data_path"]
-        window = cfg["time_window_input"]
-        stride = cfg.get("stride", 1)
-        est_tick_ranges = cfg.get("est_tick_ranges", None)
+    input_vars = get_config_input_vars(cfg)
+    out_groups = get_config_output_vars(cfg)
+    output_vars_flat = []
+    for item in out_groups:
+        if isinstance(item, list) and len(item) == 2:
+            gpath, vars = item
+            output_vars_flat.extend([f"{gpath}/{v}" for v in vars])
+        else:
+            output_vars_flat.append(item)
+    data_path = get_primary_data_path(cfg)
+    window = get_window_size(cfg, default=100)
+    stride = get_train_data_config(cfg).get("stride", cfg.get("stride", 1))
+    est_tick_ranges = get_est_tick_ranges(cfg)
 
     model_path = os.path.join(folder_path, "model.pt")
     if not os.path.exists(model_path):
@@ -1078,7 +1067,7 @@ def analyze_single_folder(folder_path):
                 ds = LazyWindowDataset(X_list, Y_list, window, 1, stride, est_tick_ranges=est_tick_ranges)
                 if len(ds) == 0: continue
                 
-                dl = DataLoader(ds, batch_size=1024, shuffle=False)
+                dl = DataLoader(ds, batch_size=1024, shuffle=False, num_workers=0)
                 
                 preds, targets = [], []
                 with torch.no_grad():
@@ -1218,7 +1207,7 @@ def plot_trajectory(y_true, y_pred, title, save_path, series_offsets=None):
     fig, axes = plt.subplots(2, 1, figsize=(12, 10))
     
     # 1. Full Duration
-    axes[0].plot(t_plot, y_true_plot, label='True Hip Angle', alpha=0.7, color='black')
+    axes[0].plot(t_plot, y_true_plot, label='True Thigh Angle', alpha=0.7, color='black')
     axes[0].plot(t_plot, y_pred_plot, label='Compensated', alpha=0.9, color='red', linestyle='--')
     
     # Add trial boundaries
@@ -1233,7 +1222,7 @@ def plot_trajectory(y_true, y_pred, title, save_path, series_offsets=None):
 
     axes[0].set_title(f"{title} - Full Duration")
     axes[0].set_xlabel("Time (s)")
-    axes[0].set_ylabel("Hip Angle (deg)")
+    axes[0].set_ylabel("Thigh Angle (deg)")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
     
@@ -1252,7 +1241,7 @@ def plot_trajectory(y_true, y_pred, title, save_path, series_offsets=None):
         axes[1].plot(t_plot[mask], y_pred_plot[mask], label='Prediction', color='red', linestyle='--', alpha=0.9)
         axes[1].set_title(f"Zoomed ({start_t}s - {end_t}s)")
         axes[1].set_xlabel("Time (s)")
-        axes[1].set_ylabel("Hip Angle (deg)")
+        axes[1].set_ylabel("Thigh Angle (deg)")
         axes[1].legend()
         axes[1].grid(True, alpha=0.3)
     else:
@@ -1279,15 +1268,15 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
     exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
     
     local_config = exp_path / "config.yaml"
-    global_config = Path(f"configs/{exp_name}.yaml")
+    global_config = find_config_by_exp_name(exp_name)
     
     cfg = None
     if local_config.exists():
         print(f"  -> Using local config: {local_config}")
-        with open(local_config, 'r', encoding='utf-8') as f_cfg: cfg = yaml.safe_load(f_cfg)
-    elif global_config.exists():
+        with open(local_config, 'r', encoding='utf-8') as f_cfg: cfg = normalize_experiment_config(yaml.safe_load(f_cfg))
+    elif global_config and global_config.exists():
         print(f"  -> Local config missing. Using global: {global_config}")
-        with open(global_config, 'r') as f_cfg: cfg = yaml.safe_load(f_cfg)
+        with open(global_config, 'r') as f_cfg: cfg = normalize_experiment_config(yaml.safe_load(f_cfg))
     else:
         print("  -> Config not found anywhere, skipping detailed plots.")
         return
@@ -1302,12 +1291,8 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
         return parsed
 
     # input_vars / output_vars
-    curr_input_vars = cfg.get("input_vars")
-    curr_output_vars = cfg.get("output_vars")
-    if not curr_input_vars and 'shared' in cfg: curr_input_vars = cfg['shared'].get('input_vars')
-    if not curr_output_vars and 'shared' in cfg: curr_output_vars = cfg['shared'].get('output_vars')
-    if not curr_input_vars and '01_construction' in cfg: curr_input_vars = cfg['01_construction'].get('inputs')
-    if not curr_output_vars and '01_construction' in cfg: curr_output_vars = cfg['01_construction'].get('outputs')
+    curr_input_vars = get_config_input_vars(cfg)
+    curr_output_vars = get_config_output_vars(cfg)
     
     c_in_vars = _parse_vars_local(curr_input_vars)
     c_out_vars = _parse_vars_local(curr_output_vars)
@@ -1370,15 +1355,10 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
     dropout_p = float(model_cfg.get("dropout") or cfg.get("dropout_p", 0.5))
     head_dropout = model_cfg.get("head_dropout", dropout_p)
     
-    # Fix: head_hidden might be a list [64] or int 64. check both.
+    # head_hidden can be a list [128, 64] or int 64 — pass as-is since TCN_MLP supports both
     raw_hidden = model_cfg.get("head_hidden") or cfg.get("mlp_hidden")
-    if isinstance(raw_hidden, list):
-         mlp_hidden = raw_hidden[0] # Take first layer size if list
-    elif raw_hidden is not None:
-         mlp_hidden = raw_hidden
-    else:
-         mlp_hidden = 128 # Default
-         
+    mlp_hidden = raw_hidden if raw_hidden is not None else 128
+
     print(f"[DEBUG] mlp_hidden resolved to: {mlp_hidden}")
 
     use_input_norm = cfg.get("data", {}).get("normalize", True)
@@ -1393,6 +1373,11 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
         model = StanceGatedTCN(**common_args, gating_dim=model_cfg.get("gating_dim", 1))
     elif model_type == "AttentionTCN":
         model = AttentionTCN(**common_args, attention_type=model_cfg.get("attention_type", "temporal"), attention_heads=model_cfg.get("attention_heads", 4))
+    elif model_type == "TCN_GRU":
+        gru_hidden = model_cfg.get("gru_hidden", 64)
+        gru_layers = model_cfg.get("gru_layers", 1)
+        bidirectional = model_cfg.get("bidirectional", False)
+        model = TCN_GRU(**common_args, gru_hidden=gru_hidden, gru_layers=gru_layers, bidirectional=bidirectional)
     else:
         model = TCN_MLP(**common_args)
         
@@ -1444,16 +1429,26 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
             fig, axes = plt.subplots(4, len(target_lvs), figsize=(6*len(target_lvs), 16), squeeze=False)
             has_data = False
             
-            # Retrieve CF flag
-            use_cf = cfg.get("data", {}).get("use_complementary_filter_euler", False)
+            # Retrieve CF flag (check 02_train.data first, then shared.data, then root data)
+            use_cf = cfg.get("02_train", {}).get("data", {}).get("use_complementary_filter_euler", False)
+            if not use_cf:
+                use_cf = cfg.get("shared", {}).get("data", {}).get("use_complementary_filter_euler", False)
+            if not use_cf:
+                use_cf = cfg.get("data", {}).get("use_complementary_filter_euler", False)
+
+            # [NEW] Residual mode for detailed plots
+            detail_residual = data_cfg.get("residual_target", False)
+            detail_calib = data_cfg.get("calibrate_robot_thigh", False)
 
             for col_idx, lv_name in enumerate(target_lvs):
                 try:
                     # Force Single Trial extract
                     X_list, Y_list = extract_condition_data_v2(
                         f, real_sub, cond, c_in_vars, c_out_vars,
-                        include_levels=[lv_name], # Load all trials for this level/cond
-                        fs=100, use_complementary_filter_euler=use_cf
+                        include_levels=[lv_name],
+                        fs=100, use_complementary_filter_euler=use_cf,
+                        residual_target=detail_residual,
+                        calibrate_robot_thigh=detail_calib
                     )
                 except Exception as e:
                     X_list = []
@@ -1502,7 +1497,7 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
                 
                 # Inference
                 ds_vis = LazyWindowDataset([X_arr], [Y_arr], window_size, window_output, 1, target_mode="sequence", est_tick_ranges=est_tick_ranges)
-                loader_vis = DataLoader(ds_vis, batch_size=512, shuffle=False)
+                loader_vis = DataLoader(ds_vis, batch_size=512, shuffle=False, num_workers=0)
                 
                 preds, targets = [], []
                 with torch.no_grad():
@@ -1558,16 +1553,27 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
                 p_0 = p_seq[:, 0] if n_channels > 1 else p_seq
                 t_0 = t_seq[:, 0] if n_channels > 1 else t_seq
                 r_0 = robot_seq_L # Left default
-                
+
                 # If only Right exists for some reason?
                 if r_0 is None and robot_seq_R is not None: r_0 = robot_seq_R
+
+                # [NEW] Residual → Absolute restoration for detailed plots
+                # First prediction corresponds to Y index (window_size - 1)
+                # because est_tick_ranges=[0] → y_index = t + window_size + 0 - 1
+                if detail_residual and r_0 is not None:
+                    start_idx = int(window_size) - 1
+                    robot_ref = r_0[start_idx : start_idx + len(p_0)]
+                    min_len = min(len(robot_ref), len(p_0))
+                    if min_len > 0:
+                        p_0[:min_len] = p_0[:min_len] + robot_ref[:min_len]
+                        t_0[:min_len] = t_0[:min_len] + robot_ref[:min_len]
 
                 # Prepare Robot Plot Data (Align length)
                 r_plot = None
                 if r_0 is not None:
-                     # Align: t=0 corresponds to window_size in X
+                     # Align: t=0 corresponds to (window_size - 1) in X
                      match_len = len(t)
-                     start_idx = int(window_size)
+                     start_idx = int(window_size) - 1
                      available = len(r_0) - start_idx
                      if available > 0:
                          plot_len = min(match_len, available)
@@ -1575,12 +1581,12 @@ def plot_detailed_condition_trajectories(exp_path, save_dir, device):
 
                 # Row 0: Full Duration
                 ax0 = axes[0, col_idx]
-                ax0.plot(t, t_0, color='black', alpha=0.7, label='True (Left)')
+                ax0.plot(t, t_0, color='black', alpha=0.7, label='MoCap Thigh (Left)')
                 if r_plot is not None:
-                     ax0.plot(t[:len(r_plot)], r_plot, color='green', alpha=0.5, label='Robot (Calibrated)')
-                
-                ax0.plot(t, p_0, color='red', alpha=0.9, linestyle='--', label='Compensated')
-                ax0.set_title(f"{lv_name} (Left Hip)")
+                     ax0.plot(t[:len(r_plot)], r_plot, color='green', alpha=0.5, label='Robot Thigh (Calibrated)')
+
+                ax0.plot(t, p_0, color='red', alpha=0.9, linestyle='--', label='Estimated Thigh')
+                ax0.set_title(f"{lv_name} (Left Thigh)")
                 ax0.grid(True, alpha=0.3)
                 if col_idx == 0: ax0.legend(loc='upper right', fontsize='small')
                 
@@ -1660,248 +1666,120 @@ def analyze_automated(target_dir, filter_pattern=None):
         return
 
     print(f"[AUTO] Found {len(valid_dirs)} experiments to analyze.")
-    
-    # 1. Collect Metrics for ALL
-    results = []
-    for exp_path in valid_dirs:
-        try:
-            res = load_and_evaluate(exp_path, device, return_seqs=False)
-            if res:
-                results.append({
-                    "name": exp_path.name,
-                    "path": exp_path,
-                    "mae": res["mae"],
-                    "rmse": res["rmse"],
-                    "r2": res.get("r2", 0.0)
-                })
-                
-                # [NEW] Generate Detailed Plots
-                try:
-                    plot_detailed_condition_trajectories(exp_path, exp_path, device)
-                except Exception as e:
-                    print(f"[ERROR] Plotting failed for {exp_path.name}: {e}")
-        except Exception as e:
-            print(f"[ERROR] Failed to evaluate {exp_path.name}: {e}")
-            import traceback
-            traceback.print_exc()
-            
-    # 2. [NEW] Create base report directory
-    base_output_dir = Path("compare_result")
+
+    import time as _time
+    _t0_total = _time.time()
+
+    base_output_dir = Path("compare_result") / root_path.name
     base_output_dir.mkdir(exist_ok=True, parents=True)
-    
-    # Extract metrics for summary table
-    mae_values = [r["mae"] for r in results]
-    rmse_values = [r["rmse"] for r in results]
-    
-    # 3. Process each fold independently
-    print(f"\n[INFO] Generating detailed reports for {len(results)} results...")
-    for idx, result in enumerate(results, 1):
-        fold_name = result["name"]
-        exp_path = result["path"]
-        
-        # Determine unique experiment name based on parent folder
-        exp_id = exp_path.parent.name if fold_name.startswith("fold_") else result.get("name", "unknown")
+
+    results = []
+
+    for idx, exp_path in enumerate(valid_dirs, 1):
+        _t0 = _time.time()
+        fold_name = exp_path.name
+        exp_id = exp_path.parent.name if fold_name.startswith("fold_") else fold_name
         fold_output_dir = base_output_dir / exp_id / fold_name
         fold_output_dir.mkdir(exist_ok=True, parents=True)
-        
-        print(f"[{idx}/{len(results)}] Processing: {exp_id} -> {fold_name}")
-        
+
+        print(f"\n[{idx}/{len(valid_dirs)}] Processing: {fold_name}")
+
         try:
-            # 3a. Training curves
+            res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+            if not res:
+                continue
+
+            results.append({
+                "name": fold_name,
+                "path": exp_path,
+                "mae": res["mae"],
+                "rmse": res["rmse"],
+                "r2": res.get("r2", 0.0)
+            })
+
+            # 1. Training curves
             plot_training_curves(exp_path, fold_output_dir)
-            
-            # 3b. Trajectory plot
-            res_with_seqs = load_and_evaluate(exp_path, device, return_seqs=True)
-            if res_with_seqs and "y_true_seq" in res_with_seqs and "y_pred_seq" in res_with_seqs:
-                traj_plot_path = fold_output_dir / "trajectory.png"
+
+            # 2. Trajectory plot
+            if "y_true_seq" in res and "y_pred_seq" in res:
+                traj_path = fold_output_dir / "trajectory.png"
                 plot_trajectory(
-                    res_with_seqs["y_true_seq"],
-                    res_with_seqs["y_pred_seq"],
+                    res["y_true_seq"], res["y_pred_seq"],
                     f"Trajectory: {exp_id} ({fold_name})",
-                    traj_plot_path,
-                    series_offsets=res_with_seqs.get("series_offsets")
+                    traj_path, series_offsets=res.get("series_offsets")
                 )
-                print(f"  [SAVED] Trajectory plot: {traj_plot_path}")
-            
-            # 3c. [NEW] Detailed Grid Plots (Refactored)
+                print(f"  [SAVED] Trajectory: {traj_path}")
+
+            # 3. Detailed 2x3 grid plots
             plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
 
-            # 5c. [NEW] Feature Importance - For EVERY fold
-            if (fold_output_dir / "feature_importance.png").exists():
+            # 4. Feature Importance (reuse already-loaded model & data)
+            fi_path = fold_output_dir / "feature_importance.png"
+            if fi_path.exists():
                 print(f"  -> Feature Importance already exists for {fold_name}. Skipping.")
-                continue
-
-            # Requires loading model and data
-            print(f"  -> Calculating Feature Importance for {fold_name}...")
-            # We already have main_script (SpeedEstimator_TCN_MLP_experiments)
-            # Find ckpt and config
-            model_path = exp_path / "model.pt"
-            config_path = exp_path / "config.yaml"
-            with open(config_path, 'r', encoding='utf-8') as f:
-                import yaml
-                cfg = yaml.safe_load(f)
-            
-            # Reconstruction Logic from load_and_evaluate
-            raw_input_vars = cfg.get("01_construction", {}).get("inputs") or cfg.get("shared", {}).get("input_vars")
-            if not raw_input_vars: 
-                raw_input_vars = [] # Fallback
-            input_vars = parse_vars(raw_input_vars)
-            
-            f_names = get_feature_names(cfg, input_vars)
-            
-            # Load Model
-            ckpt = torch.load(model_path, map_location=device)
-            # Reconstruct model architecture
-            m_type = cfg.get("model", {}).get("type", "TCN")
-            m_cfg = cfg.get("02_train", {}).get("model", {})
-            if not m_cfg: m_cfg = cfg.get("model", {})
-            
-            in_dim = len(f_names) # Corrected input dimension based on constructed names
-            out_dim = 1 # Regression default
-            horizon = len(cfg.get("02_train", {}).get("data", {}).get("est_tick_ranges", [5]))
-            
-            if m_type == "StanceGatedTCN":
-                model_c = StanceGatedTCN
-            elif m_type == "AttentionTCN":
-                model_c = AttentionTCN
             else:
-                model_c = TCN_MLP
-                
-            model = model_c(
-                input_dim=in_dim,
-                output_dim=out_dim,
-                horizon=horizon,
-                channels=m_cfg.get("channels", [64, 64, 128]),
-                kernel_size=m_cfg.get("kernel_size", 3),
-                dropout=m_cfg.get("dropout", 0.1),
-                head_dropout=m_cfg.get("head_dropout", 0.1),
-                mlp_hidden=m_cfg.get("head_hidden", [128]),
-                use_input_norm=m_cfg.get("use_input_norm", True),
-                input_norm_type=m_cfg.get("input_norm_type", m_cfg.get("model_norm") or "layer"),
-                tcn_norm=m_cfg.get("model_norm"),
-                mlp_norm=m_cfg.get("model_norm")
-            )
-            model.load_state_dict(ckpt['state_dict'], strict=False)
-            model.to(device)
-            
-            # Use original test loader logic from main_script or similar
-            # Since load_and_evaluate already did it, we can just grab data?
-            # No, load_and_evaluate doesn't return the raw loader.
-            # Let's recreate a small loader just for this.
-            import re
-            match = re.search(r"Test-((?:m\d+_)?S\d+)", fold_name)
-            sub_name = result.get("test_sub") or (match.group(1) if match else (fold_name[5:] if fold_name.startswith("fold_") else fold_name))
-            
-            # [FIXED] Robust Data Loading using manual extraction
-            # 1. Determine Data Path (Multi-dataset support)
-            prefix_found, real_sub = parse_subject_prefix(sub_name)
-            data_sources = get_data_sources_from_config(cfg)
-            if prefix_found and prefix_found in data_sources:
-                data_path = data_sources[prefix_found]['path']
-            else:
-                data_path = cfg.get("data_path", "combined_data.h5")
-                if not os.path.exists(data_path): data_path = "combined_data.h5"
+                print(f"  -> Calculating Feature Importance for {fold_name}...")
+                try:
+                    model_fi = res.get("model")
+                    cfg_fi = res.get("cfg", {})
+                    c_in_vars_fi = res.get("c_in_vars", [])
+                    X_list_fi = res.get("X_list")
+                    Y_list_fi = res.get("Y_list")
+                    window_size_fi = res.get("window_size", 200)
+                    est_tick_fi = res.get("est_tick_ranges", [5])
+                    scaler_mean_fi = res.get("scaler_mean")
+                    scaler_scale_fi = res.get("scaler_scale")
 
-            # 2. Determine Conditions
-            actual_conds = []
-            with h5py.File(data_path, 'r') as f_check:
-                if real_sub in f_check:
-                    available_conds = list(f_check[real_sub].keys())
-                else:
-                    print(f"  [WARN] Subject {real_sub} not found in {data_path}.")
-                    available_conds = []
+                    if model_fi and X_list_fi:
+                        # Apply scaler if not already applied (load_and_evaluate already scales X_list)
+                        # But X_list is modified in place there, so it's already scaled.
 
-                # Use shared conditions if available
-                cond_cfg = cfg.get("conditions")
-                if not cond_cfg and "shared" in cfg: cond_cfg = cfg["shared"].get("conditions")
-                if not cond_cfg: cond_cfg = []
+                        f_names = get_feature_names(cfg_fi, c_in_vars_fi)
 
-                for c in cond_cfg:
-                    if c in available_conds:
-                        actual_conds.append(c)
-                    elif c == 'level':
-                        actual_conds.extend([ac for ac in available_conds if ac.startswith('level_')])
+                        imp_ds = LazyWindowDataset(
+                            X_list_fi, Y_list_fi,
+                            window_size_fi, 1, 5,  # stride=5 for importance speed
+                            target_mode="sequence", est_tick_ranges=est_tick_fi
+                        )
+                        imp_loader = DataLoader(imp_ds, batch_size=1024, shuffle=False, num_workers=0)
+
+                        train_cfg = cfg_fi.get("02_train", {}).get("train", {})
+                        loss_name = train_cfg.get("loss", "mse").lower()
+                        huber_delta = float(train_cfg.get("huber_delta", 1.0))
+                        if loss_name == "huber":
+                            criterion = torch.nn.HuberLoss(delta=huber_delta, reduction='sum')
+                        elif loss_name in ["mae", "l1"]:
+                            criterion = torch.nn.L1Loss(reduction='sum')
+                        else:
+                            criterion = torch.nn.MSELoss(reduction='sum')
+
+                        imps = calculate_permutation_importance(
+                            model_fi, imp_loader, device, criterion
+                        )
+                        plot_feature_importance(
+                            imps, f_names, fi_path,
+                            title=f"Feature Importance ({loss_name}): {fold_name}"
+                        )
+                        print(f"  [SAVED] Feature Importance: {fi_path}")
                     else:
-                        matches = [ac for ac in available_conds if ac.startswith(c)]
-                        if matches: actual_conds.extend(matches)
-            actual_conds = list(dict.fromkeys(actual_conds))
+                        print(f"  [WARN] Missing model or data for importance. Skipping.")
 
-            # 3. Extract Data
-            print(f"  [DEBUG] Loading data from {data_path} for {real_sub} (Conditions: {len(actual_conds)})")
-            
-            # LPF Params from config (Removed)
-            # curr_lpf_order = cfg.get("shared", {}).get("lpf_order", 4)
+                except Exception as e_imp:
+                    print(f"  [WARN] Importance failed for {fold_name}: {e_imp}")
+                    import traceback; traceback.print_exc()
 
-            X_imp_list = []
-            Y_imp_list = []
-            
-            with h5py.File(data_path, 'r') as f_imp:
-                for cond in actual_conds:
-                     if cond not in f_imp[real_sub]: continue
-                     try:
-                         # Ensure extract_condition_data_v2 is available
-                         from model_training import extract_condition_data_v2
-                         x_list, y_list = extract_condition_data_v2(
-                            f_imp, real_sub, cond, 
-                            [(item[0], item[1]) for item in input_vars], 
-                            [(item[0], item[1]) for item in parse_vars(cfg.get("shared", {}).get("output_vars"))],
-                            fs=100
-                         )
-                         X_imp_list.extend(x_list)
-                         Y_imp_list.extend(y_list)
-                     except Exception as e:
-                         print(f"  [WARN] Skipping {cond}: {e}")
-            
-            if not X_imp_list:
-                print("  [WARN] No data loaded for importance. Skipping.")
-                continue
+            print(f"  [DONE] {fold_name} in {_time.time()-_t0:.1f}s")
 
-            X_test = np.concatenate(X_imp_list, axis=0) # (N, T, D)
-            Y_test = np.concatenate(Y_imp_list, axis=0)
-
-            # 4. Apply Scaler
-            scaler_path = exp_path / "scaler.npz"
-            if scaler_path.exists():
-                s_data = np.load(scaler_path)
-                m = s_data['mean']
-                s = s_data['scale'] if 'scale' in s_data else s_data.get('std', 1.0)
-                # X_test is (N, T, D). Broadcasting works if m is (D,)
-                X_test = (X_test - m) / (s + 1e-8)
-            else:
-                print("  [WARN] No scaler found. Using raw data.")
-
-            imp_ds = LazyWindowDataset(
-                [X_test], [Y_test], 
-                cfg.get("shared", {}).get("data", {}).get("window_size", 200),
-                horizon, cfg.get("shared", {}).get("data", {}).get("stride_inf", 1),
-                target_mode="sequence", est_tick_ranges=cfg.get("02_train", {}).get("data", {}).get("est_tick_ranges", [5])
-            )
-            imp_loader = DataLoader(imp_ds, batch_size=1024, shuffle=False, num_workers=0)
-            
-            # Determine Loss Function for Importance
-            # Default to MSE if not specified, but try to match training loss
-            train_cfg = cfg.get("02_train", {}).get("train", {})
-            loss_name = train_cfg.get("loss", "mse").lower()
-            huber_delta = float(train_cfg.get("huber_delta", 1.0))
-            
-            if loss_name == "huber":
-                criterion = torch.nn.HuberLoss(delta=huber_delta, reduction='sum')
-                print(f"  [IMP] Using Huber Loss (delta={huber_delta}) for Importance")
-            elif loss_name in ["mae", "l1"]:
-                criterion = torch.nn.L1Loss(reduction='sum')
-                print(f"  [IMP] Using L1 Loss (MAE) for Importance")
-            else:
-                criterion = torch.nn.MSELoss(reduction='sum')
-                print(f"  [IMP] Using MSE Loss for Importance")
-
-            imps = calculate_permutation_importance(model, imp_loader, device=device, criterion=criterion, batch_size=1024)
-            plot_feature_importance(imps, f_names, fold_output_dir / "feature_importance.png", title=f"Importance ({loss_name}): {fold_name}")
-            
         except Exception as e:
-            print(f"  [ERROR] Failed to generate plots for {fold_name}: {e}")
+            print(f"  [ERROR] Failed to process {fold_name}: {e}")
             import traceback
             traceback.print_exc()
-    
+
+    _total = _time.time() - _t0_total
+    print(f"\n[AUTO] {len(valid_dirs)} experiments processed in {_total:.0f}s ({_total/60:.1f}min)")
+
+
+
 def plot_model_comparison(results):
     names = [r["name"] for r in results]
     maes = [r["mae"] for r in results]
@@ -1958,26 +1836,18 @@ def analyze_detailed_single(exp_path):
     exp_name_match = re.match(r"^(.+?)_Test-", folder_name)
     exp_name = exp_name_match.group(1) if exp_name_match else "baseline"
     
-    original_config_path = Path(f"configs/{exp_name}.yaml")
-    if original_config_path.exists():
+    original_config_path = find_config_by_exp_name(exp_name)
+    if original_config_path and original_config_path.exists():
         with open(original_config_path, 'r') as f_cfg:
-            cfg = yaml.safe_load(f_cfg)
+            cfg = normalize_experiment_config(yaml.safe_load(f_cfg))
     else:
         # Fallback to per-experiment config.yaml
         config_path = exp_path / "config.yaml"
-        with open(config_path) as f_cfg: cfg = yaml.safe_load(f_cfg)
+        with open(config_path) as f_cfg: cfg = normalize_experiment_config(yaml.safe_load(f_cfg))
     
     # Config 파싱 - Training과 동일 (load_and_evaluate line 참조)
-    curr_input_vars = cfg.get("input_vars")
-    curr_output_vars = cfg.get("output_vars")
-    if not curr_input_vars and 'shared' in cfg:
-        curr_input_vars = cfg['shared'].get('input_vars')
-    if not curr_output_vars and 'shared' in cfg:
-        curr_output_vars = cfg['shared'].get('output_vars')
-    if not curr_input_vars and '01_construction' in cfg:
-        curr_input_vars = cfg['01_construction'].get('inputs')
-    if not curr_output_vars and '01_construction' in cfg:
-        curr_output_vars = cfg['01_construction'].get('outputs')
+    curr_input_vars = get_config_input_vars(cfg)
+    curr_output_vars = get_config_output_vars(cfg)
     
     def _parse_vars_local(var_list_from_yaml):
         if not var_list_from_yaml: return []
@@ -1986,10 +1856,7 @@ def analyze_detailed_single(exp_path):
     c_in_vars = _parse_vars_local(curr_input_vars)
     c_out_vars = _parse_vars_local(curr_output_vars)
     
-    if not cfg.get('subjects') and 'shared' in cfg:
-        cfg['subjects'] = cfg['shared'].get('subjects', [])
-    if not cfg.get('conditions') and 'shared' in cfg:
-        cfg['conditions'] = cfg['shared'].get('conditions', [])
+    cfg['conditions'] = get_config_conditions(cfg)
     
     # est_tick_ranges (Training line 1853-1860)
     curr_est_tick_ranges = cfg.get("est_tick_ranges")
@@ -2198,7 +2065,7 @@ def analyze_detailed_single(exp_path):
     criterion = torch.nn.MSELoss()
     print("Running Permutation Importance...")
     try:
-        ds = LazyWindowDataset([X_imp], [Y_imp], cfg.get("time_window_input", 100), 10, 20, target_mode="sequence", est_tick_ranges=curr_est_tick_ranges)
+        ds = LazyWindowDataset([X_imp], [Y_imp], get_window_size(cfg, default=100), 10, 20, target_mode="sequence", est_tick_ranges=curr_est_tick_ranges)
         loader = DataLoader(ds, batch_size=2048, shuffle=False)
         importances = calculate_permutation_importance(model, loader, device, criterion)
     except Exception as e:

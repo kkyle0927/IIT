@@ -26,6 +26,7 @@ import torch.nn.functional as F
 import torch.fft
 torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
+torch.backends.cudnn.benchmark = True
 
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
@@ -46,6 +47,21 @@ import datetime
 import argparse
 from tqdm import tqdm
 from visualize_features import visualize_features
+from config_utils import (
+    get_config_conditions,
+    get_config_input_vars,
+    get_config_level_selection,
+    get_config_output_vars,
+    get_config_subjects,
+    get_est_tick_ranges,
+    get_input_lpf_cutoff,
+    get_input_lpf_order,
+    get_primary_data_path,
+    get_tcn_channels,
+    get_train_data_config,
+    get_window_size,
+    normalize_experiment_config,
+)
 
 
 import torch.fft as fft
@@ -174,6 +190,174 @@ def parse_vars(var_list_from_yaml):
     return parsed
 
 CONDITION_SELECTION = {'include': None, 'exclude': []}
+TRIAL_DATASET_CACHE = {}
+
+
+def derive_experiment_root(config_relpath):
+    relpath = Path(config_relpath)
+    parent = relpath.parent
+    if str(parent) in ("", "."):
+        return Path("experiments")
+    return Path("experiments") / parent
+
+
+def freeze_nested(value):
+    if isinstance(value, dict):
+        return tuple(sorted((k, freeze_nested(v)) for k, v in value.items()))
+    if isinstance(value, (list, tuple)):
+        return tuple(freeze_nested(v) for v in value)
+    return value
+
+
+def canonicalize_quaternion_sequence(quat_array):
+    """
+    Enforce temporal sign continuity for quaternion sequences.
+    q and -q encode the same rotation; this keeps consecutive samples in one hemisphere.
+    """
+    quat = np.asarray(quat_array, dtype=np.float32).copy()
+    if quat.ndim != 2 or quat.shape[0] < 2 or quat.shape[1] != 4:
+        return quat
+
+    # Normalize first to make the dot-product continuity test stable.
+    norms = np.linalg.norm(quat, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    quat /= norms
+
+    for i in range(1, quat.shape[0]):
+        if np.dot(quat[i - 1], quat[i]) < 0:
+            quat[i] = -quat[i]
+    return quat
+
+
+def normalize_vector(vec, eps=1e-8):
+    arr = np.asarray(vec, dtype=np.float32)
+    norm = np.linalg.norm(arr)
+    if norm < eps:
+        return np.zeros_like(arr)
+    return arr / norm
+
+
+def normalize_vectors(vecs, axis=-1, eps=1e-8):
+    arr = np.asarray(vecs, dtype=np.float32)
+    norms = np.linalg.norm(arr, axis=axis, keepdims=True)
+    norms[norms < eps] = 1.0
+    return arr / norms
+
+
+def quat_wxyz_to_rotmat_batch(quat_wxyz):
+    quat = normalize_vectors(quat_wxyz, axis=1)
+    if quat.ndim != 2 or quat.shape[1] != 4:
+        return np.zeros((0, 3, 3), dtype=np.float32)
+
+    w, x, y, z = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
+    rot = np.empty((quat.shape[0], 3, 3), dtype=np.float32)
+    rot[:, 0, 0] = 1.0 - 2.0 * (y * y + z * z)
+    rot[:, 0, 1] = 2.0 * (x * y - z * w)
+    rot[:, 0, 2] = 2.0 * (x * z + y * w)
+    rot[:, 1, 0] = 2.0 * (x * y + z * w)
+    rot[:, 1, 1] = 1.0 - 2.0 * (x * x + z * z)
+    rot[:, 1, 2] = 2.0 * (y * z - x * w)
+    rot[:, 2, 0] = 2.0 * (x * z - y * w)
+    rot[:, 2, 1] = 2.0 * (y * z + x * w)
+    rot[:, 2, 2] = 1.0 - 2.0 * (x * x + y * y)
+    return rot
+
+
+def project_to_plane(vec, plane_normal):
+    plane_normal = normalize_vector(plane_normal)
+    vec = np.asarray(vec, dtype=np.float32)
+    return vec - np.dot(vec, plane_normal) * plane_normal
+
+
+def estimate_body_frame_features(acc_local, gyro_local, quat_wxyz, a_tread, fs):
+    quat_wxyz = canonicalize_quaternion_sequence(quat_wxyz)
+    rot_gi = quat_wxyz_to_rotmat_batch(quat_wxyz)
+    if rot_gi.shape[0] == 0:
+        raise ValueError("Quaternion sequence is empty or invalid.")
+
+    acc_global = np.einsum('nij,nj->ni', rot_gi, acc_local).astype(np.float32)
+    gyro_global = np.einsum('nij,nj->ni', rot_gi, gyro_local).astype(np.float32)
+
+    ref_len = min(len(acc_global), max(20, int(fs * 2.0)))
+    gyro_ref = np.linalg.norm(gyro_global[:ref_len], axis=1)
+    ref_mask = gyro_ref < 0.15
+    ref_idx = np.where(ref_mask)[0]
+    if len(ref_idx) < max(10, int(0.3 * fs)):
+        ref_idx = np.arange(min(ref_len, max(20, int(fs * 1.0))))
+
+    z_up = normalize_vector(np.mean(acc_global[ref_idx], axis=0))
+    if np.linalg.norm(z_up) < 1e-6:
+        z_up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+    sensor_y_global = np.einsum('nij,j->ni', rot_gi, np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    forward_prior = project_to_plane(np.mean(sensor_y_global[ref_idx], axis=0), z_up)
+    if np.linalg.norm(forward_prior) < 1e-6:
+        sensor_z_global = np.einsum('nij,j->ni', rot_gi, np.array([0.0, 0.0, 1.0], dtype=np.float32))
+        forward_prior = project_to_plane(np.mean(sensor_z_global[ref_idx], axis=0), z_up)
+    if np.linalg.norm(forward_prior) < 1e-6:
+        forward_prior = project_to_plane(np.array([0.0, 1.0, 0.0], dtype=np.float32), z_up)
+    forward_prior = normalize_vector(forward_prior)
+    forward_prev = forward_prior.copy()
+
+    g_mag = float(np.mean(np.linalg.norm(acc_global[ref_idx], axis=1)))
+    acc_lin_global = acc_global - g_mag * z_up[None, :]
+
+    body_rot_bg = np.zeros((len(acc_global), 3, 3), dtype=np.float32)
+    window = max(20, int(fs * 1.5))
+    motion_rms_threshold = 0.15
+    gyro_rms_threshold = 0.08
+    forward_update_alpha = 0.15
+    forward_idle_alpha = 0.02
+
+    for i in range(len(acc_global)):
+        start = max(0, i - window + 1)
+        horiz = np.array([project_to_plane(v, z_up) for v in acc_lin_global[start:i + 1]], dtype=np.float32)
+        horiz_energy = float(np.sum(horiz * horiz))
+        horiz_rms = float(np.sqrt(horiz_energy / max(len(horiz), 1)))
+        gyro_rms = float(np.mean(np.linalg.norm(gyro_global[start:i + 1], axis=1)))
+        is_moving = horiz.shape[0] >= 5 and (horiz_rms > motion_rms_threshold or gyro_rms > gyro_rms_threshold)
+
+        if is_moving:
+            cov = horiz.T @ horiz
+            eigvals, eigvecs = np.linalg.eigh(cov)
+            forward = eigvecs[:, int(np.argmax(eigvals))].astype(np.float32)
+            forward = project_to_plane(forward, z_up)
+            forward = normalize_vector(forward)
+            if np.linalg.norm(forward) < 1e-6:
+                forward = forward_prev
+            if np.dot(forward, forward_prev) < 0.0:
+                forward = -forward
+            forward = normalize_vector((1.0 - forward_update_alpha) * forward_prev + forward_update_alpha * forward)
+        else:
+            forward = normalize_vector((1.0 - forward_idle_alpha) * forward_prev + forward_idle_alpha * forward_prior)
+
+        x_right = normalize_vector(np.cross(forward, z_up))
+        if np.linalg.norm(x_right) < 1e-6:
+            x_right = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        y_forward = normalize_vector(np.cross(z_up, x_right))
+        if np.dot(y_forward, forward_prev) < 0.0:
+            y_forward = -y_forward
+            x_right = -x_right
+
+        body_rot_bg[i, :, 0] = x_right
+        body_rot_bg[i, :, 1] = y_forward
+        body_rot_bg[i, :, 2] = z_up
+        forward_prev = y_forward
+
+    body_rot_gb = np.transpose(body_rot_bg, (0, 2, 1))
+    acc_body = np.einsum('nij,nj->ni', body_rot_gb, acc_lin_global).astype(np.float32)
+    gyro_body = np.einsum('nij,nj->ni', body_rot_gb, gyro_global).astype(np.float32)
+    forward_accel_overground = acc_body[:, 1] + a_tread.astype(np.float32)
+
+    return {
+        'acc_global': acc_global,
+        'acc_linear_global': acc_lin_global.astype(np.float32),
+        'gyro_global': gyro_global,
+        'body_rot_bg': body_rot_bg,
+        'acc_body': acc_body,
+        'gyro_body': gyro_body,
+        'forward_accel_overground': forward_accel_overground[:, None].astype(np.float32),
+    }
 
 # -------------------------------------------------------------------------------------------------
 # Helper Functions (Dataset, Plotting, etc) -> Copy from original
@@ -212,49 +396,72 @@ class ComplementaryFilter:
         Returns: (N, 3) Euler angles [Roll, Pitch, Yaw] in degrees
         """
         N = len(acc)
-        out_angles = np.zeros((N, 3))
+        if N == 0:
+            return np.zeros((0, 3))
+            
+        # 1. Accelerometer Angle (Tilt) Vectorized
+        ax, ay, az = acc[:, 0], acc[:, 1], acc[:, 2]
+        gx, gy, gz = gyro[:, 0], gyro[:, 1], gyro[:, 2]
         
-        for i in range(N):
-            ax, ay, az = acc[i]
-            gx, gy, gz = gyro[i]
-
-            # 1. Accelerometer Angle (Tilt)
-            # Roll (X-axis rotation): atan2(ay, az)
-            # Pitch (Y-axis rotation): atan2(-ax, sqrt(ay^2 + az^2))
-            acc_roll = np.arctan2(ay, az)
-            acc_pitch = np.arctan2(-ax, np.sqrt(ay**2 + az**2))
+        acc_roll = np.arctan2(ay, az)
+        acc_pitch = np.arctan2(-ax, np.sqrt(ay**2 + az**2))
+        
+        # Initialization
+        if not self.initialized:
+            self.angle[0] = acc_roll[0]
+            self.angle[1] = acc_pitch[0]
+            self.angle[2] = 0.0 # Initial Yaw
+            self.initialized = True
             
-            # Yaw cannot be determined by gravity (requires Magnetometer)
-            # We assume initial Yaw=0 or rely purely on integration.
-            # Here we set acc_yaw to current state (no correction)
-            acc_yaw = self.angle[2] 
-
-            if not self.initialized:
-                self.angle[0] = acc_roll
-                self.angle[1] = acc_pitch
-                self.angle[2] = 0.0 # Initial Yaw
-                self.initialized = True
-            else:
-                # 2. Gyro Integration (Prediction)
-                # Euler Integration: angle += gyro * dt
-                # Note: This simple integration assumes small angles or body rates.
-                # For better 3D tracking, quaternion integration is preferred, 
-                # but Complementary Filter is traditionally simple.
-                # Transform body rates to Euler rates? 
-                # Simple approximation: d(Roll)/dt = gx, d(Pitch)/dt = gy, d(Yaw)/dt = gz
-                
-                self.angle[0] += gx * self.dt
-                self.angle[1] += gy * self.dt
-                self.angle[2] += gz * self.dt
-
-                # 3. Fusion (Correction) for Roll/Pitch
-                self.angle[0] = self.alpha * self.angle[0] + (1 - self.alpha) * acc_roll
-                self.angle[1] = self.alpha * self.angle[1] + (1 - self.alpha) * acc_pitch
-                # Yaw is purely gyro integrated (drifts)
+        # 2. Fast IIR Vectorized Integration using scipy.signal.lfilter
+        from scipy.signal import lfilter
+        
+        # Complementary Filter Difference Equation:
+        # angle[n] = alpha * angle[n-1] + alpha * gyro[n] * dt + (1 - alpha) * acc_angle[n]
+        # Rewrite for lfilter:
+        # y[n] - alpha * y[n-1] = alpha * dt * gyro[n] + (1 - alpha) * acc_angle[n]
+        # a = [1.0, -alpha]
+        # b = [1.0] 
+        # input x[n] = alpha * dt * gyro[n] + (1 - alpha) * acc_angle[n]
+        # Except Yaw, which is just accumulating gyro: y[n] - y[n-1] = dt * gyro[n]
+        
+        alpha = self.alpha
+        dt = self.dt
+        
+        # Coefficients for Roll/Pitch: a[0]*y[n] = b[0]*x[n] - a[1]*y[n-1] -> y[n] = x[n] + alpha*y[n-1]
+        a_rp = [1.0, -alpha]
+        b_rp = [1.0]
+        
+        # Inputs for Roll and Pitch
+        # Note: In standard CF, rate integrated is added to previous state.
+        # But this standard filter formula x[n] = (1-alpha)*acc[n] + alpha*rate[n]*dt is an approximation.
+        # It's identical to the iterative: angle[i] = alpha*(angle[i-1] + rate[i]*dt) + (1-alpha)*acc[i]
+        # Which reduces to: angle[i] - alpha*angle[i-1] = alpha*rate[i]*dt + (1-alpha)*acc[i]
+        
+        x_roll = alpha * dt * gx + (1.0 - alpha) * acc_roll
+        x_pitch = alpha * dt * gy + (1.0 - alpha) * acc_pitch
+        
+        # Apply filter with initial conditions
+        # To get matching lfilter outputs with initial state, we use zi
+        import scipy.signal
+        zi_roll = scipy.signal.lfilter_zi(b_rp, a_rp) * self.angle[0]
+        zi_pitch = scipy.signal.lfilter_zi(b_rp, a_rp) * self.angle[1]
+        
+        roll_seq, _ = lfilter(b_rp, a_rp, x_roll, zi=zi_roll)
+        pitch_seq, _ = lfilter(b_rp, a_rp, x_pitch, zi=zi_pitch)
+        
+        # Yaw is pure integration. lfilter_zi fails with Singular matrix for a=[1, -1].
+        # Use simple cumulative sum instead for Jaw integration
+        d_yaw = gz * dt
+        yaw_seq = self.angle[2] + np.cumsum(d_yaw)
+        
+        # Combine
+        angles = np.column_stack((roll_seq, pitch_seq, yaw_seq))
+        
+        # Update state using final states from sequences
+        self.angle = angles[-1].copy()
             
-            out_angles[i] = self.angle
-            
-        return np.degrees(out_angles) # Convert to Degrees
+        return np.degrees(angles)
 
 
 
@@ -296,7 +503,8 @@ class ExperimentLogger:
             yaml.dump(config, f, default_flow_style=False)
 
 class LazyWindowDataset(Dataset):
-    def __init__(self, X_list, Y_list, input_window, output_window, stride, target_mode="sequence", est_tick_ranges=None, augment=False, noise_std=0.0):
+    def __init__(self, X_list, Y_list, input_window, output_window, stride, target_mode="sequence", est_tick_ranges=None, augment=False, noise_std=0.0,
+                 standing_loss_weight=1.0, standing_std_threshold=2.0):
         """
         X_list: list of np.array (T, D_in) - Raw time series
         Y_list: list of np.array (T, D_out)
@@ -304,6 +512,8 @@ class LazyWindowDataset(Dataset):
         est_tick_ranges: list of ints, e.g. [1, 2, 3] or [10]. If set, Y is (D_out, len(ranges)) or similar
         augment: bool, if True apply random noise
         noise_std: float, standard deviation of Gaussian noise
+        standing_loss_weight: float, weight multiplier for standing (low-variance) windows (1.0 = disabled)
+        standing_std_threshold: float, Y std below this → standing phase (degrees)
         """
         self.X_list = [torch.from_numpy(x).float() for x in X_list]
         self.Y_list = [torch.from_numpy(y).float() for y in Y_list]
@@ -314,77 +524,115 @@ class LazyWindowDataset(Dataset):
         self.est_tick_ranges = est_tick_ranges
         self.augment = augment
         self.noise_std = noise_std
-        
+        self.use_standing_weight = (standing_loss_weight > 1.0)
+        self.standing_loss_weight = standing_loss_weight
+        self.standing_std_threshold = standing_std_threshold
+
         # Determine max lookahead for validity check
         if self.est_tick_ranges:
             self.max_lookahead = max(self.est_tick_ranges)
         else:
             self.max_lookahead = output_window
-            
-        # Pre-calculate valid indices
-        # self.indices = [ (series_idx, start_time_idx), ... ]
-        self.indices = []
+
+        # Pre-calculate valid indices vectorized
+        import numpy as np
+
+        # We need pairs of (series_idx, start_time_idx)
+        # Instead of doing a python for loop over millions of points, we build arrays
+
+        s_idxs = []
+        t_idxs = []
         for s_idx, x_data in enumerate(self.X_list):
             length = x_data.shape[0]
-            # Valid start range: [0, length - win_in - max_lookahead]
-            # range is exclusive at the end, so +1
             limit = length - input_window - self.max_lookahead + 1
             if limit > 0:
-                for t in range(0, limit, stride):
-                    self.indices.append((s_idx, t))
-                    
+                t_arr = np.arange(0, limit, stride)
+                s_arr = np.full_like(t_arr, fill_value=s_idx)
+                t_idxs.append(t_arr)
+                s_idxs.append(s_arr)
+
+        if len(s_idxs) > 0:
+            all_s = np.concatenate(s_idxs)
+            all_t = np.concatenate(t_idxs)
+            # Store as structured array or tuple of arrays instead of millions of python tuples
+            self.indices_s = all_s
+            self.indices_t = all_t
+        else:
+            self.indices_s = np.array([], dtype=int)
+            self.indices_t = np.array([], dtype=int)
+
+        # Pre-compute per-sample standing weights
+        if self.use_standing_weight and len(self.indices_s) > 0:
+            self._precompute_standing_weights()
+        else:
+            self.sample_weights = None
+            
+    def _precompute_standing_weights(self):
+        """Pre-compute per-sample weights: standing windows get higher weight."""
+        import numpy as np
+        n = len(self.indices_s)
+        weights = np.ones(n, dtype=np.float32)
+        standing_count = 0
+        for i in range(n):
+            s_idx = self.indices_s[i]
+            t = self.indices_t[i]
+            y_np = self.Y_list[s_idx].numpy()
+            # Check variance of Y in the input window region
+            y_win = y_np[t : t + self.input_window]
+            win_std = np.std(y_win, axis=0).mean()
+            if win_std < self.standing_std_threshold:
+                weights[i] = self.standing_loss_weight
+                standing_count += 1
+        self.sample_weights = torch.from_numpy(weights).float()
+        print(f"[Standing Weight] {standing_count}/{n} samples ({standing_count/max(n,1)*100:.1f}%) "
+              f"detected as standing (std<{self.standing_std_threshold}), weight={self.standing_loss_weight}")
+
     def __len__(self):
-        return len(self.indices)
+        return len(self.indices_s)
 
     def __getitem__(self, idx):
-        s_idx, t = self.indices[idx]
-        
+        s_idx = self.indices_s[idx]
+        t = self.indices_t[idx]
+
         x_data = self.X_list[s_idx]
         y_data = self.Y_list[s_idx]
-        
+
         limit = t + self.input_window
-        
+
         x_win = x_data[t : limit].clone() # Clone to avoid modifying original or shared memory issues if augmenting
-        
+
         if self.augment and self.noise_std > 0:
             x_win += torch.randn_like(x_win) * self.noise_std
-        
+
         if self.est_tick_ranges:
-            # Multi-Horizon Prediction Mode
-            # Construct Y by picking specific indices
-            # If t is start, x ends at limit(exclusive). limit corresponds to t+win_in.
-            # Prediction at +k means data point at limit + k - 1?
-            # Example: win_in=100. t=0. x=[0...99]. 
-            # Predict +1 tick => x[100] (which is the next point).
-            # So index = limit + k - 1. (Assuming k>=1)
-            
             y_indices = [(limit + k - 1) for k in self.est_tick_ranges]
             y_win = y_data[y_indices] # (Len(ranges), D_out)
-            
-            # Ensure shape is (Len(ranges), D_out) or (D_out, Len) ?
-            # Pytorch model usually expects (B, Horizon, D_out).
-            # This is correct.
         else:
             # Continuous Sequence Mode
             end = limit + self.output_window
             y_win = y_data[limit : end] # Sequence target (Win_Out, D_out)
-        
+
         if self.target_mode == "mean":
             y_win = y_win.mean(dim=0)
         elif self.target_mode == "last":
             y_win = y_win[-1, :]
-            
+
+        if self.sample_weights is not None:
+            return x_win, y_win, self.sample_weights[idx]
+
         return x_win, y_win
 
 def extract_condition_data_v2(
-    f, sub, cond, 
+    f, sub, cond,
     input_vars, output_vars,
     fs=100,
     include_levels=None, include_trials=None,
     use_physical_velocity_model=False,
     use_gait_phase=False,
     input_lpf_cutoff=None, input_lpf_order=4,
-    use_complementary_filter_euler=False
+    use_complementary_filter_euler=False,
+    residual_target=False,
+    calibrate_robot_thigh=False
 ):
     """
     input_vars, output_vars: list of (group_path, [var_names...])
@@ -442,6 +690,7 @@ def extract_condition_data_v2(
             right_fz = None
             
             curr_trial_in = []
+            body_frame_cache = None
             
             # (A) Standard Load Inputs (Explicit)
             valid_trial = True
@@ -479,6 +728,44 @@ def extract_condition_data_v2(
                     if p in curr: curr = curr[p]
                     else: return None
                 return curr[:]
+
+            def get_body_frame_cache():
+                nonlocal body_frame_cache
+                if body_frame_cache is not None:
+                    return body_frame_cache
+
+                imu_grp = trial_group['robot']['back_imu']
+                ax = imu_grp['accel_x'][:]
+                ay = imu_grp['accel_y'][:]
+                az = imu_grp['accel_z'][:]
+                gx = imu_grp['gyro_x'][:]
+                gy = imu_grp['gyro_y'][:]
+                gz = imu_grp['gyro_z'][:]
+                qw = imu_grp['quat_w'][:]
+                qx = imu_grp['quat_x'][:]
+                qy = imu_grp['quat_y'][:]
+                qz = imu_grp['quat_z'][:]
+
+                acc_local = np.stack([ax, ay, az], axis=1).astype(np.float32)
+                gyro_local = np.stack([gx, gy, gz], axis=1).astype(np.float32)
+                quat_wxyz = np.stack([qw, qx, qy, qz], axis=1).astype(np.float32)
+
+                tread_grp = trial_group['treadmill']
+                v_l = tread_grp['left']['speed_leftbelt'][:]
+                v_r = tread_grp['right']['speed_rightbelt'][:]
+                v_mean = (v_l + v_r) / 2.0
+                dt = 1.0 / fs
+                a_tread = np.diff(v_mean) / dt
+                a_tread = np.concatenate([[a_tread[0]], a_tread]).astype(np.float32)
+
+                body_frame_cache = estimate_body_frame_features(
+                    acc_local=acc_local,
+                    gyro_local=gyro_local,
+                    quat_wxyz=quat_wxyz,
+                    a_tread=a_tread,
+                    fs=fs,
+                )
+                return body_frame_cache
 
             for gpath, vars in input_vars:
                 # [NEW] Complementary Filter Interception
@@ -550,6 +837,129 @@ def extract_condition_data_v2(
                         curr_trial_in.append(arr)
                     continue # Skip normal loading for this group
 
+                # [NEW] Derived Explicit Features
+                if "derived/deflection" in gpath:
+                    try:
+                        hip_l = trial_group['robot']['left']['hip_angle'][:]
+                        mot_l = trial_group['robot']['left']['motor_angle'][:]
+                        hip_r = trial_group['robot']['right']['hip_angle'][:]
+                        mot_r = trial_group['robot']['right']['motor_angle'][:]
+                        
+                        cols = []
+                        for v in vars:
+                            if v == 'left': cols.append((mot_l - hip_l)[:, None])
+                            elif v == 'right': cols.append((mot_r - hip_r)[:, None])
+                        
+                        if cols:
+                            arr = np.concatenate(cols, axis=1).astype(np.float32)
+                            kin_q_arrays.append(arr)
+                            curr_trial_in.append(arr)
+                        continue
+                    except Exception as e:
+                        print(f"[WARN] Failed to compute deflection in {sub}/{cond}: {e}")
+                        valid_trial = False; break
+
+                if "derived/asymmetry" in gpath:
+                    try:
+                        hip_l = trial_group['robot']['left']['hip_angle'][:]
+                        hip_r = trial_group['robot']['right']['hip_angle'][:]
+                        tor_l = trial_group['robot']['left']['torque'][:]
+                        tor_r = trial_group['robot']['right']['torque'][:]
+                        # We also allow thigh_angle asymmetry
+                        if 'thigh_angle' in trial_group['robot']['left']:
+                            thi_l = trial_group['robot']['left']['thigh_angle'][:]
+                            thi_r = trial_group['robot']['right']['thigh_angle'][:]
+                        else:
+                            thi_l = np.zeros_like(hip_l)
+                            thi_r = np.zeros_like(hip_r)
+
+                        cols = []
+                        for v in vars:
+                            if v == 'hip_diff': cols.append((hip_l - hip_r)[:, None])
+                            elif v == 'torque_diff': cols.append((tor_l - tor_r)[:, None])
+                            elif v == 'thigh_diff': cols.append((thi_l - thi_r)[:, None])
+                        
+                        if cols:
+                            arr = np.concatenate(cols, axis=1).astype(np.float32)
+                            kin_q_arrays.append(arr)
+                            curr_trial_in.append(arr)
+                        continue
+                    except Exception as e:
+                        print(f"[WARN] Failed to compute asymmetry in {sub}/{cond}: {e}")
+                        valid_trial = False; break
+
+                if "derived/mech_power" in gpath:
+                    try:
+                        tor_l = trial_group['robot']['left']['torque'][:]
+                        tor_r = trial_group['robot']['right']['torque'][:]
+                        hip_l = trial_group['robot']['left']['hip_angle'][:]
+                        hip_r = trial_group['robot']['right']['hip_angle'][:]
+                        dt = 1.0 / fs
+                        hip_dot_l = np.diff(hip_l) / dt
+                        hip_dot_l = np.concatenate([[hip_dot_l[0]], hip_dot_l])
+                        hip_dot_r = np.diff(hip_r) / dt
+                        hip_dot_r = np.concatenate([[hip_dot_r[0]], hip_dot_r])
+                        
+                        cols = []
+                        for v in vars:
+                            if v == 'left': cols.append((tor_l * hip_dot_l)[:, None])
+                            elif v == 'right': cols.append((tor_r * hip_dot_r)[:, None])
+                            
+                        if cols:
+                            arr = np.concatenate(cols, axis=1).astype(np.float32)
+                            kin_q_arrays.append(arr)
+                            curr_trial_in.append(arr)
+                        continue
+                    except Exception as e:
+                        print(f"[WARN] Failed to compute mech_power in {sub}/{cond}: {e}")
+                        valid_trial = False; break
+
+                if "derived/body_frame_imu" in gpath:
+                    try:
+                        body_cache = get_body_frame_cache()
+                        cols = []
+                        for v in vars:
+                            if v == 'accel_right': cols.append(body_cache['acc_body'][:, 0:1])
+                            elif v == 'accel_forward': cols.append(body_cache['acc_body'][:, 1:2])
+                            elif v == 'accel_up': cols.append(body_cache['acc_body'][:, 2:3])
+                            elif v == 'gyro_right': cols.append(body_cache['gyro_body'][:, 0:1])
+                            elif v == 'gyro_forward': cols.append(body_cache['gyro_body'][:, 1:2])
+                            elif v == 'gyro_up': cols.append(body_cache['gyro_body'][:, 2:3])
+                            elif v == 'forward_accel_overground': cols.append(body_cache['forward_accel_overground'])
+
+                        if cols:
+                            arr = np.concatenate(cols, axis=1).astype(np.float32)
+                            kin_q_arrays.append(arr)
+                            curr_trial_in.append(arr)
+                        continue
+                    except Exception as e:
+                        print(f"[WARN] Failed to compute body_frame_imu in {sub}/{cond}: {e}")
+                        valid_trial = False; break
+
+                # [NEW] Global IMU + Treadmill Acceleration Interception
+                if "derived/global_accel" in gpath:
+                    try:
+                        body_cache = get_body_frame_cache()
+                        cols = []
+                        for v in vars:
+                            if v == 'accel_x': cols.append(body_cache['acc_global'][:, 0:1])
+                            elif v == 'accel_y': cols.append(body_cache['acc_global'][:, 1:2])
+                            elif v == 'accel_z': cols.append(body_cache['acc_global'][:, 2:3])
+                            elif v == 'accel_x_overground': cols.append(body_cache['acc_body'][:, 0:1])
+                            elif v == 'accel_y_overground': cols.append(body_cache['forward_accel_overground'])
+                            elif v == 'a_tread': cols.append((body_cache['forward_accel_overground'] - body_cache['acc_body'][:, 1:2]))
+                            
+                        if cols:
+                            arr = np.concatenate(cols, axis=1).astype(np.float32)
+                            kin_q_arrays.append(arr)
+                            curr_trial_in.append(arr)
+                        continue # Skip normal loading
+                        
+                    except Exception as e:
+                        print(f"[WARN] Failed to compute global_accel in {sub}/{cond}: {e}")
+                        valid_trial = False
+                        break
+
                 # Normal Loading Logic
                 # gpath is e.g. 'robot/back_imu' or 'mocap/kin_q'
                 
@@ -565,6 +975,13 @@ def extract_condition_data_v2(
                     print(f"[DEBUG] {sub}/{cond}/{lv}/{trial_name}: Missing group {gpath}")
                     valid_trial = False
                     break
+
+                quat_cache = None
+                if gpath == "robot/back_imu" and any(vn in {'quat_w', 'quat_x', 'quat_y', 'quat_z'} for vn in vars):
+                    quat_keys = ['quat_w', 'quat_x', 'quat_y', 'quat_z']
+                    if all(k in grp for k in quat_keys):
+                        quat_stack = np.stack([grp[k][:] for k in quat_keys], axis=1)
+                        quat_cache = canonicalize_quaternion_sequence(quat_stack)
                 
                 # Load Data Columns
                 block_cols = []
@@ -575,7 +992,11 @@ def extract_condition_data_v2(
                     
                     # 1. Direct Load
                     if v_name in grp:
-                        col_data = grp[v_name][:]
+                        if quat_cache is not None and v_name in {'quat_w', 'quat_x', 'quat_y', 'quat_z'}:
+                            quat_idx = {'quat_w': 0, 'quat_x': 1, 'quat_y': 2, 'quat_z': 3}[v_name]
+                            col_data = quat_cache[:, quat_idx]
+                        else:
+                            col_data = grp[v_name][:]
                         if input_lpf_cutoff is not None:
                             col_data = butter_lowpass_filter(col_data, input_lpf_cutoff, fs, input_lpf_order)
                             
@@ -851,7 +1272,7 @@ def extract_condition_data_v2(
                     if v not in grp: valid_out = False; break
                     d = grp[v][:]
                     
-                    # [NEW] MoCap Thigh Angle Output 
+                    # [NEW] MoCap Thigh Angle Output
                     # Use (hip_flexion - pelvis_list) as target
                     if 'mocap' in gpath and 'kin_q' in gpath and v in ['hip_flexion_l', 'hip_flexion_r']:
                         try:
@@ -859,7 +1280,19 @@ def extract_condition_data_v2(
                             d = d - p_list
                         except KeyError:
                             pass
-                            
+
+                        # [NEW] Residual Learning: target = mocap_thigh - calibrated_robot_thigh
+                        if residual_target:
+                            try:
+                                if 'hip_flexion_l' in v:
+                                    robot_hip = trial_group['robot']['left']['hip_angle'][:]
+                                    d = d - (robot_hip + robot_offset_L)
+                                elif 'hip_flexion_r' in v:
+                                    robot_hip = trial_group['robot']['right']['hip_angle'][:]
+                                    d = d - (robot_hip + robot_offset_R)
+                            except KeyError:
+                                pass
+
                     d = np.nan_to_num(d).reshape(-1, 1)
                     extracted_outs.append(d)
             
@@ -884,22 +1317,27 @@ def extract_condition_data_v2(
     return in_list_all, out_list_all
 
 def build_nn_dataset(
-    data_path, 
+    data_path,
     sub_names, cond_names,
     input_vars, output_vars,
     time_window_input, time_window_output, stride,
     subject_selection=None,
     condition_selection=None,
+    level_selection=None,
     debug_plot=False,
     est_tick_ranges=None,
     use_physical_velocity_model=False,
     use_gait_phase=False,
     input_lpf_cutoff=None,
     input_lpf_order=4,
-    use_complementary_filter_euler=False
+    use_complementary_filter_euler=False,
+    residual_target=False,
+    calibrate_robot_thigh=False,
+    return_metadata=False
 ):
     X_list = []
     Y_list = []
+    meta_list = []
 
     # print(f"[DEBUG] build_nn_dataset called with subjects={sub_names} conditions={cond_names}")
     
@@ -908,6 +1346,10 @@ def build_nn_dataset(
          # Assuming data_path is correct.
          pass
          
+    include_levels = None
+    if level_selection and isinstance(level_selection, dict):
+        include_levels = level_selection.get('include')
+
     with h5py.File(data_path, 'r') as f:
         # print(f"[DEBUG] H5 file opened. Keys: {list(f.keys())}")
         for sub in sub_names:
@@ -936,11 +1378,14 @@ def build_nn_dataset(
                 # Data load
                 X_trials, Y_trials = extract_condition_data_v2(
                     f, sub, cond, input_vars, output_vars,
+                    include_levels=include_levels,
                     use_physical_velocity_model=use_physical_velocity_model,
                     use_gait_phase=use_gait_phase,
                     input_lpf_cutoff=input_lpf_cutoff,
                     input_lpf_order=input_lpf_order,
-                    use_complementary_filter_euler=use_complementary_filter_euler
+                    use_complementary_filter_euler=use_complementary_filter_euler,
+                    residual_target=residual_target,
+                    calibrate_robot_thigh=calibrate_robot_thigh
                 )
                 
                 if not X_trials:
@@ -963,12 +1408,22 @@ def build_nn_dataset(
                     # Store RAW series (Lazy Loading)
                     X_list.append(X_arr)
                     Y_list.append(Y_arr)
+                    if return_metadata:
+                        meta_list.append({
+                            "subject": sub,
+                            "condition": cond,
+                            "source_path": data_path,
+                        })
 
     if len(X_list) == 0:
         print("[DEBUG] X_list is empty at end of build_nn_dataset")
+        if return_metadata:
+            return [], [], []
         return [], []
     
     # Return LIST of arrays, not stacked array
+    if return_metadata:
+        return X_list, Y_list, meta_list
     return X_list, Y_list
 
 def build_nn_dataset_multi(
@@ -978,12 +1433,15 @@ def build_nn_dataset_multi(
     time_window_input, time_window_output, stride,
     subject_selection=None,
     condition_selection=None,
+    level_selection=None,
     est_tick_ranges=None,
     use_physical_velocity_model=False,
     use_gait_phase=False,
     input_lpf_cutoff=None,
     input_lpf_order=4,
-    use_complementary_filter_euler=False
+    use_complementary_filter_euler=False,
+    residual_target=False,
+    calibrate_robot_thigh=False
 ):
     # Determine data sources
     data_sources = {}
@@ -1035,6 +1493,57 @@ def build_nn_dataset_multi(
         if not current_source_subs:
             continue
             
+        base_source_subs = [s for s in current_source_subs if s not in src_exclude]
+        if not base_source_subs:
+            continue
+
+        cache_key = (
+            path,
+            tuple(sorted(base_source_subs)),
+            tuple(cond_names) if cond_names else tuple(),
+            freeze_nested(input_vars),
+            freeze_nested(output_vars),
+            time_window_input,
+            time_window_output,
+            stride,
+            freeze_nested(condition_selection),
+            freeze_nested(level_selection),
+            freeze_nested(est_tick_ranges),
+            use_physical_velocity_model,
+            use_gait_phase,
+            input_lpf_cutoff,
+            input_lpf_order,
+            use_complementary_filter_euler,
+            residual_target,
+            calibrate_robot_thigh,
+        )
+
+        cached_dataset = TRIAL_DATASET_CACHE.get(cache_key)
+        if cached_dataset is None:
+            X_src_full, Y_src_full, meta_src_full = build_nn_dataset(
+                path, base_source_subs, cond_names,
+                input_vars, output_vars,
+                time_window_input, time_window_output, stride,
+                subject_selection={'include': base_source_subs, 'exclude': []},
+                condition_selection=condition_selection,
+                level_selection=level_selection,
+                est_tick_ranges=est_tick_ranges,
+                use_physical_velocity_model=use_physical_velocity_model,
+                use_gait_phase=use_gait_phase,
+                input_lpf_cutoff=input_lpf_cutoff,
+                input_lpf_order=input_lpf_order,
+                use_complementary_filter_euler=use_complementary_filter_euler,
+                residual_target=residual_target,
+                calibrate_robot_thigh=calibrate_robot_thigh,
+                return_metadata=True
+            )
+            cached_dataset = {
+                "X": X_src_full,
+                "Y": Y_src_full,
+                "meta": meta_src_full,
+            }
+            TRIAL_DATASET_CACHE[cache_key] = cached_dataset
+
         # 2. Filter & Strip 'subject_selection'
         # subject_selection has 'include' and 'exclude' lists of full names.
         curr_sub_select = {}
@@ -1059,28 +1568,30 @@ def build_nn_dataset_multi(
             # Config usually has exclude_subjects: ['S004'] for that source.
             if src_exclude:
                 ex_list.extend(src_exclude)
-                
-            curr_sub_select['exclude'] = ex_list
-            # Call build_nn_dataset
-        X_src, Y_src = build_nn_dataset(
-            path, current_source_subs, cond_names,
-            input_vars, output_vars,
-            time_window_input, time_window_output, stride,
-            subject_selection=curr_sub_select,
-            condition_selection=condition_selection,
-            est_tick_ranges=est_tick_ranges,
-            use_physical_velocity_model=use_physical_velocity_model,
-            use_gait_phase=use_gait_phase,
-            input_lpf_cutoff=input_lpf_cutoff,
-            input_lpf_order=input_lpf_order,
-            use_complementary_filter_euler=use_complementary_filter_euler
-        )
-        
-        if X_src:
-            print(f"     Loaded {len(X_src)} trials")
-            X_all.extend(X_src)
-            Y_all.extend(Y_src)
             
+            curr_sub_select['exclude'] = ex_list
+
+        include_set = None
+        exclude_set = set(src_exclude)
+        if curr_sub_select.get('include'):
+            include_set = set(curr_sub_select['include'])
+        if curr_sub_select.get('exclude'):
+            exclude_set.update(curr_sub_select['exclude'])
+
+        selected_count = 0
+        for x_arr, y_arr, meta in zip(cached_dataset["X"], cached_dataset["Y"], cached_dataset["meta"]):
+            trial_sub = meta["subject"]
+            if include_set is not None and trial_sub not in include_set:
+                continue
+            if trial_sub in exclude_set:
+                continue
+            X_all.append(x_arr.copy())
+            Y_all.append(y_arr.copy())
+            selected_count += 1
+
+        if selected_count:
+            print(f"     Loaded {selected_count} trials (cached)")
+
     return X_all, Y_all
 
 def plot_model_summary(results):
@@ -1718,19 +2229,24 @@ def train_experiment(
     aug_std = actual_train_params.get("augment_noise_std", 0.0)
     if aug_std > 0:
         print(f"[INFO] Training Data Augmentation Enabled: Gaussian Noise (std={aug_std})")
-    
-    train_ds = LazyWindowDataset(X_train, Y_train, window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=True, noise_std=aug_std)
+
+    # Standing-aware loss weighting
+    standing_loss_weight = float(data_cfg.get("standing_loss_weight", 1.0))
+    standing_std_threshold = float(data_cfg.get("standing_std_threshold", 2.0))
+    if standing_loss_weight > 1.0:
+        print(f"[INFO] Standing-Aware Loss Weight: {standing_loss_weight}x for windows with Y std < {standing_std_threshold}")
+
+    train_ds = LazyWindowDataset(X_train, Y_train, window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=True, noise_std=aug_std,
+                                 standing_loss_weight=standing_loss_weight, standing_std_threshold=standing_std_threshold)
     val_ds   = LazyWindowDataset(X_val,   Y_val,   window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=False)
     test_ds  = LazyWindowDataset(X_test,  Y_test,  window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=False)
     
-    if platform.system() == 'Linux':
-        num_workers = 0 # Revert to 0 to avoid Virtual Memory Overhead (15GB limit)
-    else:
-        num_workers = 0
-            
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    val_loader   = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers)
-    test_loader  = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers)
+    num_workers = 2
+    pin_memory = torch.cuda.is_available()
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=True)
+    val_loader   = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=True)
+    test_loader  = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=True)
     
     # input_dim from first series
     input_dim = X_train[0].shape[1]
@@ -1851,21 +2367,28 @@ def train_experiment(
         # Inner Loop: Batches
         # leave=False keeps the log clean by clearing completed epochs
         pbar = tqdm(enumerate(train_loader, start=1), total=len(train_loader), desc=f"Epoch {epoch}", leave=False, file=sys.stdout)
-        for bi, (xb, yb) in pbar:
-            xb, yb = xb.to(device), yb.to(device)
+        for bi, batch in pbar:
+            # Support both (xb, yb) and (xb, yb, sample_weight) from dataset
+            if len(batch) == 3:
+                xb, yb, sw = batch
+                sw = sw.to(device, non_blocking=True)
+            else:
+                xb, yb = batch
+                sw = None
+            xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
             optimizer.zero_grad(set_to_none=True)
-            
+
             # [FIX] OOM Handling
             try:
                 pred = model(xb)
-                
+
                 # [FIX] Robust Shape Alignment
                 # yb might be (B, 1, D) if horizon=1, pred is (B, D)
                 if pred.dim() == 2 and yb.dim() == 3 and yb.shape[1] == 1:
                     yb = yb.squeeze(1)
                 elif pred.dim() == 3 and yb.dim() == 2 and pred.shape[1] == 1:
                     pred = pred.squeeze(1)
-                
+
                 # Loss Calculation
                 if use_weighted_loss:
                     # Loss is (B, H, D) because reduction='none'
@@ -1873,6 +2396,12 @@ def train_experiment(
                     # Apply weights
                     weighted_loss = raw_loss * loss_weights
                     loss = weighted_loss.mean()
+                elif sw is not None:
+                    # Standing-aware per-sample weighting
+                    raw_loss = nn.functional.huber_loss(pred, yb, reduction='none', delta=huber_delta)
+                    # sw shape: (B,), raw_loss shape: (B, D) or (B, H, D)
+                    sw_expanded = sw.view(-1, *([1] * (raw_loss.dim() - 1)))
+                    loss = (raw_loss * sw_expanded).mean()
                 else:
                     loss = criterion(pred, yb)
                     
@@ -1916,7 +2445,7 @@ def train_experiment(
         val_pbar = tqdm(val_loader, desc=f"  [VAL]", leave=False, file=sys.stdout)
         with torch.no_grad():
             for xb, yb in val_pbar:
-                xb, yb = xb.to(device), yb.to(device)
+                xb, yb = xb.to(device, non_blocking=True), yb.to(device, non_blocking=True)
                 pred = model(xb)
                 
                 if use_weighted_loss:
@@ -2344,6 +2873,12 @@ if __name__ == "__main__":
     parser.add_argument("--total_nodes", type=int, default=1, help="Total number of nodes/GPUs")
     parser.add_argument("--config", type=str, default=None, help="Specific config file to run")
     parser.add_argument("--inspect", type=str, default=None, help="Path to H5 file to inspect structure")
+    parser.add_argument("--run_distribution_analysis", action="store_true",
+                        help="Run expensive subject-level distribution analysis before training")
+    parser.add_argument("--run_feature_visualization", action="store_true",
+                        help="Run optional baseline feature visualization hook")
+    parser.add_argument("--run_feature_importance", action="store_true",
+                        help="Run expensive permutation feature importance after training")
     args = parser.parse_args()
 
     # [NEW] Inspect Mode
@@ -2392,22 +2927,12 @@ if __name__ == "__main__":
             with open(yf, 'r', encoding='utf-8') as f:
                 cfg = yaml.safe_load(f)
                 
-            # Merge with defaults (RECURSIVELY)
-            def recursive_update(target, update):
-                for k, v in update.items():
-                    if isinstance(v, dict) and k in target and isinstance(target[k], dict):
-                        recursive_update(target[k], v)
-                    else:
-                        target[k] = v
-            
-            merged = copy.deepcopy(base_config)
-            recursive_update(merged, cfg)
-
-            
-            # Fix: Do not inherit exp_name from base_config blindly.
-            # If cfg doesn't have it, use filename.
             exp_name = cfg.get("exp_name", yf.stem)
-            merged["exp_name"] = exp_name
+            merged = normalize_experiment_config(cfg, base_config=base_config, exp_name=exp_name)
+            try:
+                merged["_config_relpath"] = str(yf.relative_to(config_dir))
+            except ValueError:
+                merged["_config_relpath"] = str(yf)
             experiments_to_run.append((exp_name, merged))
             
     # --- Sharding for Parallel Execution ---
@@ -2422,14 +2947,14 @@ if __name__ == "__main__":
     
     # [USER REQUEST] Run Distribution Analysis at the very beginning
     # Use the first valid config (or base_config) to find data sources
-    if args.rank == 0:
+    if args.run_distribution_analysis and args.rank == 0:
         analysis_config = base_config
         if not analysis_config and experiments_to_run:
             analysis_config = experiments_to_run[0][1]
             
         if analysis_config:
             # We assume output dir based on first config or generic
-            dist_output_dir = "compare_result/distribution_analysis"
+            dist_output_dir = "compare_result/input_feat_check"
             analyze_data_distribution(analysis_config, dist_output_dir)
             
     # Remove Global Dataset Load - Move to Experiment Loop
@@ -2446,7 +2971,7 @@ if __name__ == "__main__":
     # Use position=0 for the outer bar.
     for exp_name, cfg in tqdm(experiments_to_run, desc=f"GPU-{args.rank} Total", position=0):
         # [USER REQUEST] Visualize Input Features for Baseline
-        if exp_name == "baseline":
+        if args.run_feature_visualization and exp_name == "baseline":
             try:
                 visualize_features(cfg)
             except Exception as e:
@@ -2459,7 +2984,8 @@ if __name__ == "__main__":
             
             # Directory Setup
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            save_dir = f"experiments/{full_name}"
+            exp_root = derive_experiment_root(cfg.get("_config_relpath", ""))
+            save_dir = str(exp_root / full_name)
             
             # --- Dynamic Data Loading ---
             # Extract vars from config or use default global if not present (backward compatibility)
@@ -2512,79 +3038,41 @@ if __name__ == "__main__":
                 cfg['cv_mode'] = 'loso'
 
             # Retrieve data_path safely
-            current_data_path = cfg.get("data_path")
-            if not current_data_path and base_config:
-                current_data_path = base_config.get("data_path")
-                
+            current_data_path = get_primary_data_path(cfg)
             if not current_data_path:
-                raise ValueError("data_path not found in config or base_config")
+                raise ValueError("data_path not found in config")
                 
             # print(f"Data Path: {current_data_path}")
-            
-            curr_input_vars = cfg.get("input_vars") or (base_config.get("input_vars") if base_config else None)
-            curr_output_vars = cfg.get("output_vars") or (base_config.get("output_vars") if base_config else None)
-            
-            # [FIX] Fallback to shared section
-            if not curr_input_vars and 'shared' in cfg:
-                curr_input_vars = cfg['shared'].get('input_vars')
-            if not curr_output_vars and 'shared' in cfg:
-                curr_output_vars = cfg['shared'].get('output_vars')
-            
-            # [FIX] Ensure subjects and conditions are populated from shared
-            if not cfg.get('subjects') and 'shared' in cfg:
-                cfg['subjects'] = cfg['shared'].get('subjects', [])
-            if not cfg.get('conditions') and 'shared' in cfg:
-                cfg['conditions'] = cfg['shared'].get('conditions', [])
+
+            curr_input_vars = get_config_input_vars(cfg)
+            curr_output_vars = get_config_output_vars(cfg)
+            cfg['subjects'] = get_config_subjects(cfg)
+            cfg['conditions'] = get_config_conditions(cfg)
 
             # Subj / Window
-            curr_window = cfg.get("time_window_input") or (base_config.get("time_window_input") if base_config else None)
-            if not curr_window and 'shared' in cfg and 'data' in cfg['shared']:
-                curr_window = cfg['shared']['data'].get('window_size')
-                
-            curr_est_tick_ranges = cfg.get("est_tick_ranges") or (base_config.get("est_tick_ranges") if base_config else None)
-            if not curr_est_tick_ranges and 'shared' in cfg and 'data' in cfg['shared']:
-                val = cfg['shared']['data'].get('y_delay', 5) # Default 5 if missing?
-                curr_est_tick_ranges = [val] if isinstance(val, int) else val
+            curr_window = get_window_size(cfg)
+            curr_est_tick_ranges = get_est_tick_ranges(cfg)
                 
             # [FIX] Inject back into cfg so train_experiment sees it
             if curr_est_tick_ranges:
                 cfg["est_tick_ranges"] = curr_est_tick_ranges
-            # If missing in root, check 01_construction
-            if not curr_input_vars and '01_construction' in cfg:
-                curr_input_vars = cfg['01_construction'].get('inputs')
-            if not curr_output_vars and '01_construction' in cfg:
-                curr_output_vars = cfg['01_construction'].get('outputs')
                     
             # [NEW] Input LPF
-            curr_input_lpf_cutoff = cfg.get("input_lpf_cutoff_hz")
-            if curr_input_lpf_cutoff is None and 'shared' in cfg:
-                curr_input_lpf_cutoff = cfg['shared'].get('input_lpf_cutoff_hz')
-            if curr_input_lpf_cutoff is None and '02_train' in cfg and 'data' in cfg['02_train']:
-                curr_input_lpf_cutoff = cfg['02_train']['data'].get('input_lpf_cutoff_hz')
+            curr_input_lpf_cutoff = get_input_lpf_cutoff(cfg)
             
-            curr_input_lpf_order = cfg.get("input_lpf_order", 4)
-            if 'shared' in cfg and cfg['shared'].get('input_lpf_order'):
-                curr_input_lpf_order = cfg['shared'].get('input_lpf_order')
-            elif '02_train' in cfg and 'data' in cfg['02_train'] and cfg['02_train']['data'].get('input_lpf_order'):
-                curr_input_lpf_order = cfg['02_train']['data'].get('input_lpf_order')
+            curr_input_lpf_order = get_input_lpf_order(cfg, default=4)
                     
             # Dataset Universe (Full list of subs/conds available to read)
-            curr_sub_names = cfg.get("subjects") or (base_config.get("subjects") if base_config else None)
-            curr_cond_names = cfg.get("conditions") or (base_config.get("conditions") if base_config else None)
+            curr_sub_names = get_config_subjects(cfg)
+            curr_cond_names = get_config_conditions(cfg)
+
+            # Level Selection (Explicit include list)
+            curr_level_selection = get_config_level_selection(cfg)
                     
             # --- TCN Dynamic Config ---
-            if "tcn_channels" in cfg:
-                curr_tcn_channels = cfg["tcn_channels"]
-            elif "02_train" in cfg and cfg["02_train"].get("model") and "channels" in cfg["02_train"]["model"]:
-                curr_tcn_channels = cfg["02_train"]["model"]["channels"]
-            elif "02_train" in cfg and "data" in cfg["02_train"] and "channels" in cfg["02_train"]["data"]:
-                 curr_tcn_channels = cfg["02_train"]["data"]["channels"]
-            elif "shared" in cfg and cfg["shared"].get("model") and "channels" in cfg["shared"]["model"]:
-                curr_tcn_channels = cfg["shared"]["model"]["channels"]
-            else:
-                n_layers = cfg.get("tcn_layers", base_config.get("tcn_layers", 3) if base_config else 3)
-                n_hidden = cfg.get("tcn_hidden", base_config.get("tcn_hidden", 64) if base_config else 64)
-                curr_tcn_channels = [n_hidden] * n_layers
+            fallback_layers = base_config.get("tcn_layers", 3) if base_config else 3
+            fallback_hidden = base_config.get("tcn_hidden", 64) if base_config else 64
+            curr_tcn_channels = get_tcn_channels(cfg, fallback_layers=fallback_layers, fallback_hidden=fallback_hidden)
             
             cfg["tcn_channels"] = curr_tcn_channels
             
@@ -2627,43 +3115,55 @@ if __name__ == "__main__":
                     use_comp_filter = cfg['data'].get("use_complementary_filter_euler", False)
                 
                 print(f"[INFO] Comp Filter for {final_exp_name}: {use_comp_filter}")
-                
+
+                # [NEW] Residual Learning Mode
+                use_residual = data_cfg_now.get("residual_target", False)
+                use_calib_thigh = data_cfg_now.get("calibrate_robot_thigh", False)
+                if use_residual:
+                    print(f"[INFO] Residual target mode ENABLED for {final_exp_name}")
+
                 X_train, Y_train = build_nn_dataset_multi(
                     cfg, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
                     curr_window, time_window_output, stride,
                     subject_selection=make_subject_selection(run_meta["train"]),
                     condition_selection=CONDITION_SELECTION,
+                    level_selection=curr_level_selection,
                     est_tick_ranges=cfg.get("est_tick_ranges"),
                     use_physical_velocity_model=use_phys_vel, use_gait_phase=use_gait_ph,
                     input_lpf_cutoff=curr_input_lpf_cutoff, input_lpf_order=curr_input_lpf_order,
-                    use_complementary_filter_euler=use_comp_filter
+                    use_complementary_filter_euler=use_comp_filter,
+                    residual_target=use_residual, calibrate_robot_thigh=use_calib_thigh
                 )
                 X_val, Y_val = build_nn_dataset_multi(
                     cfg, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
                     curr_window, time_window_output, stride,
                     subject_selection=make_subject_selection(run_meta["val"]),
                     condition_selection=CONDITION_SELECTION,
+                    level_selection=curr_level_selection,
                     est_tick_ranges=cfg.get("est_tick_ranges"),
                     use_physical_velocity_model=use_phys_vel, use_gait_phase=use_gait_ph,
                     input_lpf_cutoff=curr_input_lpf_cutoff, input_lpf_order=curr_input_lpf_order,
-                    use_complementary_filter_euler=use_comp_filter
+                    use_complementary_filter_euler=use_comp_filter,
+                    residual_target=use_residual, calibrate_robot_thigh=use_calib_thigh
                 )
                 X_test, Y_test = build_nn_dataset_multi(
                     cfg, curr_sub_names, curr_cond_names, c_in_vars, c_out_vars,
                     curr_window, time_window_output, stride,
                     subject_selection=make_subject_selection(run_meta["test"]),
                     condition_selection=CONDITION_SELECTION,
+                    level_selection=curr_level_selection,
                     est_tick_ranges=cfg.get("est_tick_ranges"),
                     use_physical_velocity_model=use_phys_vel, use_gait_phase=use_gait_ph,
                     input_lpf_cutoff=curr_input_lpf_cutoff, input_lpf_order=curr_input_lpf_order,
-                    use_complementary_filter_euler=use_comp_filter
+                    use_complementary_filter_euler=use_comp_filter,
+                    residual_target=use_residual, calibrate_robot_thigh=use_calib_thigh
                 )
 
                 if len(X_train) == 0:
                     print(f"[ERROR] No training data for {full_name_seed}.")
                     continue
                     
-                local_save_dir = f"experiments/{full_name_seed}"
+                local_save_dir = str(exp_root / full_name_seed)
                 os.makedirs(local_save_dir, exist_ok=True)
                     
                 # Normalization
@@ -2722,6 +3222,10 @@ if __name__ == "__main__":
         print("No results to analyze.")
         exit()
         
+    if not args.run_feature_importance:
+        print("\n[INFO] Skipping feature importance (disabled).")
+        sys.exit(0)
+
     print("\n>>> Calculating Feature Importance for Best Model...")
     
     # 1. Find Best Model (lowest test_mae)
@@ -2752,28 +3256,30 @@ if __name__ == "__main__":
     c_out_vars = parse_vars(raw_out)
     
     # Retrieve Data Path
-    best_data_path = best_cfg.get("data_path")
-    if not best_data_path:
-        best_data_path = best_cfg.get("01_construction", {}).get("src_h5") or \
-                         best_cfg.get("shared", {}).get("src_h5") or \
-                         (base_config.get("data_path") if base_config else None)
+    best_data_path = get_primary_data_path(best_cfg)
 
     # Retrieve Other params
-    best_sub_names = best_cfg.get("subjects") or best_cfg.get("01_construction", {}).get("include_subjects")
-    best_cond_names = best_cfg.get("conditions") or best_cfg.get("01_construction", {}).get("include_conditions")
+    best_sub_names = get_config_subjects(best_cfg)
+    best_cond_names = get_config_conditions(best_cfg)
     # best_lpf variables removed
     
     # Window
-    best_window = best_cfg.get("time_window_input") or best_cfg.get("shared", {}).get("data", {}).get("window_size")
+    best_window = get_window_size(best_cfg)
+
+    best_data_cfg = get_train_data_config(best_cfg)
+    best_residual = best_data_cfg.get("residual_target", False)
+    best_calib = best_data_cfg.get("calibrate_robot_thigh", False)
+    best_level_selection = get_config_level_selection(best_cfg)
 
     X_test_best, Y_test_best = build_nn_dataset_multi(
         best_cfg, best_sub_names, best_cond_names, c_in_vars, c_out_vars,
         best_window, best_cfg.get("time_window_output", 1), best_cfg.get("stride", 5),
-        subject_selection=make_subject_selection(best_sub_names), # Use all relevant subjects for global check
+        subject_selection=make_subject_selection(best_sub_names),
         condition_selection=CONDITION_SELECTION,
+        level_selection=best_level_selection,
         est_tick_ranges=best_cfg.get("est_tick_ranges", None),
-        use_complementary_filter_euler=use_comp_filter # Need to enable this too if best_cfg uses it?
-        # WAIT. best_cfg has it? We need to extract it from best_cfg.
+        use_complementary_filter_euler=use_comp_filter,
+        residual_target=best_residual, calibrate_robot_thigh=best_calib
     )
     
     best_horizon = len(best_cfg.get("est_tick_ranges")) if best_cfg.get("est_tick_ranges") else best_cfg.get("time_window_output", 10)

@@ -21,11 +21,6 @@ shared:
   - decline_5deg
   - incline_10deg
   - stopandgo
-  level_selection:
-    include:
-    - lv0
-    - lv4
-    - lv7
   input_vars:
   - - derived/euler
     - - roll
@@ -35,10 +30,6 @@ shared:
     - - hip_angle
   - - robot/right
     - - hip_angle
-  - - robot/left
-    - - torque
-  - - robot/right
-    - - torque
   - - robot/left
     - - thigh_angle
   - - robot/right
@@ -132,6 +123,6 @@ shared:
   train:
     device: cuda
   scaler_path: ./runs_tcn/scaler.npz
-exp_name: baseline
+exp_name: exp_no_torque
 cv_mode: loso
 subjects: *id004

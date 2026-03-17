@@ -21,11 +21,6 @@ shared:
   - decline_5deg
   - incline_10deg
   - stopandgo
-  level_selection:
-    include:
-    - lv0
-    - lv4
-    - lv7
   input_vars:
   - - derived/euler
     - - roll
@@ -64,7 +59,7 @@ shared:
     use_complementary_filter_euler: true
     calibrate_robot_thigh: true
   model: &id002
-    type: TCN
+    type: StanceGatedTCN
     channels:
     - 32
     - 64
@@ -132,6 +127,6 @@ shared:
   train:
     device: cuda
   scaler_path: ./runs_tcn/scaler.npz
-exp_name: baseline
+exp_name: exp_A5_gated_tcn
 cv_mode: loso
 subjects: *id004

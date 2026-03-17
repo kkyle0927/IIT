@@ -21,11 +21,6 @@ shared:
   - decline_5deg
   - incline_10deg
   - stopandgo
-  level_selection:
-    include:
-    - lv0
-    - lv4
-    - lv7
   input_vars:
   - - derived/euler
     - - roll
@@ -48,6 +43,15 @@ shared:
       - quat_x
       - quat_y
       - quat_z
+  - - robot/left
+    - - thigh_angle_dot
+      - torque_dot
+  - - robot/right
+    - - thigh_angle_dot
+      - torque_dot
+  - - derived/mech_power
+    - - left
+      - right
   output_vars:
   - - mocap/kin_q
     - - hip_flexion_l
@@ -63,6 +67,7 @@ shared:
     time_window_output: 1
     use_complementary_filter_euler: true
     calibrate_robot_thigh: true
+    residual_target: true
   model: &id002
     type: TCN
     channels:
@@ -92,6 +97,7 @@ shared:
     use_complementary_filter_euler: true
     calibrate_robot_thigh: true
     normalize_type: standard
+    residual_target: true
   model: *id002
   loader:
     batch_size: 128
@@ -132,6 +138,6 @@ shared:
   train:
     device: cuda
   scaler_path: ./runs_tcn/scaler.npz
-exp_name: baseline
+exp_name: exp_A5_res_kin_power
 cv_mode: loso
 subjects: *id004

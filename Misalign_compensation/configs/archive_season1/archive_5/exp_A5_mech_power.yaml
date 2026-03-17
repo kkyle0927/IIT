@@ -21,11 +21,6 @@ shared:
   - decline_5deg
   - incline_10deg
   - stopandgo
-  level_selection:
-    include:
-    - lv0
-    - lv4
-    - lv7
   input_vars:
   - - derived/euler
     - - roll
@@ -48,6 +43,9 @@ shared:
       - quat_x
       - quat_y
       - quat_z
+  - - derived/mech_power
+    - - left
+      - right
   output_vars:
   - - mocap/kin_q
     - - hip_flexion_l
@@ -132,6 +130,6 @@ shared:
   train:
     device: cuda
   scaler_path: ./runs_tcn/scaler.npz
-exp_name: baseline
+exp_name: exp_A5_mech_power
 cv_mode: loso
 subjects: *id004

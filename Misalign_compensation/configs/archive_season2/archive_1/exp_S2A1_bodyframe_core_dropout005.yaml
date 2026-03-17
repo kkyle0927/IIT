@@ -21,16 +21,7 @@ shared:
   - decline_5deg
   - incline_10deg
   - stopandgo
-  level_selection:
-    include:
-    - lv0
-    - lv4
-    - lv7
   input_vars:
-  - - derived/euler
-    - - roll
-      - pitch
-      - yaw
   - - robot/left
     - - hip_angle
   - - robot/right
@@ -43,11 +34,14 @@ shared:
     - - thigh_angle
   - - robot/right
     - - thigh_angle
-  - - robot/back_imu
-    - - quat_w
-      - quat_x
-      - quat_y
-      - quat_z
+  - - derived/body_frame_imu
+    - - accel_right
+      - accel_forward
+      - accel_up
+      - gyro_right
+      - gyro_forward
+      - gyro_up
+      - forward_accel_overground
   output_vars:
   - - mocap/kin_q
     - - hip_flexion_l
@@ -63,6 +57,7 @@ shared:
     time_window_output: 1
     use_complementary_filter_euler: true
     calibrate_robot_thigh: true
+    residual_target: true
   model: &id002
     type: TCN
     channels:
@@ -71,11 +66,11 @@ shared:
     - 64
     - 128
     kernel_size: 5
-    dropout: 0.15
+    dropout: 0.05
     use_norm: true
     head_hidden:
     - 64
-    head_dropout: 0.15
+    head_dropout: 0.05
     model_norm: layer
     gating_signal: null
     attention_type: null
@@ -92,6 +87,7 @@ shared:
     use_complementary_filter_euler: true
     calibrate_robot_thigh: true
     normalize_type: standard
+    residual_target: true
   model: *id002
   loader:
     batch_size: 128
@@ -111,6 +107,7 @@ shared:
     cos_T0: 10
     cos_Tmult: 1
     eta_min: 1.0e-05
+    augment_noise_std: 0.01
 03_eval:
   split:
     mode: loso
@@ -120,18 +117,19 @@ shared:
     - 0.7
     - 0.15
     - 0.15
+    save_to: null
+    loso_subjects:
+    - m2_S001
+    - m2_S008
     manual:
       val:
       - m2_S007
       test:
       - m2_S008
-    save_to: null
-    loso_subjects:
-    - m2_S008
   data: *id003
   train:
     device: cuda
   scaler_path: ./runs_tcn/scaler.npz
-exp_name: baseline
+exp_name: exp_S2A1_bodyframe_core_dropout005
 cv_mode: loso
 subjects: *id004

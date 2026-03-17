@@ -36,7 +36,7 @@
 #SBATCH -J misalign_train
 #SBATCH -N 1
 #SBATCH -n 1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:idx0:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=15G
 #SBATCH -t 12:00:00
@@ -187,6 +187,10 @@ if [ -z "$SLURM_JOB_ID" ]; then
             local job_name
             job_name="train_$(basename "$cfg" .yaml)"
 
+            # [Specific GPU Assignment]
+            # Forced to GPU 0 as per user request
+            local gpu_assign="gpu:idx0:1"
+
             local dep_arg=""
             if [ "$slot" -ge "$MAX_PARALLEL" ]; then
                 local dep_idx=$((slot - MAX_PARALLEL))
@@ -196,13 +200,13 @@ if [ -z "$SLURM_JOB_ID" ]; then
             local job_id
             job_id=$(sbatch --parsable \
                 --job-name="$job_name" \
-                --gres="gpu:1" \
+                --gres="$gpu_assign" \
                 --mem="15G" \
                 --cpus-per-task="8" \
                 $dep_arg \
                 "$0" "$cfg")
             submitted_ids+=("$job_id")
-            echo "  Submitted: $job_name (JobID: $job_id)"
+            echo "  Submitted: $job_name (JobID: $job_id) on $gpu_assign"
             ((slot++))
         done
 
