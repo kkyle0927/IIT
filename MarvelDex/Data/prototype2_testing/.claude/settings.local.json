@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /c/Github/IIT/MarvelDex/Data/prototype2_testing/before/*.csv /c/Github/IIT/MarvelDex/Data/prototype2_testing/after/*.csv)",
+      "Bash(python -c \"import jupyter; print\\(jupyter.__version__\\)\")",
+      "Bash(python -c \"import nbconvert; print\\(''nbconvert ok''\\)\")",
+      "Bash(python -c \"import pandas, numpy, scipy, matplotlib, seaborn; print\\(''All dependencies OK''\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(python _run_analysis.py)",
+      "Bash(python grf_normalized_comparison.py)",
+      "Bash(python grf_norm_heel_toe_analysis.py)"
+    ]
+  }
+}
