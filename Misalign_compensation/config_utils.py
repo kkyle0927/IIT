@@ -1,7 +1,11 @@
 import copy
+import os
 
 
 FULL_CONFIG_KEYS = ("shared", "02_train", "03_eval")
+
+LOCAL_IIT_ROOT = "C:/Github/IIT"
+SERVER_IIT_ROOT = "/home/chanyoungko/IIT"
 
 
 def deep_update(target, update):
@@ -57,20 +61,105 @@ def get_model_config(cfg):
 def get_data_sources(cfg):
     shared_cfg = get_shared_config(cfg)
     raw_sources = shared_cfg.get("data_sources", {}) or cfg.get("data_sources", {})
-    return raw_sources if isinstance(raw_sources, dict) else {}
+    if not isinstance(raw_sources, dict):
+        return {}
+
+    resolved = {}
+    for name, source in raw_sources.items():
+        if not isinstance(source, dict):
+            continue
+        source_copy = copy.deepcopy(source)
+        resolved_path = resolve_data_source_path(source_copy)
+        if resolved_path:
+            source_copy["path"] = resolved_path
+        resolved[name] = source_copy
+    return resolved
+
+
+def _translate_known_iit_path(path_value):
+    if not path_value:
+        return None
+
+    normalized = str(path_value).replace("\\", "/")
+
+    if os.name == "nt" and normalized.startswith(f"{SERVER_IIT_ROOT}/"):
+        tail = normalized[len(SERVER_IIT_ROOT) + 1 :]
+        return f"{LOCAL_IIT_ROOT}/{tail}"
+
+    if os.name != "nt" and normalized.startswith(f"{LOCAL_IIT_ROOT}/"):
+        tail = normalized[len(LOCAL_IIT_ROOT) + 1 :]
+        return f"{SERVER_IIT_ROOT}/{tail}"
+
+    return None
+
+
+def _fallback_local_iit_candidates(path_value):
+    if not path_value or os.name != "nt":
+        return []
+
+    normalized = str(path_value).replace("\\", "/")
+    basename = os.path.basename(normalized)
+    candidates = []
+
+    if basename:
+        candidates.append(f"{LOCAL_IIT_ROOT}/{basename}")
+
+    if normalized.endswith("/combined_data.h5"):
+        candidates.append(f"{LOCAL_IIT_ROOT}/combined_data.h5")
+
+    deduped = []
+    for candidate in candidates:
+        if candidate not in deduped:
+            deduped.append(candidate)
+    return deduped
+
+
+def resolve_data_source_path(source):
+    if isinstance(source, dict):
+        if os.name == "nt":
+            preferred_keys = ("local_path", "windows_path", "path", "server_path", "linux_path")
+        else:
+            preferred_keys = ("path", "server_path", "linux_path", "local_path", "windows_path")
+
+        candidates = []
+        for key in preferred_keys:
+            value = source.get(key)
+            if value:
+                candidates.append(str(value))
+                translated = _translate_known_iit_path(value)
+                if translated:
+                    candidates.append(translated)
+                candidates.extend(_fallback_local_iit_candidates(value))
+    else:
+        candidates = [str(source)] if source else []
+        translated = _translate_known_iit_path(source)
+        if translated:
+            candidates.append(translated)
+        candidates.extend(_fallback_local_iit_candidates(source))
+
+    deduped = []
+    for candidate in candidates:
+        if candidate and candidate not in deduped:
+            deduped.append(candidate)
+
+    for candidate in deduped:
+        if os.path.exists(candidate):
+            return candidate
+
+    return deduped[0] if deduped else None
 
 
 def get_primary_data_path(cfg):
     if not isinstance(cfg, dict):
         return None
     if cfg.get("data_path"):
-        return cfg["data_path"]
+        return resolve_data_source_path(cfg["data_path"])
     construction_cfg = cfg.get("01_construction", {})
     if isinstance(construction_cfg, dict) and construction_cfg.get("src_h5"):
-        return construction_cfg["src_h5"]
+        return resolve_data_source_path(construction_cfg["src_h5"])
     shared_cfg = get_shared_config(cfg)
     if shared_cfg.get("src_h5"):
-        return shared_cfg["src_h5"]
+        return resolve_data_source_path(shared_cfg["src_h5"])
     data_sources = get_data_sources(cfg)
     for source in data_sources.values():
         if isinstance(source, dict) and source.get("path"):

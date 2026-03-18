@@ -53,6 +53,7 @@ from config_utils import (
     get_config_level_selection,
     get_config_output_vars,
     get_config_subjects,
+    get_data_sources,
     get_est_tick_ranges,
     get_input_lpf_cutoff,
     get_input_lpf_order,
@@ -1446,8 +1447,9 @@ def build_nn_dataset_multi(
     # Determine data sources
     data_sources = {}
 
-    if 'shared' in config and 'data_sources' in config['shared']:
-        for ds_name, ds_config in config['shared']['data_sources'].items():
+    resolved_sources = get_data_sources(config)
+    if resolved_sources:
+        for ds_name, ds_config in resolved_sources.items():
             prefix = ds_config.get('prefix', '')
             path = ds_config.get('path', '')
             exclude = ds_config.get('exclude_subjects', [])
@@ -1456,12 +1458,9 @@ def build_nn_dataset_multi(
     
     # Fallback to single path in config
     if not data_sources:
-        data_path = config.get('data_path')
+        data_path = get_primary_data_path(config)
         if not data_path:
-             # Try nested
-             if '01_construction' in config: data_path = config['01_construction'].get('src_h5')
-             if not data_path and 'shared' in config: data_path = config['shared'].get('src_h5')
-             if not data_path: data_path = './combined_data.h5'
+             data_path = './combined_data.h5'
              
         data_sources = {'': {'path': data_path, 'exclude_subjects': []}} # Empty prefix for default
         
@@ -2241,12 +2240,13 @@ def train_experiment(
     val_ds   = LazyWindowDataset(X_val,   Y_val,   window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=False)
     test_ds  = LazyWindowDataset(X_test,  Y_test,  window_size, window_output, stride, target_mode, est_tick_ranges=est_tick_ranges, augment=False)
     
-    num_workers = 2
+    num_workers = 0 if os.name == "nt" else 2
     pin_memory = torch.cuda.is_available()
+    persistent_workers = num_workers > 0
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=True)
-    val_loader   = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=True)
-    test_loader  = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=True)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=persistent_workers)
+    val_loader   = DataLoader(val_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=persistent_workers)
+    test_loader  = DataLoader(test_ds, batch_size=val_batch_size, shuffle=False, num_workers=num_workers, pin_memory=pin_memory, persistent_workers=persistent_workers)
     
     # input_dim from first series
     input_dim = X_train[0].shape[1]
@@ -2668,8 +2668,9 @@ def load_all_subject_data(config):
     """
     # ... (rest of the function remains same, just inserting above) ...
     data_sources = {}
-    if 'shared' in config and 'data_sources' in config['shared']:
-        for ds_name, ds_config in config['shared']['data_sources'].items():
+    resolved_sources = get_data_sources(config)
+    if resolved_sources:
+        for ds_name, ds_config in resolved_sources.items():
             prefix = ds_config.get('prefix', '')
             path = ds_config.get('path', '')
             exclude = ds_config.get('exclude_subjects', [])
@@ -2677,7 +2678,7 @@ def load_all_subject_data(config):
                  data_sources[prefix] = {'path': path, 'exclude_subjects': exclude}
     
     if not data_sources:
-        data_path = config.get('data_path', './combined_data.h5')
+        data_path = get_primary_data_path(config) or './combined_data.h5'
         data_sources = {'': {'path': data_path, 'exclude_subjects': []}}
 
     # ...
