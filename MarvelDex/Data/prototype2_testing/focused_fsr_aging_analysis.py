@@ -18,18 +18,21 @@ WINDOW_SEC = 5.0
 HEEL_CH = 2
 TOE_CH = 7
 
-PLOT_CONDITIONS = ["before_level", "after_level"]
+PLOT_CONDITIONS = ["before_level", "after_level", "last_level"]
 TEMPORAL_LABELS = {
     "before_level": "S1-Level (fresh)",
     "after_level": "S2-Level (aged)",
+    "last_level": "S3-Level (aged+)",
 }
 BODY_MASS_KG = {
     "before_level": 82.0,
     "after_level": 62.0,
+    "last_level": 61.8,
 }
 FILES = {
     "before_level": DATA_DIR / "before" / "level_075mps_lv0_01_processed.csv",
     "after_level": DATA_DIR / "after" / "level_075mps_lv0_01_processed.csv",
+    "last_level": DATA_DIR / "last" / "level_075mps_lv0_01_processed.csv",
 }
 
 LEFT_FSR = [f"LeftFSR{i}" for i in range(1, 15)]
@@ -73,17 +76,28 @@ def choose_arch_sensor(df: pd.DataFrame, onset: int, side: str) -> int:
     return best_sensor
 
 
+def choose_reference_arch_sensors(data: dict[str, pd.DataFrame]) -> dict[str, int]:
+    reference_condition = "before_level"
+    reference_df = data[reference_condition]
+    reference_onset = detect_walking_onset(reference_df)
+    return {
+        "Left": choose_arch_sensor(reference_df, reference_onset, "Left"),
+        "Right": choose_arch_sensor(reference_df, reference_onset, "Right"),
+    }
+
+
 def build_plot_cache(data: dict[str, pd.DataFrame], normalize_by_mass: bool) -> tuple[dict, float, float]:
     cache = {}
     channel_max = 0.0
     sum_max = 0.0
+    arch_sensor_map = choose_reference_arch_sensors(data)
 
     for condition in PLOT_CONDITIONS:
         df = data[condition]
         onset = detect_walking_onset(df)
         norm = BODY_MASS_KG[condition] if normalize_by_mass else 1.0
-        left_arch = choose_arch_sensor(df, onset, "Left")
-        right_arch = choose_arch_sensor(df, onset, "Right")
+        left_arch = arch_sensor_map["Left"]
+        right_arch = arch_sensor_map["Right"]
 
         time = np.arange(len(df), dtype=float) / SAMPLING_RATE
         start_idx = onset
@@ -130,7 +144,7 @@ def build_plot_cache(data: dict[str, pd.DataFrame], normalize_by_mass: bool) -> 
 
 def plot_time_series_panel(data: dict[str, pd.DataFrame], normalize_by_mass: bool, output_name: str) -> None:
     plot_cache, channel_max, sum_max = build_plot_cache(data, normalize_by_mass)
-    fig, axes = plt.subplots(len(PLOT_CONDITIONS), 3, figsize=(21, 6.2), sharex=False)
+    fig, axes = plt.subplots(len(PLOT_CONDITIONS), 3, figsize=(21, 12.4), sharex=False)
     if len(PLOT_CONDITIONS) == 1:
         axes = np.array([axes])
 
