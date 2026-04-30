@@ -1,0 +1,4 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_S2A5_feat_quat_load_coupling,1.84404,2.3708322,0.98273975,4.0,1.84404,0.0
+exp_S2A5_ctrl_quat_res_kin_power,1.9964179,2.5563066,0.9799335,5.0,1.9964179,0.0
+exp_S2A5_feat_quat_all_misalign,2.0043638,2.494348,0.98089445,4.0,2.0043638,0.0

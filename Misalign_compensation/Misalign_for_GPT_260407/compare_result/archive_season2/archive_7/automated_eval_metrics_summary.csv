@@ -1,0 +1,2 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S2A7_feat_worksplit_teacher_Test-m2_S008_seed42,experiments/archive_season2/archive_7/exp_S2A7_feat_worksplit_teacher_Test-m2_S008_seed42,1.7985439,2.270344,0.98417187,3.0,0.8912487

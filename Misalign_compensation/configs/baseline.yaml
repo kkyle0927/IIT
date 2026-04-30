@@ -1,7 +1,7 @@
 shared:
   data_sources:
     milestone2:
-      path: /home/chanyoungko/IIT/SpeedEstimation/combined_data.h5
+      path: /home/chanyoungko/IIT/Databank/combined_data_S008.h5
       prefix: m2_
       exclude_subjects: []
   subjects: &id004

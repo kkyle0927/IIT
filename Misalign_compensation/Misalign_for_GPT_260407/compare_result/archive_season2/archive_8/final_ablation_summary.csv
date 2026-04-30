@@ -1,0 +1,8 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_S2A8_feat_short_worksplit_teacher,1.9100586,2.434216,0.9818045,1.5,1.9100586,0.0
+exp_S2A8_feat_norm_load_coupling_teacher,1.9179635,2.4534407,0.98151594,2.0,1.9179635,0.0
+exp_S2A8_feat_trunk_consistency_teacher,1.9233067,2.4514592,0.9815458,3.5,1.9233067,0.0
+exp_S2A8_feat_norm_worksplit_teacher,1.9277467,2.4646277,0.981347,0.5,1.9277467,0.0
+exp_S2A8_feat_lag_teacher,1.9989169,2.5367417,0.9802395,5.5,1.9989169,0.0
+exp_S2A8_feat_normload_worksplit_teacher,2.0738096,2.608057,0.9791128,4.0,2.0738096,0.0
+exp_S2A8_ctrl_teacher_kinpower,2.2360759,2.807682,0.97579294,2.5,2.2360759,0.0

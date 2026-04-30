@@ -1,0 +1,368 @@
+{
+    "test_huber": 2.454567084295882,
+    "test_mae": 2.480290412902832,
+    "test_rmse": 3.1118783950805664,
+    "n_params": 224072,
+    "model_size_mb": 0.8548,
+    "host_latency_ms": 2.4113,
+    "host_max_freq_hz": 414.71,
+    "config": {
+        "shared": {
+            "data_sources": {
+                "milestone2": {
+                    "path": "/home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5",
+                    "prefix": "m2_",
+                    "exclude_subjects": []
+                }
+            },
+            "subjects": [
+                "m2_S001",
+                "m2_S002",
+                "m2_S003",
+                "m2_S004",
+                "m2_S005",
+                "m2_S006",
+                "m2_S007",
+                "m2_S008"
+            ],
+            "conditions": [
+                "level_075mps",
+                "level_100mps",
+                "level_125mps",
+                "accel_sine",
+                "decline_5deg",
+                "incline_10deg",
+                "stopandgo"
+            ],
+            "input_vars": [
+                [
+                    "derived/euler",
+                    [
+                        "roll",
+                        "pitch",
+                        "yaw"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "hip_angle"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "hip_angle"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "torque"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "torque"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "thigh_angle"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "thigh_angle"
+                    ]
+                ],
+                [
+                    "robot/back_imu",
+                    [
+                        "quat_w",
+                        "quat_x",
+                        "quat_y",
+                        "quat_z"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "thigh_angle_dot",
+                        "torque_dot"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "thigh_angle_dot",
+                        "torque_dot"
+                    ]
+                ],
+                [
+                    "derived/mech_power",
+                    [
+                        "left",
+                        "right"
+                    ]
+                ]
+            ],
+            "output_vars": [
+                [
+                    "mocap/kin_q",
+                    [
+                        "hip_flexion_l",
+                        "hip_flexion_r"
+                    ]
+                ]
+            ],
+            "data": {
+                "window_size": 200,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": true,
+                "calibrate_robot_thigh": true,
+                "residual_target": true
+            },
+            "model": {
+                "type": "TCN",
+                "channels": [
+                    32,
+                    64,
+                    64,
+                    128
+                ],
+                "kernel_size": 5,
+                "dropout": 0.15,
+                "use_norm": true,
+                "head_hidden": [
+                    64
+                ],
+                "head_dropout": 0.15,
+                "model_norm": "layer"
+            }
+        },
+        "02_train": {
+            "data": {
+                "window_size": 200,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": true,
+                "calibrate_robot_thigh": true,
+                "normalize_type": "standard",
+                "residual_target": true
+            },
+            "model": {
+                "type": "TCN",
+                "channels": [
+                    32,
+                    64,
+                    64,
+                    128
+                ],
+                "kernel_size": 5,
+                "dropout": 0.15,
+                "use_norm": true,
+                "head_hidden": [
+                    64
+                ],
+                "head_dropout": 0.15,
+                "model_norm": "layer"
+            },
+            "loader": {
+                "batch_size": 128,
+                "val_batch_size": 256
+            },
+            "train": {
+                "task_type": "regression",
+                "epochs": 30,
+                "lr": 0.001,
+                "wd": 0.01,
+                "amp": true,
+                "device": "cuda",
+                "save_dir": "./runs_tcn",
+                "early_stop_patience": 10,
+                "early_stop_min_delta": 0.0001,
+                "early_stop_warmup": 10,
+                "k_fold": 4,
+                "cos_T0": 10,
+                "cos_Tmult": 1,
+                "eta_min": 1e-05,
+                "augment_noise_std": 0.01
+            }
+        },
+        "03_eval": {
+            "split": {
+                "mode": "loso",
+                "level": "subject",
+                "seed": 99,
+                "ratio": [
+                    0.7,
+                    0.15,
+                    0.15
+                ],
+                "save_to": null,
+                "loso_subjects": [
+                    "m2_S001",
+                    "m2_S002",
+                    "m2_S003",
+                    "m2_S004",
+                    "m2_S005",
+                    "m2_S006",
+                    "m2_S007",
+                    "m2_S008"
+                ]
+            },
+            "data": {
+                "window_size": 200,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": true,
+                "calibrate_robot_thigh": true,
+                "residual_target": true
+            },
+            "train": {
+                "device": "cuda"
+            },
+            "scaler_path": "./runs_tcn/scaler.npz"
+        },
+        "exp_name": "exp_S2A6R_ctrl_teacher_kinpower_seed99",
+        "cv_mode": "loso",
+        "subjects": [
+            "m2_S001",
+            "m2_S002",
+            "m2_S003",
+            "m2_S004",
+            "m2_S005",
+            "m2_S006",
+            "m2_S007",
+            "m2_S008"
+        ],
+        "conditions": [
+            "level_075mps",
+            "level_100mps",
+            "level_125mps",
+            "accel_sine",
+            "decline_5deg",
+            "incline_10deg",
+            "stopandgo"
+        ],
+        "input_vars": [
+            [
+                "derived/euler",
+                [
+                    "roll",
+                    "pitch",
+                    "yaw"
+                ]
+            ],
+            [
+                "robot/left",
+                [
+                    "hip_angle"
+                ]
+            ],
+            [
+                "robot/right",
+                [
+                    "hip_angle"
+                ]
+            ],
+            [
+                "robot/left",
+                [
+                    "torque"
+                ]
+            ],
+            [
+                "robot/right",
+                [
+                    "torque"
+                ]
+            ],
+            [
+                "robot/left",
+                [
+                    "thigh_angle"
+                ]
+            ],
+            [
+                "robot/right",
+                [
+                    "thigh_angle"
+                ]
+            ],
+            [
+                "robot/back_imu",
+                [
+                    "quat_w",
+                    "quat_x",
+                    "quat_y",
+                    "quat_z"
+                ]
+            ],
+            [
+                "robot/left",
+                [
+                    "thigh_angle_dot",
+                    "torque_dot"
+                ]
+            ],
+            [
+                "robot/right",
+                [
+                    "thigh_angle_dot",
+                    "torque_dot"
+                ]
+            ],
+            [
+                "derived/mech_power",
+                [
+                    "left",
+                    "right"
+                ]
+            ]
+        ],
+        "output_vars": [
+            [
+                "mocap/kin_q",
+                [
+                    "hip_flexion_l",
+                    "hip_flexion_r"
+                ]
+            ]
+        ],
+        "data_path": "/home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5",
+        "est_tick_ranges": [
+            0
+        ],
+        "_config_relpath": "archive_season2/archive_6/exp_S2A6R_ctrl_teacher_kinpower_seed99.yaml",
+        "tcn_channels": [
+            32,
+            64,
+            64,
+            128
+        ]
+    }
+}

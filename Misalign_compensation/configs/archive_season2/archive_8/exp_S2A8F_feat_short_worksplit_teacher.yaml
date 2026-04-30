@@ -1,0 +1,27 @@
+shared:
+  data_sources: {milestone2: {path: /home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5, prefix: m2_, exclude_subjects: []}}
+  subjects: &subjects [m2_S001, m2_S002, m2_S003, m2_S004, m2_S005, m2_S006, m2_S007, m2_S008]
+  conditions: [level_075mps, level_100mps, level_125mps, accel_sine, decline_5deg, incline_10deg, stopandgo]
+  input_vars:
+    - [derived/euler, [roll, pitch, yaw]]
+    - [robot/left, [hip_angle, torque, thigh_angle, thigh_angle_dot, torque_dot]]
+    - [robot/right, [hip_angle, torque, thigh_angle, thigh_angle_dot, torque_dot]]
+    - [robot/back_imu, [quat_w, quat_x, quat_y, quat_z]]
+    - [derived/mech_power, [left, right]]
+    - [derived/interface_workloop, [left_pos_work_short, right_pos_work_short, left_neg_work_short, right_neg_work_short, left_work_balance_short, right_work_balance_short, left_net_work_ratio_short, right_net_work_ratio_short]]
+  output_vars: [[mocap/kin_q, [hip_flexion_l, hip_flexion_r]]]
+  data: &shared_data {window_size: 200, stride: 5, stride_inf: 1, y_delay: 0, est_tick_ranges: &ticks [0], normalize: true, time_window_output: 1, use_complementary_filter_euler: true, calibrate_robot_thigh: true, residual_target: true}
+  model: &teacher_model {type: TCN, channels: [32, 64, 64, 128], kernel_size: 5, dropout: 0.15, use_norm: true, head_hidden: [64], head_dropout: 0.15, model_norm: layer}
+02_train:
+  data: {window_size: 200, stride: 5, stride_inf: 1, y_delay: 0, est_tick_ranges: *ticks, normalize: true, time_window_output: 1, use_complementary_filter_euler: true, calibrate_robot_thigh: true, normalize_type: standard, residual_target: true}
+  model: *teacher_model
+  loader: {batch_size: 128, val_batch_size: 256}
+  train: {task_type: regression, epochs: 30, lr: 0.001, wd: 0.01, amp: true, device: cuda, save_dir: ./runs_tcn, early_stop_patience: 10, early_stop_min_delta: 1.0e-04, early_stop_warmup: 10, k_fold: 4, cos_T0: 10, cos_Tmult: 1, eta_min: 1.0e-05, augment_noise_std: 0.01}
+03_eval:
+  split: {mode: loso, level: subject, seed: 42, ratio: [0.7, 0.15, 0.15], save_to: null, loso_subjects: [m2_S001, m2_S002, m2_S003, m2_S004, m2_S005, m2_S006, m2_S007, m2_S008]}
+  data: *shared_data
+  train: {device: cuda}
+  scaler_path: ./runs_tcn/scaler.npz
+exp_name: exp_S2A8F_feat_short_worksplit_teacher
+cv_mode: loso
+subjects: *subjects

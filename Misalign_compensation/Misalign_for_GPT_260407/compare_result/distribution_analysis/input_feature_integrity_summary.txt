@@ -1,0 +1,52 @@
+Condition: level_100mps/lv0/trial_01
+
+Lowest median pattern-similarity features:
+- mech_power_right: autocorr=0.992, trace=0.249, periodicity=0.102
+- mech_power_left: autocorr=0.993, trace=0.266, periodicity=0.089
+- right_torque: autocorr=0.993, trace=0.305, periodicity=0.098
+- left_torque: autocorr=0.992, trace=0.307, periodicity=0.098
+- asymmetry_torque_diff: autocorr=0.993, trace=0.312, periodicity=0.104
+- global_accel_x_overground: autocorr=0.865, trace=0.310, periodicity=0.393
+- global_accel_y_overground: autocorr=0.870, trace=0.299, periodicity=0.454
+- a_tread: autocorr=0.970, trace=0.341, periodicity=0.320
+
+Flagged subject-feature pairs:
+- a_tread / S005: range_z=0.52, freq_z=3.81, periodicity_z=-0.75, autocorr_z=-26.53, trace_z=-0.48
+- asymmetry_hip_diff / S002: range_z=0.78, freq_z=-1.61, periodicity_z=-1.32, autocorr_z=-3.61, trace_z=-0.80
+- asymmetry_hip_diff / S003: range_z=4.74, freq_z=-0.10, periodicity_z=0.66, autocorr_z=0.23, trace_z=-1.25
+- asymmetry_hip_diff / S005: range_z=0.07, freq_z=2.09, periodicity_z=2.01, autocorr_z=-7.93, trace_z=-0.22
+- asymmetry_hip_diff / S007: range_z=-0.56, freq_z=2.27, periodicity_z=0.38, autocorr_z=-3.70, trace_z=0.55
+- asymmetry_thigh_diff / S002: range_z=0.79, freq_z=-1.61, periodicity_z=-1.32, autocorr_z=-3.61, trace_z=-0.80
+- asymmetry_thigh_diff / S003: range_z=4.74, freq_z=-0.10, periodicity_z=0.65, autocorr_z=0.23, trace_z=-1.25
+- asymmetry_thigh_diff / S005: range_z=0.05, freq_z=2.09, periodicity_z=2.01, autocorr_z=-7.93, trace_z=-0.22
+- asymmetry_thigh_diff / S007: range_z=-0.56, freq_z=2.27, periodicity_z=0.38, autocorr_z=-3.70, trace_z=0.55
+- asymmetry_torque_diff / S002: range_z=0.50, freq_z=-5.05, periodicity_z=-1.28, autocorr_z=-2.39, trace_z=0.84
+- asymmetry_torque_diff / S003: range_z=1.58, freq_z=30.81, periodicity_z=-0.23, autocorr_z=-0.30, trace_z=-2.20
+- deflection_left / S002: range_z=5.27, freq_z=20.76, periodicity_z=-9.93, autocorr_z=-18.97, trace_z=-0.73
+- deflection_left / S005: range_z=-1.24, freq_z=2.72, periodicity_z=4.01, autocorr_z=-8.36, trace_z=-0.32
+- deflection_left / S007: range_z=-1.19, freq_z=1.36, periodicity_z=0.11, autocorr_z=-3.60, trace_z=-0.62
+- deflection_right / S002: range_z=5.32, freq_z=20.76, periodicity_z=-9.50, autocorr_z=-18.88, trace_z=-0.67
+- deflection_right / S005: range_z=-1.19, freq_z=2.72, periodicity_z=3.60, autocorr_z=-8.36, trace_z=-0.39
+- deflection_right / S007: range_z=-1.13, freq_z=1.36, periodicity_z=-0.02, autocorr_z=-3.61, trace_z=-1.02
+- euler_pitch / S003: range_z=0.12, freq_z=-5.11, periodicity_z=1.10, autocorr_z=-1.44, trace_z=-1.99
+- euler_pitch / S008: range_z=0.94, freq_z=-8.34, periodicity_z=2.46, autocorr_z=0.89, trace_z=-0.20
+- euler_roll / S002: range_z=8.41, freq_z=-1.61, periodicity_z=-0.96, autocorr_z=-5.11, trace_z=0.05
+- euler_roll / S005: range_z=-4.32, freq_z=3.94, periodicity_z=1.45, autocorr_z=-9.19, trace_z=-0.48
+- euler_roll / S006: range_z=-4.16, freq_z=1.12, periodicity_z=1.26, autocorr_z=-0.13, trace_z=1.06
+- euler_yaw / S002: range_z=-1.43, freq_z=-1.61, periodicity_z=-2.40, autocorr_z=-7.53, trace_z=-2.30
+- euler_yaw / S006: range_z=-1.64, freq_z=1.12, periodicity_z=0.24, autocorr_z=0.09, trace_z=-10.83
+- global_accel_y_overground / S005: range_z=0.66, freq_z=3.94, periodicity_z=-0.84, autocorr_z=-1.60, trace_z=0.44
+- global_accel_y_overground / S006: range_z=1.06, freq_z=1.12, periodicity_z=1.67, autocorr_z=-0.22, trace_z=-3.76
+- left_hip_angle / S002: range_z=-0.39, freq_z=-1.61, periodicity_z=2.05, autocorr_z=-3.59, trace_z=-1.18
+- left_hip_angle / S003: range_z=5.02, freq_z=-0.10, periodicity_z=1.78, autocorr_z=0.22, trace_z=-1.45
+- left_hip_angle / S005: range_z=4.39, freq_z=2.09, periodicity_z=-0.79, autocorr_z=-7.67, trace_z=-0.55
+- left_hip_angle / S007: range_z=-0.76, freq_z=2.27, periodicity_z=-0.14, autocorr_z=-3.57, trace_z=0.33
+- left_thigh_angle / S002: range_z=-0.99, freq_z=-1.61, periodicity_z=3.36, autocorr_z=-3.57, trace_z=-0.89
+- left_thigh_angle / S005: range_z=1.72, freq_z=2.09, periodicity_z=-0.52, autocorr_z=-7.67, trace_z=-0.46
+- left_thigh_angle / S007: range_z=-0.94, freq_z=2.27, periodicity_z=-0.52, autocorr_z=-3.58, trace_z=0.35
+- mech_power_right / S004: range_z=0.72, freq_z=0.72, periodicity_z=1.80, autocorr_z=-6.34, trace_z=-0.03
+- right_hip_angle / S002: range_z=-1.01, freq_z=-1.61, periodicity_z=0.92, autocorr_z=-3.57, trace_z=-0.84
+- right_hip_angle / S005: range_z=0.85, freq_z=2.09, periodicity_z=-4.30, autocorr_z=-7.42, trace_z=-0.49
+- right_thigh_angle / S002: range_z=-1.39, freq_z=-1.61, periodicity_z=0.37, autocorr_z=-3.51, trace_z=-0.83
+- right_thigh_angle / S005: range_z=0.82, freq_z=2.09, periodicity_z=-1.41, autocorr_z=-7.27, trace_z=-0.47
+- right_torque / S005: range_z=0.67, freq_z=-0.19, periodicity_z=2.05, autocorr_z=-4.18, trace_z=-0.65
