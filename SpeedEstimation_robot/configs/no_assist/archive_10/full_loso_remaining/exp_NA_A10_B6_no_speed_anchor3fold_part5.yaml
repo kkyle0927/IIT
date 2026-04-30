@@ -1,0 +1,105 @@
+exp_name: exp_NA_A10_B6_no_speed_anchor3fold_screen_noassist
+cv_mode: loso
+shared:
+  data_sources:
+    milestone2:
+      path: ../combined_data_S008.h5
+      prefix: m2_
+      exclude_subjects: []
+  subjects: [m2_S001, m2_S002, m2_S003, m2_S004, m2_S005, m2_S006, m2_S007, m2_S008]
+  conditions: [level_075mps, level_100mps, level_125mps, accel_sine, decline_5deg, incline_10deg, stopandgo]
+  input_vars:
+    - [derived/tilt_tvcf_imu_2d_og, [acc_hx, acc_hy, acc_up, gyro_hx, gyro_hy, gyro_up, roll_cf, pitch_cf]]
+    - [derived/tilt_tvcf_velocity_2d_og, [vel_hx, vel_hy]]
+    - [derived/tilt_tvcf_summary_2d_og, [acc_h_mag, vel_h_mag]]
+    - [robot/left, [hip_angle, hip_angle_linvel]]
+    - [robot/right, [hip_angle, hip_angle_linvel]]
+    - [derived/robot_biomech_rt, [cadence_mean]]
+  output_vars:
+    - [common, [speed_y]]
+  lpf_cutoff: 0.5
+  lpf_order: 4
+  target_lpf_mode: zero_phase
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges: [5]
+    normalize: true
+    time_window_output: 1
+    level_selection:
+      include: [lv0]
+  model: &model
+    type: CausalSmoothTCN_GRU
+    channels: &channels [16, 16, 32, 32]
+    kernel_size: 5
+    dropout: 0.15
+    use_norm: true
+    head_hidden: [20]
+    head_dropout: 0.2
+    model_norm: batch
+    use_input_norm: true
+    input_norm_type: instance
+    gru_hidden: 12
+    smooth_window: 9
+02_train:
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges: [5]
+    normalize: true
+    time_window_output: 1
+    normalize_type: standard
+    use_physical_velocity_model: false
+    use_gait_phase: false
+    level_selection:
+      include: [lv0]
+  model: *model
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  train:
+    task_type: regression
+    loss: huber
+    huber_delta: 0.1
+    epochs: 18
+    lr: 0.001
+    wd: 0.001
+    amp: true
+    device: cuda
+    save_dir: ./runs_tcn
+    early_stop_patience: 6
+    early_stop_min_delta: 0.0001
+    early_stop_warmup: 4
+    k_fold: 4
+    cos_T0: 10
+    cos_Tmult: 1
+    eta_min: 1.0e-05
+    augment_noise_std: 0.02
+    allow_tf32: true
+    cudnn_benchmark: true
+    clear_cuda_cache_each_epoch: false
+03_eval:
+  split:
+    mode: loso
+    level: subject
+    seed: 42
+    ratio: [0.7, 0.15, 0.15]
+    save_to: null
+    loso_subjects: [m2_S005, m2_S006, m2_S007]
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges: [5]
+    normalize: true
+    time_window_output: 1
+    level_selection:
+      include: [lv0]
+  train:
+    device: cuda
+  scaler_path: ./runs_tcn/scaler.npz

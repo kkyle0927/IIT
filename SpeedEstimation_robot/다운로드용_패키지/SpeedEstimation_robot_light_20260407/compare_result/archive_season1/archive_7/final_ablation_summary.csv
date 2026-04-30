@@ -1,0 +1,3 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_L6_bounded_residual_biasloss,0.0505846,0.09498251,0.93220246,44.5,0.0505846,0.0
+exp_L4_affine_calibration_kinematics_first,0.05777909,0.09857617,0.9269752,33.5,0.05777909,0.0

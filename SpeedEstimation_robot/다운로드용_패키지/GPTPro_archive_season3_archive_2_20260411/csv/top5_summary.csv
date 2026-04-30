@@ -1,0 +1,7 @@
+rank,short_name,experiment_name,model_type,test_mae,test_rmse,latency_ms,deploy_comment
+1,P6,exp_S3A2_P6_switch_dualhead_Test-m2_S008_seed42,AssistSwitchHeadTCN_GRU,0.05223155,0.08372440,5.3346,Best overall accuracy with moderate latency
+2,P4,exp_S3A2_P4_onbias_corrector_Test-m2_S008_seed42,AssistOnBiasCorrectorTCN_GRU,0.05604428,0.08756451,5.0570,Strong bias correction and still deployable
+3,P7,exp_S3A2_P7_regime_mixture_Test-m2_S008_seed42,RegimeExpertTCN_GRU,0.05732040,0.08875183,5.2342,Competitive but not better than P6/P4
+4,R1,exp_S3A2_R1_d1_reference_Test-m2_S008_seed42,PersistentBiasTCN_GRU,0.05769416,0.08653927,15.9556,Strong reference but much slower
+5,P8,exp_S3A2_P8_split_off_on_Test-m2_S008_seed42,AssistSplitTCN_GRU,0.06261187,0.09182534,8.9939,Full split underperforms routed variants
+

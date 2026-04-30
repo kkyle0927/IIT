@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_G2_fullkin_multiscale,0.06090623,0.109577134,0.9097668,30.0,0.06090623,0.0

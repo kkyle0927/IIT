@@ -1,0 +1,2 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_K4_deflection_power_multibranch_Test-m2_S008_seed42,experiments/exp_K4_deflection_power_multibranch_Test-m2_S008_seed42,0.05817549,0.10700316,0.91395617,43.0,0.0033840116

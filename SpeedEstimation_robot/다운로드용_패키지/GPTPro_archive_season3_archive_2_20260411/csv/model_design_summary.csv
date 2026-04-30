@@ -1,0 +1,6 @@
+short_name,model_type,core_structure,fast_path_raw_torque,assist_handling,window_size,latency_ms
+P6,AssistSwitchHeadTCN_GRU,Shared backbone plus assist on/off switched heads,no,assist on/off routing with shared representation,300,5.3346
+P4,AssistOnBiasCorrectorTCN_GRU,Nominal predictor plus stronger assist-on bias corrector,no,assist-on slow bias correction,300,5.0570
+P7,RegimeExpertTCN_GRU,Shared encoding with regime-specific experts,no,regime mixture via assist context,300,5.2342
+R1,PersistentBiasTCN_GRU,Streaming-like persistent slow bias state,no,persistent slow calibration state,300,15.9556
+P8,AssistSplitTCN_GRU,Full split assist-off and assist-on models,no,hard split by assist state,300,8.9939

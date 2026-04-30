@@ -1,0 +1,3 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_NA_A8_D6_full_loso_noassist_part1,0.037576042,0.057036534,0.97322446,-13.375,0.037576042,0.0
+exp_NA_A8_D6_full_loso_noassist_part2,0.08335946,0.11333128,0.8957912,-29.50892857142857,0.08335946,0.0

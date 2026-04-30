@@ -1,0 +1,31 @@
+path,type,notes
+S001,group,subject root
+S001/sub_info,group,subject metadata
+S001/sub_info/age,dataset,scalar subject metadata
+S001/sub_info/height,dataset,scalar subject metadata
+S001/sub_info/sex,dataset,scalar subject metadata
+S001/sub_info/weight,dataset,scalar subject metadata
+S001/sub_info/left,group,left anthropometry
+S001/sub_info/right,group,right anthropometry
+S001/level_100mps,group,condition root
+S001/level_100mps/lv4,group,assist/level bucket
+S001/level_100mps/lv4/trial_01,group,trial root
+S001/level_100mps/lv4/trial_01/common,group,reference/common signals
+S001/level_100mps/lv4/trial_01/common/v_Y_true,dataset,target speed semantics used by project
+S001/level_100mps/lv4/trial_01/common/a_Y_true,dataset,reference acceleration
+S001/level_100mps/lv4/trial_01/common/time,dataset,time vector
+S001/level_100mps/lv4/trial_01/common/assist_level,dataset,present in H5 but not used directly as input
+S001/level_100mps/lv4/trial_01/robot,group,robot and IMU inputs
+S001/level_100mps/lv4/trial_01/robot/back_imu,group,trunk IMU
+S001/level_100mps/lv4/trial_01/robot/back_imu/accel_x,dataset,raw trunk IMU acceleration
+S001/level_100mps/lv4/trial_01/robot/back_imu/gyro_x,dataset,raw trunk IMU gyro
+S001/level_100mps/lv4/trial_01/robot/back_imu/quat_w,dataset,raw trunk IMU quaternion
+S001/level_100mps/lv4/trial_01/robot/left,group,left exoskeleton signals
+S001/level_100mps/lv4/trial_01/robot/left/hip_angle,dataset,raw exoskeleton signal
+S001/level_100mps/lv4/trial_01/robot/left/thigh_angle,dataset,raw exoskeleton signal
+S001/level_100mps/lv4/trial_01/robot/left/motor_angle,dataset,raw exoskeleton signal
+S001/level_100mps/lv4/trial_01/robot/left/torque,dataset,raw exoskeleton signal
+S001/level_100mps/lv4/trial_01/robot/right,group,right exoskeleton signals
+S001/level_100mps/lv4/trial_01/treadmill,group,treadmill signals present in raw data
+S001/level_100mps/lv4/trial_01/forceplate,group,privileged reference modality
+S001/level_100mps/lv4/trial_01/mocap,group,privileged reference modality

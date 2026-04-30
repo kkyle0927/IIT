@@ -1,0 +1,52 @@
+[
+  {
+    "rank": 1,
+    "short_name": "P6",
+    "experiment_name": "exp_S3A2_P6_switch_dualhead_Test-m2_S008_seed42",
+    "model_type": "AssistSwitchHeadTCN_GRU",
+    "test_mae": 0.05223155,
+    "test_rmse": 0.08372440,
+    "latency_ms": 5.3346,
+    "takeaway": "Best overall accuracy; strong candidate for accuracy-best and deployable-best."
+  },
+  {
+    "rank": 2,
+    "short_name": "P4",
+    "experiment_name": "exp_S3A2_P4_onbias_corrector_Test-m2_S008_seed42",
+    "model_type": "AssistOnBiasCorrectorTCN_GRU",
+    "test_mae": 0.05604428,
+    "test_rmse": 0.08756451,
+    "latency_ms": 5.0570,
+    "takeaway": "Simpler bias-correction style model; likely strongest offset-focused alternative."
+  },
+  {
+    "rank": 3,
+    "short_name": "P7",
+    "experiment_name": "exp_S3A2_P7_regime_mixture_Test-m2_S008_seed42",
+    "model_type": "RegimeExpertTCN_GRU",
+    "test_mae": 0.05732040,
+    "test_rmse": 0.08875183,
+    "latency_ms": 5.2342,
+    "takeaway": "Competitive but not clearly better than switch-dualhead or on-bias corrector."
+  },
+  {
+    "rank": 4,
+    "short_name": "R1",
+    "experiment_name": "exp_S3A2_R1_d1_reference_Test-m2_S008_seed42",
+    "model_type": "PersistentBiasTCN_GRU",
+    "test_mae": 0.05769416,
+    "test_rmse": 0.08653927,
+    "latency_ms": 15.9556,
+    "takeaway": "Very strong RMSE reference, but substantially slower."
+  },
+  {
+    "rank": 5,
+    "short_name": "P8",
+    "experiment_name": "exp_S3A2_P8_split_off_on_Test-m2_S008_seed42",
+    "model_type": "AssistSplitTCN_GRU",
+    "test_mae": 0.06261187,
+    "test_rmse": 0.09182534,
+    "latency_ms": 8.9939,
+    "takeaway": "Full split model underperforms routed/shared-backbone variants."
+  }
+]

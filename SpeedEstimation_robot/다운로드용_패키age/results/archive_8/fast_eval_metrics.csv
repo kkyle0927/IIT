@@ -1,0 +1,9 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S001_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S001_seed42,0.033286545,0.052133832,0.97873056,-34.44444444444444,0.002948285
+exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S002_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S002_seed42,0.03697794,0.058750886,0.97024816,-26.0,0.002833505
+exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S003_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S003_seed42,0.03946567,0.05874154,0.97196865,22.5,0.0028428435
+exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S004_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part1_Test-m2_S004_seed42,0.04057402,0.05851987,0.9719505,-15.555555555555555,0.0029685788
+exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S005_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S005_seed42,0.12314695,0.16272517,0.7988074,-50.0,0.0038522228
+exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S006_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S006_seed42,0.08233095,0.10981123,0.91466075,-24.285714285714285,0.0040727584
+exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S007_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S007_seed42,0.06608347,0.095745,0.92765504,-26.25,0.0033566928
+exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S008_seed42,experiments/exp_NA_A8_D6_full_loso_noassist_part2_Test-m2_S008_seed42,0.061876465,0.08504372,0.9420416,-17.5,0.0032540038

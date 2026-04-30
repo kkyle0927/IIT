@@ -1,0 +1,21 @@
+I am attaching a compact review packet for `SpeedEstimation_robot`, specifically `archive_season3/archive_2`.
+
+Please read:
+1. README.md
+2. overview.md
+3. notes/key_findings.md
+4. csv/top5_summary.csv
+5. csv/lv4_lv7_offset_focus.csv
+6. the plots for P6, P4, P7, R1, and P8
+
+Important constraints:
+- final target is LPF(common/speed_y), not treadmill speed
+- inputs must remain causal / online-feasible
+- no mocap, GRF, or direct treadmill speed input
+- no common/assist_level as inference input
+
+Please focus on:
+- which model really reduces the plateau offset in level_100 / level_125, especially lv4 and lv7
+- whether assist on/off routing is a robust structural fix or just a shortcut
+- what next experiment should be prioritized for better steady offset reduction without losing fast dynamics
+

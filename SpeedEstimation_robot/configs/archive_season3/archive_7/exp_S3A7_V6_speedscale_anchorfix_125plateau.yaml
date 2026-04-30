@@ -1,0 +1,287 @@
+exp_name: exp_S3A7_V6_speedscale_anchorfix_125plateau
+cv_mode: loso
+shared:
+  data_sources:
+    milestone2:
+      path: ../combined_data_S008.h5
+      prefix: m2_
+      exclude_subjects: []
+  subjects:
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+  conditions:
+  - level_075mps
+  - level_100mps
+  - level_125mps
+  - accel_sine
+  - decline_5deg
+  - incline_10deg
+  - stopandgo
+  input_vars:
+  - - derived/body_frame_imu
+    - - accel_right
+      - accel_forward
+      - accel_up
+      - gyro_right
+      - gyro_forward
+      - gyro_up
+      - forward_accel_overground
+  - - derived/imu_integrated_speed
+    - - imu_integrated_speed
+  - - robot/left
+    - - hip_angle
+      - hip_angle_dot
+      - hip_angle_ddot
+      - thigh_angle
+      - thigh_angle_dot
+      - thigh_angle_ddot
+  - - robot/right
+    - - hip_angle
+      - hip_angle_dot
+      - hip_angle_ddot
+      - thigh_angle
+      - thigh_angle_dot
+      - thigh_angle_ddot
+  - - derived/robot_biomech_rt
+    - - cadence_l
+      - cadence_r
+      - cadence_mean
+      - step_time_mean
+      - hip_excursion_rms
+      - thigh_excursion_rms
+      - hip_sep_excursion_rms
+      - thigh_sep_excursion_rms
+      - trunk_pitch
+      - trunk_pitch_rate
+      - trunk_pitch_rms
+      - trunk_harmonic_ratio
+      - step_length_proxy
+      - step_length_proxy_norm
+      - speed_anchor_geom
+      - pseudo_speed_robot
+      - imu_anchor_speed_rt
+      - anchor_diff_imu_geom
+      - anchor_diff_imu_pseudo
+      - anchor_confidence
+      - plateau_confidence
+      - anchor_consensus_speed
+      - anchor_consensus_spread
+      - highspeed_anchor_hint
+  - - derived/wo_priors_rt
+    - - vel_forward_cf
+      - stride_speed_wo
+      - roll_cf
+      - pitch_cf
+      - interaction_work_pos_wo
+      - interaction_work_neg_wo
+      - contact_prob_l_fusion_wo
+      - contact_prob_r_fusion_wo
+  - - sub_info
+    - - height
+      - weight
+      - leg_length_mean
+      - leg_length_diff
+  - - derived/robot_biomech_rt
+    - - hip_power_l
+      - hip_power_r
+      - thigh_power_l
+      - thigh_power_r
+      - power_prop_sum
+      - power_brake_sum
+      - motor_power_l
+      - motor_power_r
+      - deflection_rms_l
+      - deflection_rms_r
+      - stiffness_proxy_sum
+      - damping_proxy_sum
+      - torque_abs_ema_fast_sum
+      - torque_abs_ema_slow_sum
+      - torque_signed_ema_fast_sum
+      - torque_signed_ema_slow_sum
+      - assist_proxy_sum
+      - torque_stride_impulse_sum
+      - torque_preview_sum_100ms
+      - torque_preview_delta_sum_100ms
+      - stiffness_proxy_l
+      - stiffness_proxy_r
+      - assist_active_flag
+      - assist_high_flag
+      - assist_intensity_norm
+      - time_since_assist_on
+      - time_since_assist_off
+      - assist_duty_cycle_1s
+      - assist_duty_cycle_3s
+      - assist_duty_cycle_5s
+      - positive_work_ema_fast
+      - positive_work_ema_slow
+      - work_norm_cadence
+      - work_norm_excursion
+      - work_norm_step_time
+  - - derived/wo_priors_rt
+    - - interaction_power_l_wo
+      - interaction_power_r_wo
+      - contact_prob_l_phase_wo
+      - contact_prob_r_phase_wo
+      - yaw_cf
+  output_vars:
+  - - common
+    - - speed_y
+  lpf_cutoff: 0.5
+  lpf_order: 4
+  target_lpf_mode: zero_phase
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges:
+    - 5
+    normalize: true
+    time_window_output: 1
+  model:
+    type: SpeedScaleSwitchTCN_GRU
+    gru_hidden: 32
+    channels:
+    - 24
+    - 24
+    - 48
+    - 48
+    branch_channels: &id001
+    - 28
+    - 32
+    - 56
+    - 64
+    branch_input_dims: &id002
+    - 20
+    - 36
+    - 40
+    kernel_size: 5
+    dropout: 0.15
+    head_hidden:
+    - 64
+    head_dropout: 0.25
+    model_norm: batch
+    use_input_norm: true
+    input_norm_type: instance
+    bias_scale: 0.1
+    residual_scale: 0.035
+    gate_temperature: 0.95
+    on_scale: 0.18
+    off_scale: 0.03
+    hard_switch: false
+    ar_feedback:
+      enable: false
+    low_scale: 0.04
+    high_scale: 0.16
+    speed_temperature: 0.9
+02_train:
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges:
+    - 5
+    normalize: true
+    time_window_output: 1
+    normalize_type: standard
+  model:
+    type: SpeedScaleSwitchTCN_GRU
+    gru_hidden: 32
+    channels:
+    - 24
+    - 24
+    - 48
+    - 48
+    branch_channels: *id001
+    branch_input_dims: *id002
+    kernel_size: 5
+    dropout: 0.15
+    head_hidden:
+    - 64
+    head_dropout: 0.25
+    model_norm: batch
+    use_input_norm: true
+    input_norm_type: instance
+    bias_scale: 0.1
+    residual_scale: 0.035
+    gate_temperature: 0.95
+    on_scale: 0.18
+    off_scale: 0.03
+    hard_switch: false
+    ar_feedback:
+      enable: false
+    low_scale: 0.04
+    high_scale: 0.16
+    speed_temperature: 0.9
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  train:
+    task_type: regression
+    loss: huber
+    huber_delta: 0.1
+    epochs: 30
+    lr: 0.0008
+    wd: 0.001
+    amp: true
+    device: cuda
+    save_dir: ./runs_tcn
+    early_stop_patience: 10
+    early_stop_min_delta: 0.0001
+    early_stop_warmup: 8
+    k_fold: 4
+    cos_T0: 10
+    cos_Tmult: 1
+    eta_min: 1.0e-05
+    augment_noise_std: 0.02
+    plateau_loss:
+      enable: true
+      dy_threshold: 0.0035
+      speed_threshold: 1.1
+      assist_channel_idx: 78
+      assist_threshold: 0.0
+      signed_bias_weight: 0.08
+      mae_weight: 0.03
+      gain_weight: 0.03
+      under_only: false
+    anchor_supervision:
+      enable: true
+      weight: 0.03
+      dy_threshold: 0.004
+      speed_threshold: 1.1
+03_eval:
+  split:
+    mode: loso
+    level: subject
+    seed: 42
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    manual:
+      val:
+      - m2_S007
+      test:
+      - m2_S008
+    save_to: null
+    loso_subjects:
+    - m2_S008
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges:
+    - 5
+    normalize: true
+    time_window_output: 1
+  train:
+    device: cuda
+  scaler_path: ./runs_tcn/scaler.npz

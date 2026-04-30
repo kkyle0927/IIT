@@ -1,0 +1,2 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A2_P8_split_off_on_Test-m2_S008_seed42,experiments/exp_S3A2_P8_split_off_on_Test-m2_S008_seed42,0.0626266,0.09184402,0.93761617,4.0,0.0091202585

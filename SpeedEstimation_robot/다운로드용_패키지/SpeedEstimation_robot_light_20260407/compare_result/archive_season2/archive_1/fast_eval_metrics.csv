@@ -1,0 +1,6 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S2A1_G2_fullkin_deeptcn_Test-m2_S008_seed42,experiments/exp_S2A1_G2_fullkin_deeptcn_Test-m2_S008_seed42,0.0626788,0.09839781,0.9283954,8.0,0.0094398875
+exp_S2A1_J1_hybrid_power_base_Test-m2_S008_seed42,experiments/exp_S2A1_J1_hybrid_power_base_Test-m2_S008_seed42,0.062297598,0.098352365,0.92945945,2.5,0.012148639
+exp_S2A1_J7_hybrid_longwin_envelope_Test-m2_S008_seed42,experiments/exp_S2A1_J7_hybrid_longwin_envelope_Test-m2_S008_seed42,0.060981315,0.09589643,0.93198967,4.5,0.008160721
+exp_S2A1_L7_affine_calibration_biasloss_Test-m2_S008_seed42,experiments/exp_S2A1_L7_affine_calibration_biasloss_Test-m2_S008_seed42,0.06260884,0.09475338,0.9336013,3.0,0.008121429
+exp_S2A1_M8_positive_residual_bestshot_Test-m2_S008_seed42,experiments/exp_S2A1_M8_positive_residual_bestshot_Test-m2_S008_seed42,0.06393497,0.09129201,0.93813455,0.5,0.008019706

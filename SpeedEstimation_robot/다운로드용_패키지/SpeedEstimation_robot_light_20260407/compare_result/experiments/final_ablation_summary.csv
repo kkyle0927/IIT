@@ -1,0 +1,5 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_L6_bounded_residual_biasloss,0.0505846,0.09498251,0.93220246,44.5,0.0505846,0.0
+exp_M1_repaired_bounded_residual,0.057205386,0.09451585,0.93286705,15.0,0.057205386,0.0
+exp_M2_bounded_residual_assistbias,0.05976734,0.10454253,0.917868,38.5,0.05976734,0.0
+exp_L3_bounded_residual_kinematics_first,0.06841496,0.11067375,0.9079517,39.5,0.06841496,0.0
