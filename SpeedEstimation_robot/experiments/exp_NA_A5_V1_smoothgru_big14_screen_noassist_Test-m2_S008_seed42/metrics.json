@@ -1,0 +1,266 @@
+{
+    "test_loss": 0.0034529305114899345,
+    "test_huber": 0.0034529305114899345,
+    "test_mae": 0.06601086258888245,
+    "test_rmse": 0.09315746277570724,
+    "n_params": 26017,
+    "model_size_mb": 0.0992,
+    "host_latency_ms": 1.7673,
+    "host_max_freq_hz": 565.85,
+    "config": {
+        "exp_name": "exp_NA_A5_V1_smoothgru_big14_screen_noassist",
+        "cv_mode": "loso",
+        "shared": {
+            "data_sources": {
+                "milestone2": {
+                    "path": "../combined_data_S008.h5",
+                    "prefix": "m2_",
+                    "exclude_subjects": []
+                }
+            },
+            "subjects": [
+                "m2_S001",
+                "m2_S002",
+                "m2_S003",
+                "m2_S004",
+                "m2_S005",
+                "m2_S006",
+                "m2_S007",
+                "m2_S008"
+            ],
+            "conditions": [
+                "level_075mps",
+                "level_100mps",
+                "level_125mps",
+                "accel_sine",
+                "decline_5deg",
+                "incline_10deg",
+                "stopandgo"
+            ],
+            "input_vars": [
+                [
+                    "derived/tilt_local_imu_2d",
+                    [
+                        "acc_hx",
+                        "acc_hy",
+                        "acc_up",
+                        "gyro_hx",
+                        "gyro_hy",
+                        "gyro_up"
+                    ]
+                ],
+                [
+                    "derived/tilt_local_velocity_2d",
+                    [
+                        "vel_hx",
+                        "vel_hy"
+                    ]
+                ],
+                [
+                    "robot/left",
+                    [
+                        "hip_angle",
+                        "hip_angle_linvel"
+                    ]
+                ],
+                [
+                    "robot/right",
+                    [
+                        "hip_angle",
+                        "hip_angle_linvel"
+                    ]
+                ],
+                [
+                    "derived/robot_biomech_rt",
+                    [
+                        "cadence_mean",
+                        "speed_anchor_geom"
+                    ]
+                ]
+            ],
+            "output_vars": [
+                [
+                    "common",
+                    [
+                        "speed_y"
+                    ]
+                ]
+            ],
+            "lpf_cutoff": 0.5,
+            "lpf_order": 4,
+            "target_lpf_mode": "zero_phase",
+            "data": {
+                "window_size": 300,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 5,
+                "est_tick_ranges": [
+                    5
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "level_selection": {
+                    "include": [
+                        "lv0"
+                    ]
+                }
+            },
+            "model": {
+                "type": "CausalSmoothTCN_GRU",
+                "channels": [
+                    16,
+                    16,
+                    32,
+                    32
+                ],
+                "kernel_size": 5,
+                "dropout": 0.15,
+                "use_norm": true,
+                "head_hidden": [
+                    20
+                ],
+                "head_dropout": 0.2,
+                "model_norm": "batch",
+                "use_input_norm": true,
+                "input_norm_type": "instance",
+                "gru_hidden": 12,
+                "smooth_window": 9
+            }
+        },
+        "02_train": {
+            "data": {
+                "window_size": 300,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 5,
+                "est_tick_ranges": [
+                    5
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "normalize_type": "standard",
+                "use_physical_velocity_model": false,
+                "use_gait_phase": false,
+                "level_selection": {
+                    "include": [
+                        "lv0"
+                    ]
+                }
+            },
+            "model": {
+                "type": "CausalSmoothTCN_GRU",
+                "channels": [
+                    16,
+                    16,
+                    32,
+                    32
+                ],
+                "kernel_size": 5,
+                "dropout": 0.15,
+                "use_norm": true,
+                "head_hidden": [
+                    20
+                ],
+                "head_dropout": 0.2,
+                "model_norm": "batch",
+                "use_input_norm": true,
+                "input_norm_type": "instance",
+                "gru_hidden": 12,
+                "smooth_window": 9
+            },
+            "loader": {
+                "batch_size": 128,
+                "val_batch_size": 256
+            },
+            "train": {
+                "task_type": "regression",
+                "loss": "huber",
+                "huber_delta": 0.1,
+                "epochs": 18,
+                "lr": 0.001,
+                "wd": 0.001,
+                "amp": true,
+                "device": "cuda",
+                "save_dir": "./runs_tcn",
+                "early_stop_patience": 6,
+                "early_stop_min_delta": 0.0001,
+                "early_stop_warmup": 4,
+                "k_fold": 4,
+                "cos_T0": 10,
+                "cos_Tmult": 1,
+                "eta_min": 1e-05,
+                "augment_noise_std": 0.02,
+                "allow_tf32": true,
+                "cudnn_benchmark": true,
+                "clear_cuda_cache_each_epoch": false
+            }
+        },
+        "03_eval": {
+            "split": {
+                "mode": "loso",
+                "level": "subject",
+                "seed": 42,
+                "ratio": [
+                    0.7,
+                    0.15,
+                    0.15
+                ],
+                "save_to": null,
+                "loso_subjects": [
+                    "m2_S001",
+                    "m2_S004",
+                    "m2_S008"
+                ]
+            },
+            "data": {
+                "window_size": 300,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 5,
+                "est_tick_ranges": [
+                    5
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "level_selection": {
+                    "include": [
+                        "lv0"
+                    ]
+                }
+            },
+            "train": {
+                "device": "cuda"
+            },
+            "scaler_path": "./runs_tcn/scaler.npz"
+        },
+        "data_path": "./combined_data_S008.h5",
+        "subjects": [
+            "m2_S001",
+            "m2_S002",
+            "m2_S003",
+            "m2_S004",
+            "m2_S005",
+            "m2_S006",
+            "m2_S007",
+            "m2_S008"
+        ],
+        "conditions": [
+            "level_075mps",
+            "level_100mps",
+            "level_125mps",
+            "accel_sine",
+            "decline_5deg",
+            "incline_10deg",
+            "stopandgo"
+        ],
+        "est_tick_ranges": [
+            5
+        ],
+        "tcn_channels": [
+            16,
+            16,
+            32,
+            32
+        ]
+    }
+}

@@ -1,0 +1,161 @@
+02_train:
+  data:
+    est_tick_ranges:
+    - 5
+    level_selection:
+      include:
+      - lv0
+    normalize: true
+    normalize_type: standard
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_gait_phase: false
+    use_physical_velocity_model: false
+    window_size: 300
+    y_delay: 5
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model: &id002
+    channels: &id004
+    - 16
+    - 16
+    - 32
+    - 32
+    dropout: 0.15
+    gru_hidden: 12
+    head_dropout: 0.2
+    head_hidden:
+    - 20
+    input_norm_type: instance
+    kernel_size: 5
+    model_norm: batch
+    smooth_window: 9
+    type: CausalSmoothTCN_GRU
+    use_input_norm: true
+    use_norm: true
+  train:
+    allow_tf32: true
+    amp: true
+    augment_noise_std: 0.02
+    clear_cuda_cache_each_epoch: false
+    cos_T0: 10
+    cos_Tmult: 1
+    cudnn_benchmark: true
+    device: cuda
+    early_stop_min_delta: 0.0001
+    early_stop_patience: 6
+    early_stop_warmup: 4
+    epochs: 18
+    eta_min: 1.0e-05
+    huber_delta: 0.1
+    k_fold: 4
+    loss: huber
+    lr: 0.001
+    save_dir: ./runs_tcn
+    task_type: regression
+    wd: 0.001
+03_eval:
+  data:
+    est_tick_ranges:
+    - 5
+    level_selection:
+      include:
+      - lv0
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 300
+    y_delay: 5
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m2_S005
+    - m2_S006
+    - m2_S007
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id001
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data_S008.h5
+est_tick_ranges:
+- 5
+exp_name: exp_NA_A10_B6_no_speed_anchor3fold_screen_noassist
+shared:
+  conditions: *id001
+  data:
+    est_tick_ranges:
+    - 5
+    level_selection:
+      include:
+      - lv0
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 300
+    y_delay: 5
+  data_sources:
+    milestone2:
+      exclude_subjects: []
+      path: ../combined_data_S008.h5
+      prefix: m2_
+  input_vars:
+  - - derived/tilt_tvcf_imu_2d_og
+    - - acc_hx
+      - acc_hy
+      - acc_up
+      - gyro_hx
+      - gyro_hy
+      - gyro_up
+      - roll_cf
+      - pitch_cf
+  - - derived/tilt_tvcf_velocity_2d_og
+    - - vel_hx
+      - vel_hy
+  - - derived/tilt_tvcf_summary_2d_og
+    - - acc_h_mag
+      - vel_h_mag
+  - - robot/left
+    - - hip_angle
+      - hip_angle_linvel
+  - - robot/right
+    - - hip_angle
+      - hip_angle_linvel
+  - - derived/robot_biomech_rt
+    - - cadence_mean
+  lpf_cutoff: 0.5
+  lpf_order: 4
+  model: *id002
+  output_vars:
+  - - common
+    - - speed_y
+  subjects: &id003
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+  target_lpf_mode: zero_phase
+subjects: *id003
+tcn_channels: *id004

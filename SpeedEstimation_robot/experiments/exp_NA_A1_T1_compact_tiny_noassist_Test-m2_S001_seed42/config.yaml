@@ -1,0 +1,105 @@
+conditions: &id001
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data_S008.h5
+est_tick_ranges:
+- 5
+exp_name: exp_NA_A1_T1_compact_tiny_noassist
+shared:
+  conditions: *id001
+  data:
+    est_tick_ranges:
+    - 5
+    level_selection:
+      include:
+      - lv0
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 300
+    y_delay: 5
+  data_sources:
+    milestone2:
+      exclude_subjects: []
+      path: ../combined_data_S008.h5
+      prefix: m2_
+  input_vars:
+  - - derived/body_frame_imu_stationaryheading
+    - - accel_right
+      - accel_forward
+      - accel_up
+      - gyro_right
+      - gyro_forward
+      - gyro_up
+      - forward_accel_overground
+  - - derived/imu_integrated_speed_stationaryheading
+    - - imu_integrated_speed
+  - - robot/left
+    - - hip_angle
+      - hip_angle_dot
+      - thigh_angle
+      - thigh_angle_dot
+  - - robot/right
+    - - hip_angle
+      - hip_angle_dot
+      - thigh_angle
+      - thigh_angle_dot
+  - - derived/robot_biomech_rt
+    - - cadence_mean
+      - speed_anchor_geom
+  - - sub_info
+    - - height
+      - leg_length_mean
+  loso_subjects:
+  - m2_S001
+  - m2_S004
+  - m2_S008
+  lpf_cutoff: 0.5
+  lpf_order: 4
+  model:
+    bias_scale: 0.16
+    branch_channels:
+    - 8
+    - 8
+    - 16
+    - 16
+    branch_input_dims:
+    - 16
+    - 2
+    - 2
+    channels: &id003
+    - 8
+    - 8
+    - 16
+    - 16
+    dropout: 0.15
+    gate_temperature: 1.0
+    gru_hidden: 12
+    head_dropout: 0.2
+    head_hidden:
+    - 16
+    input_norm_type: instance
+    kernel_size: 5
+    model_norm: batch
+    residual_scale: 0.04
+    state_leak: 0.94
+    type: PersistentBiasTCN_GRU
+    use_input_norm: true
+    use_norm: true
+  output_vars:
+  - - common
+    - - speed_y
+  subjects: &id002
+  - m2_S001
+  - m2_S004
+  - m2_S008
+  target_lpf_mode: zero_phase
+subjects: *id002
+tcn_channels: *id003
