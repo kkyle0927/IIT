@@ -1,0 +1,143 @@
+02_train:
+  data:
+    calibrate_robot_thigh: true
+    est_tick_ranges: &id001
+    - 0
+    normalize: true
+    normalize_type: standard
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_complementary_filter_euler: true
+    window_size: 200
+    y_delay: 0
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model: &id004
+    attention_heads: 0
+    attention_type: null
+    channels: &id006
+    - 32
+    - 64
+    - 64
+    - 128
+    dropout: 0.2
+    gating_signal: null
+    head_dropout: 0.2
+    head_hidden:
+    - 64
+    kernel_size: 5
+    model_norm: layer
+    type: TCN
+    use_norm: true
+  train:
+    amp: true
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 1e-04
+    early_stop_patience: 10
+    early_stop_warmup: 10
+    epochs: 30
+    eta_min: 1.0e-05
+    k_fold: 4
+    lr: 0.001
+    save_dir: ./runs_tcn
+    task_type: regression
+    wd: 0.01
+03_eval:
+  data: &id003
+    calibrate_robot_thigh: true
+    est_tick_ranges: *id001
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_complementary_filter_euler: true
+    window_size: 200
+    y_delay: 0
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m2_S008
+    manual:
+      test:
+      - m2_S008
+      val:
+      - m2_S007
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id002
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data_S008.h5
+est_tick_ranges:
+- 0
+exp_name: exp_A4_quat_kinetics
+shared:
+  conditions: *id002
+  data: *id003
+  data_sources:
+    milestone2:
+      exclude_subjects: []
+      path: /home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5
+      prefix: m2_
+  input_vars:
+  - - derived/euler
+    - - roll
+      - pitch
+      - yaw
+  - - robot/left
+    - - hip_angle
+  - - robot/right
+    - - hip_angle
+  - - robot/left
+    - - torque
+  - - robot/right
+    - - torque
+  - - robot/left
+    - - thigh_angle
+  - - robot/right
+    - - thigh_angle
+  - - robot/back_imu
+    - - quat_w
+      - quat_x
+      - quat_y
+      - quat_z
+  - - robot/left
+    - - thigh_angle_dot
+      - torque_dot
+  - - robot/right
+    - - thigh_angle_dot
+      - torque_dot
+  model: *id004
+  output_vars:
+  - - mocap/kin_q
+    - - hip_flexion_l
+      - hip_flexion_r
+  subjects: &id005
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+subjects: *id005
+tcn_channels: *id006
