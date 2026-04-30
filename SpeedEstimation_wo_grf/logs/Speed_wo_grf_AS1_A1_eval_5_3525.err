@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/tmp/speed_wo_grf_archive1_feature_importance_top4.py", line 448, in <module>
+    main()
+  File "/tmp/speed_wo_grf_archive1_feature_importance_top4.py", line 443, in main
+    run_single(exp_name)
+  File "/tmp/speed_wo_grf_archive1_feature_importance_top4.py", line 385, in run_single
+    cfg = load_merged_cfg(exp_dir)
+  File "/tmp/speed_wo_grf_archive1_feature_importance_top4.py", line 104, in load_merged_cfg
+    cfg = yaml.safe_load(BASELINE_CFG_PATH.read_text(encoding="utf-8")) or {}
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/pathlib.py", line 1134, in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/pathlib.py", line 1119, in open
+    return self._accessor.open(self, mode, buffering, encoding, errors,
+FileNotFoundError: [Errno 2] No such file or directory: '/home/chanyoungko/IIT/SpeedEstimation_wo_grf/configs/baseline.yaml'

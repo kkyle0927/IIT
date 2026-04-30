@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/tmp/speed_wo_grf_archive1_representatives.py", line 8, in <module>
+    import compare_results
+ModuleNotFoundError: No module named 'compare_results'

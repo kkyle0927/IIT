@@ -1,0 +1,12 @@
+/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/torch/cuda/__init__.py:716: UserWarning: Can't initialize NVML
+  warnings.warn("Can't initialize NVML")
+/home/chanyoungko/IIT/SpeedEstimation_wo_grf/compare_results.py:1015: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/tmp/archive2_top_model_feature_importance.py", line 222, in <module>
+    main()
+  File "/tmp/archive2_top_model_feature_importance.py", line 159, in main
+    importances = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/SpeedEstimation_wo_grf/compare_results.py", line 2463, in calculate_permutation_importance
+    X_cpu = torch.cat(X_list, dim=0) # (N, T, D)
+RuntimeError: [enforce fail at alloc_cpu.cpp:117] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 2657907200 bytes. Error code 12 (Cannot allocate memory)

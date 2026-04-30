@@ -1,0 +1,3560 @@
+config_speed_diff.yaml
+# =============================================================================
+# Shared Configurations (Anchors)
+# =============================================================================
+shared:
+  src_h5: &SRC_H5_PATH "./dataset/combined_data_milestone2.h5"
+  dst_h5: &DST_H5_PATH "combined_data_speed_diff.h5"
+  
+  data: &DATA_CONFIG
+    window_size: 100
+    stride: 10
+    stride_inf: 1
+    y_delay: 5
+    normalize: True
+    
+  model: &NN_MODEL 
+    type: "TCN"               # [NEW] Model Type
+    channels: [32, 32, 64, 64]
+    kernel_size: 4
+    dropout: 0.3
+    use_norm: True
+    head_hidden: [64, 32]
+    head_dropout: 0.3
+# =============================================================================
+# 01. Construction Configuration
+# =============================================================================
+01_construction:
+  "src_h5": *SRC_H5_PATH
+  "dst_h5": *DST_H5_PATH
+
+  "include_subjects": []
+  "include_conditions": []
+  "include_levels": [] 
+  "include_trials": []
+  "exclude_paths": []
+  "inputs": [
+      "mocap/kin_q/hip_flexion_l", "mocap/kin_q/hip_flexion_r",
+      "mocap/kin_q/knee_angle_l", "mocap/kin_q/knee_angle_r",
+      "mocap/kin_q/ankle_angle_l", "mocap/kin_q/ankle_angle_r",
+      "forceplate/grf/left/z", "forceplate/grf/right/z",
+      "robot/back_imu/accel_z", "common/gait_state"
+  ]
+  "outputs": [
+      "treadmill/left/speed_leftbelt",
+      "treadmill/right/speed_rightbelt",
+  ]
+
+  "compression": "gzip"
+  "compression_lvl": 4
+  "dtype": "float32"
+  "overwrite_dst": True
+  
+  # [NEW] Custom Filter Hook
+  "custom_filter":
+    "enable": True
+    "file": "./custom_preprocessor.py"
+    "function": "process_data_speed_diff"
+
+# =============================================================================
+# 02. Train Configuration
+# =============================================================================
+02_train:
+  "io_h5": *DST_H5_PATH
+  "split":
+    "mode": "loso" # Options: "random", "manual", "loso"
+    "level": "subject"
+    "seed": 43
+    "ratio": [0.7, 0.15, 0.15]
+    "manual": 
+      "train": []
+      "val": []
+      "test": []
+    "loso":  # LOSO (Leave-One-Subject-Out) settings
+      "val_ratio": 0.2  # Portion of remaining subjects for validation
+      "seed": 42
+    "save_to": "./splits/split_units.json"
+  
+  "data": *DATA_CONFIG
+
+  "scaler_path": "./runs_tcn/scaler.npz"
+  "loader":
+    "batch_size": 128
+    "num_workers": 4
+    "pin_memory": True
+    "drop_last": True
+    "persistent_workers": True
+
+  "model": *NN_MODEL
+  
+  "train":
+    "task_type": "regression"   # [NEW] "regression" or "classification"
+    "loss": "mse"               # Ignored if classification
+    "epochs": 100
+    "lr": 5e-4
+    "wd": 1e-3
+    "amp": True
+    "device": "cuda"
+    "save_dir": "./runs_tcn"
+    # Early stopping options
+    early_stop_patience: 10     # 개선이 없으면 20 epoch 후 정지
+    early_stop_min_delta: 1e-03  # 이만큼(초)과 더 작아져야 '개선'으로 인정
+    early_stop_warmup: 5        # 초기 5 epoch은 ES 체크 안 함
+    k_fold: 4
+    
+    # [NEW] Domain Knowledge Loss (Kinematic Chain)
+    kinematic_loss_weight_pos: 0   # 위치 기반 제약 (추천: 100~500)
+    kinematic_loss_weight_limit: 0   # 관절 가동 범위 제약 (추천: 1~10)
+    kinematic_loss_degrees: True       # 모델 출력이 Degree인 경우
+# =============================================================================
+# 03. Evaluation Configuration
+# =============================================================================
+03_eval:
+  "io_h5": *DST_H5_PATH
+  "split":
+    "mode": "manual" # "manual"
+    "level": "subject"
+    "seed": 42
+    "ratio": [0.7, 0.15, 0.15]
+    "manual": 
+      "test": ["S001"] # select subjects used in training for quick eval
+    "save_to": Null
+  
+  "data": *DATA_CONFIG
+  
+  "train": 
+    "device": "cuda" 
+
+  "scaler_path": "./runs_tcn/scaler.npz"
+
+dataset_construction.py
+
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+run_build_io.py
+- 설정을 정의하고 utilities.build_io_h5()를 호출
+- (옵션) get_dataloaders()로 스플릿/로더 생성 가능
+"""
+
+from utilities import build_io_h5, scan_series_by_trial, plot_trial_io
+import yaml
+import time
+
+import os
+from pathlib import Path
+
+def main(cfg_path: str):
+    # 1) IO H5 생성
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+        
+    # [NEW] Resolve dst_h5 relative to config file's directory
+    cfg_dir = Path(cfg_path).parent
+    
+    def prepend_root(path_str):
+        if path_str and (path_str.startswith("./") or not os.path.isabs(path_str)):
+            # If path already starts with the config directory, don't prepend
+            if str(cfg_dir) in path_str:
+                return path_str
+            p = Path(path_str)
+            parts = list(p.parts)
+            if parts[0] == ".":
+                parts = parts[1:]
+            new_path = cfg_dir / Path(*parts)
+            return str(new_path).replace("\\", "/")
+        return path_str
+
+    if "dst_h5" in cfg["01_construction"]:
+        original_dst = cfg["01_construction"]["dst_h5"]
+        cfg["01_construction"]["dst_h5"] = prepend_root(original_dst)
+        print(f"[PATH] Resolved dst_h5: {cfg['01_construction']['dst_h5']}")
+
+    build_io_h5(cfg["01_construction"])
+
+    # plot inputs & outputs for a few trials
+    io_h5 = cfg["01_construction"].get("dst_h5")
+    print(io_h5)
+    # series = scan_series_by_trial(io_h5, ["input"], ["output"], [], [], [])
+    # for it in series:
+    #     plot_trial_io(io_h5, it.subject, it.condition, it.trial,
+    #                 out_dir="./figs_trial_io", downsample=2)
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cfg", type=str, default="config.yaml", help="Path to YAML config.")
+    args = ap.parse_args()
+    main(args.cfg)
+
+custom_preprocessor.py
+
+
+import numpy as np
+import math
+import re
+from dataclasses import dataclass, field
+from typing import List, Optional, Dict, Tuple
+from scipy.spatial.transform import Rotation as R
+from scipy.signal import butter, filtfilt
+import h5py
+import os
+
+# =============================================================================
+# Configuration
+# =============================================================================
+
+# Subject Mass Map (kg) - DEPRECATED: Please use dataset-provided weight
+SUBJECT_MASS = {}
+
+@dataclass
+class QuatToEulerConfig:
+    enable: bool = True
+    target_substr: str = "back_imu" # Identify sensor group
+    baseline_duration: float = 1.0 # Seconds to average for tare
+    seq: str = 'xyz' # Euler sequence
+    degrees: bool = True # [MOD] output in degrees
+
+@dataclass
+class PreprocessorConfig:
+    # Only keeping Quat config for now as requested "Start anew"
+    quat_to_euler: QuatToEulerConfig = field(default_factory=QuatToEulerConfig)
+    
+    # Placeholder for others if needed later
+    # lpf: ...
+
+# =============================================================================
+# Main Class
+# =============================================================================
+class GaitDataPreprocessor:
+    def __init__(self, config: PreprocessorConfig = None):
+        self.cfg = config or PreprocessorConfig()
+
+    def process(self, arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+        """
+        Process data: 
+        1. GRF Normalization (by Body Weight = mass * 9.81)
+        2. Convert Quat -> Euler (Deg) with standing baseline (Tare).
+        
+        Returns: (new_arr, new_ch_map)
+        """
+        fs_hz = meta.get("fs_hz", 100) or 100
+        ch_map = meta["ch_map"]
+        subject = meta.get("subject", "S001") # Default fallback?
+        
+        # Get Mass (Prefer meta)
+        mass = meta.get("mass", None)
+        if mass is None or mass <= 0:
+            mass = SUBJECT_MASS.get(subject, None)
+            if mass is None or mass <= 0:
+                # Try to get from meta if available (fallback)
+                mass = meta.get("mass", 70.0)
+                if mass is None or mass <= 0: mass = 70.0 # Ultimate fallback
+                print(f"[WARN] Mass not found for {subject}, using {mass} kg")
+        
+        bw = mass * 9.81
+        
+        # Sort channels by start index to handle contiguous blocks
+        sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+        
+        # --- Motor Angle Bias Correction (Align motor_angle mean to hip_flexion mean for first 1s) ---
+        bias_l, bias_r = 0.0, 0.0
+        ml_idx, mr_idx, hl_idx, hr_idx = None, None, None, None
+        
+        for k, (s, e) in ch_map.items():
+            lk = k.lower()
+            if "hip_flexion_l" in lk: hl_idx = s
+            elif "hip_flexion_r" in lk: hr_idx = s
+            elif "left/motor_angle" in lk: ml_idx = s
+            elif "right/motor_angle" in lk: mr_idx = s
+            
+        # [NEW] If hip_flexion is missing, try loading from src_h5
+        ref_hl, ref_hr = None, None
+        if hl_idx is not None: ref_hl = arr_concat[:, hl_idx]
+        if hr_idx is not None: ref_hr = arr_concat[:, hr_idx]
+        
+        src_h5 = meta.get("src_h5")
+        trial_abs = meta.get("trial_abs")
+        
+        if (ref_hl is None or ref_hr is None) and src_h5 and trial_abs and os.path.exists(src_h5):
+            try:
+                # Optimized search: Try direct paths first, and only load first 1s
+                with h5py.File(src_h5, 'r') as f:
+                    g = f[trial_abs] if trial_abs in f else f
+                    
+                    def get_ref_data(group, target, n):
+                        # 1. Try common direct paths
+                        for prefix in ["mocap/kin_q", "kin_q", "output"]:
+                            path = f"{prefix}/{target}"
+                            if path in group:
+                                return group[path][:n]
+                        # 2. Shallow search in groups
+                        for k in group.keys():
+                            if k.lower() == target: return group[k][:n]
+                        # 3. Recursive search (fallback)
+                        for k in group.keys():
+                            if isinstance(group[k], h5py.Group):
+                                res = get_ref_data(group[k], target, n)
+                                if res is not None: return res
+                        return None
+                    
+                    n_needed = int(1.1 * fs_hz) # cache a bit more than 1s
+                    if ref_hl is None: ref_hl = get_ref_data(g, "hip_flexion_l", n_needed)
+                    if ref_hr is None: ref_hr = get_ref_data(g, "hip_flexion_r", n_needed)
+            except Exception as e:
+                print(f"[WARN] Failed to load ref hip_flexion from {src_h5}: {e}")
+
+        n_base_bias = int(1.0 * fs_hz)
+        n_samples = min(n_base_bias, len(arr_concat))
+        if n_samples > 0:
+            if ref_hl is not None and ml_idx is not None:
+                bias_l = np.mean(ref_hl[:n_samples]) - np.mean(arr_concat[:n_samples, ml_idx])
+            if ref_hr is not None and mr_idx is not None:
+                bias_r = np.mean(ref_hr[:n_samples]) - np.mean(arr_concat[:n_samples, mr_idx])
+        # ------------------------------------------------------------------------------------------
+        
+        # Identify Quat Channels for Target (Back IMU)
+        # We look for 4 channels: w, x, y, z under the target substring
+        target = self.cfg.quat_to_euler.target_substr.lower()
+        
+        quat_indices = {} # {'w': idx, 'x': idx...}
+        quat_keys = {}    # {'w': key, ...}
+        
+        # New containers
+        new_cols = []
+        new_map = {}
+        current_ptr = 0
+        
+        # We need to reconstruct the array. 
+        # But first, let's identify Quat indices to process them as a block.
+        # Scan for quaternion parts
+        for key, (s, e) in sorted_map:
+            lkey = key.lower()
+            if target in lkey:
+                if 'quat_w' in lkey: quat_indices['w'] = s; quat_keys['w'] = key
+                elif 'quat_x' in lkey: quat_indices['x'] = s; quat_keys['x'] = key
+                elif 'quat_y' in lkey: quat_indices['y'] = s; quat_keys['y'] = key
+                elif 'quat_z' in lkey: quat_indices['z'] = s; quat_keys['z'] = key
+
+        # If we have a complete quaternion
+        has_quat = (len(quat_indices) == 4 and self.cfg.quat_to_euler.enable)
+        processed_quat = False
+        
+        # Pre-calculate Euler if needed
+        euler_yz = None
+        if has_quat:
+             # 1. Extract Quat Data (T, 4) in (x, y, z, w) order for Scipy
+            w = arr_concat[:, quat_indices['w']]
+            x = arr_concat[:, quat_indices['x']]
+            y = arr_concat[:, quat_indices['y']]
+            z = arr_concat[:, quat_indices['z']]
+            
+            quats = np.stack([x, y, z, w], axis=1) # (T, 4)
+            
+            # 2. Compute Baseline (Tare)
+            n_base = int(self.cfg.quat_to_euler.baseline_duration * fs_hz)
+            n_base = min(n_base, len(quats))
+            if n_base > 0:
+                q_mean = np.mean(quats[:n_base], axis=0)
+                q_mean /= np.linalg.norm(q_mean)
+                
+                R_base = R.from_quat(q_mean)
+                R_seq = R.from_quat(quats)
+                
+                R_rel = R_base.inv() * R_seq
+                
+                # 3. Convert to Euler
+                euler = R_rel.as_euler(self.cfg.quat_to_euler.seq, degrees=self.cfg.quat_to_euler.degrees) # (T, 3)
+            else:
+                euler = np.zeros((len(quats), 3))
+            
+            # User wants y, z only? Based on previous code "euler_yz = euler[:, 1:]"
+            # Yes, standard logic here is usually dropping x if walking in sagittal plane (strictly).
+            # I will keep the previous logic of dropping X.
+            euler_yz = euler[:, 1:] 
+
+        
+        # Re-iterate sorted map to build new array
+        for key, (s, e) in sorted_map:
+            # 1. Check if it is a Quat key
+            if has_quat and key in quat_keys.values():
+                if not processed_quat:
+                    # Insert Euler Block HERE
+                    base_name = quat_keys['w'].replace('quat_w', '').strip('/_') 
+                    if not base_name: base_name = "imu"
+                    
+                    new_cols.append(euler_yz.astype(np.float32))
+                    
+                    start_idx = current_ptr
+                    # new_map[f"{base_name}/euler_x"] = ... SKIP
+                    new_map[f"{base_name}/euler_y"] = (start_idx, start_idx+1)
+                    new_map[f"{base_name}/euler_z"] = (start_idx+1, start_idx+2)
+                    
+                    current_ptr += 2
+                    processed_quat = True
+                continue # Skip this key as it was replaced/handled
+                
+            # 2. Check for GRF Normalization
+            # "forceplate" AND "grf" in name
+            block = arr_concat[:, s:e].copy() # Copy to avoid side effects
+            lkey = key.lower()
+            
+            if "forceplate" in lkey and "grf" in lkey:
+                # Divide by BW
+                block /= bw
+            
+            # Apply Motor Angle Bias
+            if "left/motor_angle" in lkey:
+                block += bias_l
+            elif "right/motor_angle" in lkey:
+                block += bias_r
+            
+            # Add block
+            new_cols.append(block.astype(np.float32))
+            width = block.shape[1]
+            new_map[key] = (current_ptr, current_ptr + width)
+            current_ptr += width
+            
+        # Concatenate
+        new_arr = np.hstack(new_cols).astype(np.float32)
+        return new_arr, new_map
+
+# =============================================================================
+# Entry Point
+# =============================================================================
+_PREPROCESSOR = GaitDataPreprocessor()
+_PREPROCESSOR_M1 = GaitDataPreprocessor(PreprocessorConfig(quat_to_euler=QuatToEulerConfig(enable=False)))
+
+def process_data_bsg(arr_concat: np.ndarray, meta: dict): # Returns tuple or array
+    return _PREPROCESSOR.process(arr_concat, meta)
+
+def process_data_bsg_milestone1(arr_concat: np.ndarray, meta: dict):
+    return _PREPROCESSOR_M1.process(arr_concat, meta)
+
+def process_data_LP(arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+    """
+    LP-specific preprocessor: Only normalizes GRF/z by Body Weight.
+    
+    This function normalizes all GRF channels by body weight (mass * 9.81).
+    Specifically designed for Locomotion Planner (LP) training.
+    
+    Returns: (new_arr, new_ch_map)
+    """
+    ch_map = meta["ch_map"]
+    subject = meta.get("subject", "S001")
+    
+    # Get Mass (Prefer meta)
+    mass = meta.get("mass", None)
+    if mass is None or mass <= 0:
+        mass = SUBJECT_MASS.get(subject, None)
+        if mass is None or mass <= 0:
+            mass = 70.0
+            print(f"[WARN] Mass not found for {subject}, using {mass} kg")
+    
+    bw = mass * 9.81
+    
+    # Sort channels by start index
+    sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+    
+    # Build new array with normalized GRF
+    new_cols = []
+    new_map = {}
+    current_ptr = 0
+    
+    for key, (s, e) in sorted_map:
+        block = arr_concat[:, s:e].copy()
+        lkey = key.lower()
+        
+        # Normalize GRF channels by body weight
+        if "forceplate" in lkey and "grf" in lkey:
+            block /= bw
+        
+        new_cols.append(block.astype(np.float32))
+        width = block.shape[1]
+        new_map[key] = (current_ptr, current_ptr + width)
+        current_ptr += width
+    
+    new_arr = np.hstack(new_cols).astype(np.float32)
+    return new_arr, new_map
+
+def process_data_speed(arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+    """
+    Speed-specific preprocessor: Average left/right treadmill belt speeds and apply LPF.
+    
+    1. Finds "treadmill/left/speed_leftbelt" and "treadmill/right/speed_rightbelt"
+    2. Computes their average
+    3. Applies 2nd order 10Hz Butterworth LPF using filtfilt
+       (Sampling period = 10ms -> fs = 100Hz)
+    
+    Returns: (new_arr, new_ch_map)
+    """
+    ch_map = meta["ch_map"]
+    fs_hz = meta.get("fs_hz", 100) or 100  # Default 100Hz (10ms period)
+    
+    # --- LPF Parameters ---
+    cutoff_hz = 1.5   # [MOD] 1.5Hz
+    order = 4         # [MOD] 4th order
+    
+    # Design Butterworth filter
+    nyq = fs_hz / 2.0
+    normalized_cutoff = cutoff_hz / nyq
+    b, a = butter(order, normalized_cutoff, btype='low', analog=False)
+    
+    # Sort channels by start index
+    sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+    
+    # --- Find Speed Channels ---
+    left_key = None
+    right_key = None
+    left_idx = None
+    right_idx = None
+    
+    for key, (s, e) in sorted_map:
+        lkey = key.lower()
+        if "treadmill" in lkey and "left" in lkey and "speed" in lkey:
+            left_key = key
+            left_idx = (s, e)
+        elif "treadmill" in lkey and "right" in lkey and "speed" in lkey:
+            right_key = key
+            right_idx = (s, e)
+    
+    # --- Build new array ---
+    new_cols = []
+    new_map = {}
+    current_ptr = 0
+    
+    processed_speed = False
+    
+    for key, (s, e) in sorted_map:
+        lkey = key.lower()
+        
+        # Skip individual speed channels - we'll replace them with averaged version
+        if key == left_key or key == right_key:
+            if not processed_speed and left_idx is not None and right_idx is not None:
+                # Compute average of left and right belt speeds
+                left_speed = arr_concat[:, left_idx[0]:left_idx[1]].flatten()
+                right_speed = arr_concat[:, right_idx[0]:right_idx[1]].flatten()
+                avg_speed = (left_speed + right_speed) / 2.0
+                
+                # Apply filtfilt LPF
+                filtered_speed = filtfilt(b, a, avg_speed)
+                filtered_speed = filtered_speed.reshape(-1, 1).astype(np.float32)
+                
+                new_cols.append(filtered_speed)
+                new_map["treadmill/speed_avg"] = (current_ptr, current_ptr + 1)
+                current_ptr += 1
+                processed_speed = True
+            continue  # Skip this key
+        
+        # Copy other channels as-is
+        block = arr_concat[:, s:e].copy().astype(np.float32)
+        new_cols.append(block)
+        width = block.shape[1]
+        new_map[key] = (current_ptr, current_ptr + width)
+        current_ptr += width
+    
+    new_arr = np.hstack(new_cols).astype(np.float32)
+    return new_arr, new_map
+
+def process_data_moment(arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+    """
+    Moment-specific preprocessor: Normalizes hip flexion moments by subject mass (Nm/kg).
+    
+    This function divides "mocap/joint_moment/hip_flexion_l_moment" and 
+    "mocap/joint_moment/hip_flexion_r_moment" by the subject's mass.
+    
+    Returns: (new_arr, new_ch_map)
+    """
+    ch_map = meta["ch_map"]
+    subject = meta.get("subject", "S001")
+    
+    # Get Mass (Prefer meta)
+    mass = meta.get("mass", None)
+    if mass is None or mass <= 0:
+        mass = SUBJECT_MASS.get(subject, None)
+        if mass is None or mass <= 0:
+            mass = 70.0 # Default fallback
+            print(f"[WARN] Mass not found for {subject}, using {mass} kg")
+    
+    # Sort channels by start index
+    sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+    
+    new_cols = []
+    new_map = {}
+    current_ptr = 0
+    
+    for key, (s, e) in sorted_map:
+        block = arr_concat[:, s:e].copy()
+        lkey = key.lower()
+        
+        # Normalize target moment channels by mass (Nm/kg)
+        if "mocap/joint_moment/hip_flexion_l_moment" in lkey or "mocap/joint_moment/hip_flexion_r_moment" in lkey:
+            block /= mass
+        
+        new_cols.append(block.astype(np.float32))
+        width = block.shape[1]
+        new_map[key] = (current_ptr, current_ptr + width)
+        current_ptr += width
+    
+    new_arr = np.hstack(new_cols).astype(np.float32)
+    return new_arr, new_map
+def process_data_rg(arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+    """
+    Combined Preprocessor for RG:
+    1. GRF Normalization: If role == 'input', divide forceplate/grf by BW (mass * 9.81).
+    2. Treadmill Speed: Average left/right belt speeds and apply 10Hz LPF (filtfilt).
+    
+    Returns: (new_arr, new_ch_map)
+    """
+    ch_map = meta["ch_map"]
+    subject = meta.get("subject", "S001")
+    role = meta.get("role", "input")
+    fs_hz = meta.get("fs_hz", 100) or 100
+    
+    # --- 1. Preparation for Speed LPF ---
+    cutoff_hz = 10.0
+    order = 2
+    nyq = fs_hz / 2.0
+    b, a = butter(order, cutoff_hz / nyq, btype='low', analog=False)
+    
+    # --- 2. Preparation for GRF Normalization ---
+    mass = meta.get("mass", None)
+    if mass is None or mass <= 0:
+        mass = SUBJECT_MASS.get(subject, 70.0)
+    bw = mass * 9.81
+    
+    # --- 3. Find Channels ---
+    sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+    l_speed_key = None
+    r_speed_key = None
+    l_idx = None
+    r_idx = None
+    
+    for key, (s, e) in sorted_map:
+        lk = key.lower()
+        if "treadmill" in lk and "speed" in lk:
+            if "left" in lk or "leftbelt" in lk:
+                l_speed_key, l_idx = key, (s, e)
+            elif "right" in lk or "rightbelt" in lk:
+                r_speed_key, r_idx = key, (s, e)
+
+    # --- 4. Process and Build New Array ---
+    new_cols = []
+    new_map = {}
+    current_ptr = 0
+    processed_speed = False
+    
+    for key, (s, e) in sorted_map:
+        # A. Speed Processing (Replace two with one)
+        if key == l_speed_key or key == r_speed_key:
+            if not processed_speed and l_idx is not None and r_idx is not None:
+                # Average
+                v_l = arr_concat[:, l_idx[0]:l_idx[1]].flatten()
+                v_r = arr_concat[:, r_idx[0]:r_idx[1]].flatten()
+                v_avg = (v_l + v_r) / 2.0
+                # Filter
+                v_filt = filtfilt(b, a, v_avg).reshape(-1, 1).astype(np.float32)
+                
+                new_cols.append(v_filt)
+                new_map["treadmill/speed_avg"] = (current_ptr, current_ptr + 1)
+                current_ptr += 1
+                processed_speed = True
+            continue 
+            
+        # B. General Processing
+        block = arr_concat[:, s:e].copy().astype(np.float32)
+        lk = key.lower()
+        
+        # GRF Normalization (Only for input role to avoid double-normalizing targets if any)
+        if role == "input" and "forceplate" in lk and "grf" in lk:
+            block /= bw
+            
+        new_cols.append(block)
+        width = block.shape[1]
+        new_map[key] = (current_ptr, current_ptr + width)
+        current_ptr += width
+        
+    new_arr = np.hstack(new_cols).astype(np.float32)
+    return new_arr, new_map
+
+def process_data_speed_diff(arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+    """
+    Enhanced Speed Preprocessor:
+    1. Average Treadmill Speed & Acceleration (for ground truth and IMU correction).
+    2. IMU Correction: robot/back_imu/accel_z (forward) += treadmill_accel.
+    3. Joint Velocities: mocap/kin_q -> Diff -> Causal 5Hz LPF.
+    4. GRF Normalization: forceplate/grf / BW.
+    
+    Returns: (new_arr, new_ch_map)
+    """
+    from scipy.signal import lfilter
+    ch_map = meta["ch_map"]
+    fs = meta.get("fs_hz", 100) or 100
+    subject = meta.get("subject", "S001")
+    dt = 1.0 / fs
+    
+    # --- 1. Filter Design ---
+    # a. Treadmill Speed LPF (Target - filtfilt for precision)
+    # [MOD] 1.5Hz, 4th order
+    b_tm, a_tm = butter(4, 1.5 / (fs / 2.0), btype='low')
+    
+    # b. Joint Velocity LPF (Target - filtfilt)
+    # [MOD] 5Hz, 2nd order (filtfilt)
+    b_v, a_v = butter(2, 5.0 / (fs / 2.0), btype='low')
+    
+    # --- 2. Calculate Treadmill Avg Speed & Accel ---
+    tm_l_idx = None; tm_r_idx = None
+    for k, (s, e) in ch_map.items():
+        lk = k.lower()
+        if "treadmill" in lk:
+            if "left" in lk: tm_l_idx = (s, e)
+            elif "right" in lk: tm_r_idx = (s, e)
+            
+    v_avg = np.zeros(len(arr_concat))
+    a_belt = np.zeros(len(arr_concat))
+    if tm_l_idx and tm_r_idx:
+        v_l = arr_concat[:, tm_l_idx[0]:tm_l_idx[1]].flatten()
+        v_r = arr_concat[:, tm_r_idx[0]:tm_r_idx[1]].flatten()
+        v_raw = (v_l + v_r) / 2.0
+        # Target speed (filtfilt)
+        v_avg = filtfilt(b_tm, a_tm, v_raw)
+        # Acceleration for IMU correction (diff of raw or lightly filtered)
+        # We use raw for immediacy, then filter the resulting acc if needed, 
+        # but here we'll diff the filtered speed to stay consistent with V trend.
+        a_belt = np.zeros_like(v_avg)
+        a_belt[1:] = np.diff(v_avg) / dt
+        
+    # --- 3. Build New Array ---
+    sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+    new_cols = []
+    new_map = {}
+    current_ptr = 0
+    
+    processed_tm = False
+    
+    # Get Mass for GRF
+    mass = meta.get("mass", 70.0)
+    bw = mass * 9.81
+    
+    for key, (s, e) in sorted_map:
+        lk = key.lower()
+        
+        # A. Replace Treadmill 벨트 2개를 1개로 (speed_avg)
+        if "treadmill" in lk and ("left" in lk or "right" in lk):
+            if not processed_tm:
+                col = v_avg.reshape(-1, 1).astype(np.float32)
+                new_cols.append(col)
+                new_map["treadmill/speed_avg"] = (current_ptr, current_ptr + 1)
+                current_ptr += 1
+                processed_tm = True
+            continue
+            
+        block = arr_concat[:, s:e].copy().astype(np.float32)
+        
+        # B. Joint Velocities (kin_q -> append vel)
+        if "mocap/kin_q" in lk:
+            # 1. Keep original angle
+            new_cols.append(block)
+            new_map[key] = (current_ptr, current_ptr + 1)
+            current_ptr += 1
+            
+            # 2. Compute Velocity
+            vel = np.zeros_like(block)
+            vel[1:, 0] = np.diff(block[:, 0]) / dt
+            # Apply LPF (filtfilt)
+            vel_filt = filtfilt(b_v, a_v, vel, axis=0)
+            
+            new_cols.append(vel_filt.astype(np.float32))
+            vel_name = key.replace("kin_q", "kin_dq")
+            new_map[vel_name] = (current_ptr, current_ptr + 1)
+            current_ptr += 1
+            continue
+            
+        # C. IMU Correction (accel_z += a_belt)
+        if "robot/back_imu/accel_z" in lk:
+            block[:, 0] += a_belt
+            
+        # D. GRF Normalization
+        if "forceplate" in lk and "grf" in lk:
+            block /= bw
+            
+        # Add the block
+        new_cols.append(block)
+        width = block.shape[1]
+        new_map[key] = (current_ptr, current_ptr + width)
+        current_ptr += width
+        
+    new_arr = np.hstack(new_cols).astype(np.float32)
+    return new_arr, new_map
+
+def process_data_speed_diff_leglength(arr_concat: np.ndarray, meta: dict) -> Tuple[np.ndarray, dict]:
+    """
+    Enhanced Speed Preprocessor with Leg Length:
+    1. Average Treadmill Speed & Acceleration (for ground truth and IMU correction).
+    2. IMU Correction: robot/back_imu/accel_z (forward) += treadmill_accel.
+    3. Joint Velocities: mocap/kin_q -> Diff -> Causal 5Hz LPF.
+    4. GRF Normalization: forceplate/grf / BW.
+    5. [NEW] Append Leg Length as a constant channel.
+    
+    Returns: (new_arr, new_ch_map)
+    """
+    from scipy.signal import lfilter
+    ch_map = meta["ch_map"]
+    fs = meta.get("fs_hz", 100) or 100
+    subject = meta.get("subject", "S001")
+    dt = 1.0 / fs
+    
+    # Get Leg Length (from meta, injected by utilities.py)
+    leg_length = meta.get("leg_length", 0.9)
+    if leg_length <= 0: leg_length = 0.9
+
+    # --- 1. Filter Design ---
+    # [MOD] 1.5Hz, 4th order for Speed
+    b_tm, a_tm = butter(4, 1.5 / (fs / 2.0), btype='low')
+    # [MOD] 5Hz, 2nd order (filtfilt) for Joint Vel
+    b_v, a_v = butter(2, 5.0 / (fs / 2.0), btype='low')
+    
+    # --- 2. Calculate Treadmill Avg Speed & Accel ---
+    tm_l_idx = None; tm_r_idx = None
+    for k, (s, e) in ch_map.items():
+        lk = k.lower()
+        if "treadmill" in lk:
+            if "left" in lk: tm_l_idx = (s, e)
+            elif "right" in lk: tm_r_idx = (s, e)
+            
+    v_avg = np.zeros(len(arr_concat))
+    a_belt = np.zeros(len(arr_concat))
+    if tm_l_idx and tm_r_idx:
+        v_l = arr_concat[:, tm_l_idx[0]:tm_l_idx[1]].flatten()
+        v_r = arr_concat[:, tm_r_idx[0]:tm_r_idx[1]].flatten()
+        v_raw = (v_l + v_r) / 2.0
+        v_avg = filtfilt(b_tm, a_tm, v_raw)
+        a_belt = np.zeros_like(v_avg)
+        a_belt[1:] = np.diff(v_avg) / dt
+        
+    # --- 3. Build New Array ---
+    sorted_map = sorted(ch_map.items(), key=lambda x: x[1][0])
+    new_cols = []
+    new_map = {}
+    current_ptr = 0
+    
+    processed_tm = False
+    
+    mass = meta.get("mass", 70.0)
+    bw = mass * 9.81
+    
+    for key, (s, e) in sorted_map:
+        lk = key.lower()
+        
+        # A. Speed
+        if "treadmill" in lk and ("left" in lk or "right" in lk):
+            if not processed_tm:
+                col = v_avg.reshape(-1, 1).astype(np.float32)
+                new_cols.append(col)
+                new_map["treadmill/speed_avg"] = (current_ptr, current_ptr + 1)
+                current_ptr += 1
+                processed_tm = True
+            continue
+            
+        block = arr_concat[:, s:e].copy().astype(np.float32)
+        
+        # B. Joint Velocities
+        if "mocap/kin_q" in lk:
+            new_cols.append(block)
+            new_map[key] = (current_ptr, current_ptr + 1)
+            current_ptr += 1
+            
+            vel = np.zeros_like(block)
+            vel[1:, 0] = np.diff(block[:, 0]) / dt
+            vel_filt = filtfilt(b_v, a_v, vel, axis=0) # filtfilt LPF
+            
+            new_cols.append(vel_filt.astype(np.float32))
+            vel_name = key.replace("kin_q", "kin_dq")
+            new_map[vel_name] = (current_ptr, current_ptr + 1)
+            current_ptr += 1
+            continue
+            
+        # C. IMU Correction
+        if "robot/back_imu/accel_z" in lk:
+            block[:, 0] += a_belt
+            
+        # D. GRF Normalization
+        if "forceplate" in lk and "grf" in lk:
+            block /= bw
+            
+        new_cols.append(block)
+        width = block.shape[1]
+        new_map[key] = (current_ptr, current_ptr + width)
+        current_ptr += width
+        
+    # --- 4. Append Leg Length (Constant Channel) ---
+    # Only append if role is input (assuming leg length is input feature)
+    # The user didn't specify, but usually static features are inputs.
+    # We check if this is meant for input or output. Speed predictor inputs include joint angles etc.
+    # Outputs are treadmill speed. We should only add to input.
+    role = meta.get("role", "input")
+    if role == "input":
+        T = len(arr_concat)
+        leg_col = np.full((T, 1), leg_length, dtype=np.float32)
+        new_cols.append(leg_col)
+        new_map["common/leg_length"] = (current_ptr, current_ptr + 1)
+        current_ptr += 1
+        
+    new_arr = np.hstack(new_cols).astype(np.float32)
+    return new_arr, new_map
+
+02_train_tcn.py
+# ==== file: train_user_tcn.py ================================================
+"""
+Plug the TCN into *your* finished IO-HDF5 dataloader.
+- Expects a function `get_dataloaders(cfg)` that returns
+  {
+    "datasets": {"train": ds_tr, "val": ds_va, "test": ds_te},
+    "loaders":  {"train": dl_tr, "val": dl_va, "test": dl_te},
+    "channels": {"in": in_ch,  "out": out_ch},
+    "splits":   splits,
+  }
+- Each dataset item should be (x, y) with shapes:
+    x: (C_in, W)  [channel-first, window length W]
+    y: (C_out,)   [seq2one label]
+- If your batch comes as x: (B, C, W), we permute to (B, W, C) before TCN.
+
+How to use
+----------
+1) Make sure `get_dataloaders` is importable (replace the import path below).
+2) Edit the `CFG` block if needed (epochs, lr, channels, etc.).
+3) Run:  `python train_user_tcn.py`
+"""
+from typing import Dict
+import os, math, csv
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+import yaml
+from tcn import TCNModel
+from utilities import *
+from utilities import scan_series_by_trial
+try:
+    from test_scripts_by_agent.kinematic_loss import KinematicLoss
+    KIN_LOSS_AVAILABLE = True
+except ImportError:
+    KIN_LOSS_AVAILABLE = False
+
+
+
+# Remove local make_model since we use utilities.build_model
+
+def count_parameters(model) -> int:
+    """Count total trainable parameters in a model."""
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def send_notification_email(subject, body):
+    """Utility to send email notification using established credentials."""
+    import smtplib
+    from email.mime.text import MIMEText
+    
+    sender = "aronwos1212@gmail.com"
+    receiver = "aronwos1212@gmail.com"
+    app_password = "tepx bjdq lgik xpdj" # Known app password from run_all.py
+    
+    msg = MIMEText(body, "plain", "utf-8")
+    msg['Subject'] = subject
+    msg['From'] = sender
+    msg['To'] = receiver
+    
+    try:
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(sender, app_password)
+        server.sendmail(sender, receiver, msg.as_string())
+        server.quit()
+        print("[INFO] Notification email sent successfully.")
+    except Exception as e:
+        print(f"[WARN] Failed to send notification email: {e}")
+
+
+def check_model_capacity(model, n_train_samples: int, fold_name: str = "", 
+                          window_size: int = None, stride: int = None) -> dict:
+    """
+    Check if the number of model parameters is appropriate for the training data size.
+    
+    Rules of thumb:
+    - ratio < 0.1 (10:1 samples per param): Very safe, may be underfitting
+    - 0.1 <= ratio < 1 (1~10 samples per param): Good balance
+    - 1 <= ratio < 10: Risk of overfitting, regularization strongly recommended
+    - ratio >= 10: High risk of overfitting, consider reducing model size
+    
+    Args:
+        model: PyTorch model
+        n_train_samples: Number of training samples (windows)
+        fold_name: Optional fold identifier for logging
+        window_size: Window size used for sliding window (for effective sample calculation)
+        stride: Stride used for sliding window (for effective sample calculation)
+        
+    Returns:
+        dict with analysis results
+    """
+    n_params = count_parameters(model)
+    
+    # Calculate effective independent samples considering overlap
+    n_effective = n_train_samples
+    overlap_ratio = 0.0
+    if window_size is not None and stride is not None and window_size > stride:
+        overlap = window_size - stride
+        overlap_ratio = overlap / window_size
+        # Effective independent samples: rough approximation
+        # When overlap is high, consecutive samples are highly correlated
+        # Effective multiplier = stride / window_size (fraction of new data per sample)
+        effective_multiplier = stride / window_size
+        n_effective = int(n_train_samples * effective_multiplier)
+    
+    ratio = n_params / max(1, n_train_samples)
+    ratio_effective = n_params / max(1, n_effective)
+    samples_per_param = n_train_samples / max(1, n_params)
+    effective_samples_per_param = n_effective / max(1, n_params)
+    
+    prefix = f"[{fold_name}]" if fold_name else "[Model Capacity Check]"
+    
+    print(f"\n{prefix} ====== Model Capacity Analysis ======")
+    print(f"  Total trainable parameters:    {n_params:,}")
+    print(f"  Number of training windows:    {n_train_samples:,}")
+    if window_size is not None and stride is not None:
+        print(f"  Window size / Stride:          {window_size} / {stride}")
+        print(f"  Overlap ratio:                 {overlap_ratio:.1%}")
+        print(f"  Effective independent samples: {n_effective:,} (approx.)")
+    print(f"  Ratio (params/windows):        {ratio:.4f}")
+    print(f"  Ratio (params/effective):      {ratio_effective:.4f}")
+    print(f"  Windows per parameter:         {samples_per_param:.2f}")
+    print(f"  Effective samples per param:   {effective_samples_per_param:.2f}")
+    
+    # Use effective ratio for status determination
+    status = "OK"
+    if ratio_effective < 0.01:
+        status = "UNDERFIT_RISK"
+        print(f"  ⚠️  WARNING: Very low param/effective_sample ratio ({ratio_effective:.4f} < 0.01)")
+        print(f"      Model may be too simple. Consider increasing model capacity.")
+    elif ratio_effective < 0.1:
+        status = "SAFE"
+        print(f"  ✅ GOOD: Low param/sample ratio. Model capacity is conservative.")
+    elif ratio_effective < 1.0:
+        status = "BALANCED"
+        print(f"  ✅ GOOD: Balanced param/sample ratio. Good for generalization.")
+    elif ratio_effective < 10.0:
+        status = "OVERFIT_WARNING"
+        print(f"  ⚠️  WARNING: High effective param/sample ratio ({ratio_effective:.4f} >= 1.0)")
+        print(f"      Risk of overfitting. Ensure regularization is enabled.")
+        print(f"      Recommendations: weight_decay, dropout, early_stopping, data augmentation")
+    else:
+        status = "OVERFIT_HIGH_RISK"
+        print(f"  🚨 CRITICAL: Very high effective param/sample ratio ({ratio_effective:.4f} >= 10.0)")
+        print(f"      High risk of overfitting!")
+        print(f"      Strongly recommend: reduce model size, add more data, or use heavy regularization.")
+    
+    print(f"  Status: {status}")
+    print(f"{prefix} =======================================\n")
+    
+    return {
+        "n_params": n_params,
+        "n_train_samples": n_train_samples,
+        "n_effective_samples": n_effective,
+        "overlap_ratio": overlap_ratio,
+        "ratio": ratio,
+        "ratio_effective": ratio_effective,
+        "samples_per_param": samples_per_param,
+        "effective_samples_per_param": effective_samples_per_param,
+        "status": status
+    }
+
+
+def train_one_epoch(model, dl: DataLoader, device, criterion, optim, scaler=None, task_type="regression", kin_criterion=None):
+    model.train()
+    total = 0
+    run_loss = 0.0
+    run_reg_loss = 0.0
+    run_kin_loss = 0.0
+    run_pos_loss = 0.0
+    run_limit_loss = 0.0
+    run_cont_loss = 0.0
+    run_smooth_loss = 0.0
+    correct = 0  # for classification
+    
+    for batch in dl:
+        # Check if batch has metadata (length 3: x, y, m)
+        if len(batch) == 3:
+            x, y, m = batch
+        else:
+            x, y = batch
+            m = None
+
+        # x: (B, C, W) -> (B, W, C) for TCN
+        if x.ndim == 3:
+            x = x.permute(0, 2, 1)
+        elif x.ndim == 2:  # (C, W) single item (shouldn't happen in DataLoader)
+            x = x.unsqueeze(0).permute(0, 2, 1)
+        y = y if y.ndim == 2 else y.unsqueeze(0) if y.ndim == 1 else y
+
+        x = x.to(device, non_blocking=True).float()
+        y = y.to(device, non_blocking=True)
+        m = m.to(device) if m is not None else None
+
+        # For classification, y should be Long (class indices) and shape (B,)
+        if task_type == "classification":
+            y = y.long()
+            if y.ndim > 1: y = y.squeeze() # (B, 1) -> (B,)
+        else:
+            y = y.float()
+
+        optim.zero_grad(set_to_none=True)
+        k_loss = torch.tensor(0.0, device=device)
+        p_loss = torch.tensor(0.0, device=device)
+        l_loss = torch.tensor(0.0, device=device)
+        c_loss = torch.tensor(0.0, device=device)
+        s_loss = torch.tensor(0.0, device=device)
+        
+        if scaler is not None:
+            with torch.amp.autocast(device_type=device.type):
+                pred = model(x)
+                reg_loss = criterion(pred, y)
+                if kin_criterion is not None and m is not None:
+                    k_loss, p_loss, l_loss, c_loss, s_loss = kin_criterion(pred, y, x, m)
+                loss = reg_loss + k_loss
+            scaler.scale(loss).backward()
+            scaler.step(optim)
+            scaler.update()
+        else:
+            pred = model(x)
+            reg_loss = criterion(pred, y)
+            if kin_criterion is not None and m is not None:
+                k_loss, p_loss, l_loss, c_loss, s_loss = kin_criterion(pred, y, x, m)
+            loss = reg_loss + k_loss
+            loss.backward()
+            optim.step()
+
+        bs = x.size(0)
+        total += bs
+        run_loss += loss.item() * bs
+        run_reg_loss += reg_loss.item() * bs
+        run_kin_loss += k_loss.item() * bs
+        run_pos_loss += p_loss.item() * bs
+        run_limit_loss += l_loss.item() * bs
+        run_cont_loss += c_loss.item() * bs
+        run_smooth_loss += s_loss.item() * bs
+        
+        if task_type == "classification":
+            # dim 1 is classes
+            _, predicted = torch.max(pred, 1)
+            correct += (predicted == y).sum().item()
+            
+    avg_loss = run_loss / max(1, total)
+    avg_reg_loss = run_reg_loss / max(1, total)
+    avg_kin_loss = run_kin_loss / max(1, total)
+    avg_pos_loss = run_pos_loss / max(1, total)
+    avg_limit_loss = run_limit_loss / max(1, total)
+    avg_cont_loss = run_cont_loss / max(1, total)
+    avg_smooth_loss = run_smooth_loss / max(1, total)
+    acc = (correct / total) if task_type == "classification" else 0.0
+    return {"total": avg_loss, "reg": avg_reg_loss, "kin": avg_kin_loss, "pos": avg_pos_loss, "limit": avg_limit_loss, "cont": avg_cont_loss, "smooth": avg_smooth_loss, "acc": acc}
+
+def evaluate(model, dl: DataLoader, device, criterion, task_type="regression", kin_criterion=None):
+    model.eval()
+    total = 0
+    run_loss = 0.0
+    run_reg_loss = 0.0
+    run_kin_loss = 0.0
+    run_pos_loss = 0.0
+    run_limit_loss = 0.0
+    correct = 0
+    with torch.no_grad():
+        for batch in dl:
+            if len(batch) == 3:
+                x, y, m = batch
+            else:
+                x, y = batch
+                m = None
+
+            if x.ndim == 3:
+                x = x.permute(0, 2, 1)
+            elif x.ndim == 2:
+                x = x.unsqueeze(0).permute(0, 2, 1)
+            y = y if y.ndim == 2 else y.unsqueeze(0) if y.ndim == 1 else y
+            
+            x = x.to(device, non_blocking=True).float()
+            y = y.to(device, non_blocking=True)
+            m = m.to(device) if m is not None else None
+            
+            if task_type == "classification":
+                y = y.long()
+                if y.ndim > 1: y = y.squeeze()
+            else:
+                y = y.float()
+                
+            pred = model(x)
+            reg_loss = criterion(pred, y)
+            k_loss = torch.tensor(0.0, device=device)
+            p_loss = torch.tensor(0.0, device=device)
+            l_loss = torch.tensor(0.0, device=device)
+            c_loss = torch.tensor(0.0, device=device)
+            s_loss = torch.tensor(0.0, device=device)
+            if kin_criterion is not None and m is not None:
+                k_loss, p_loss, l_loss, c_loss, s_loss = kin_criterion(pred, y, x, m)
+            loss = reg_loss + k_loss
+
+            bs = x.size(0)
+            total += bs
+            run_loss += loss.item() * bs
+            run_reg_loss += reg_loss.item() * bs
+            run_kin_loss += k_loss.item() * bs
+            run_pos_loss += p_loss.item() * bs
+            run_limit_loss += l_loss.item() * bs
+            run_cont_loss += c_loss.item() * bs
+            run_smooth_loss += s_loss.item() * bs
+            
+            if task_type == "classification":
+                _, predicted = torch.max(pred, 1)
+                correct += (predicted == y).sum().item()
+                
+    avg_loss = run_loss / max(1, total)
+    avg_reg_loss = run_reg_loss / max(1, total)
+    avg_kin_loss = run_kin_loss / max(1, total)
+    avg_pos_loss = run_pos_loss / max(1, total)
+    avg_limit_loss = run_limit_loss / max(1, total)
+    avg_cont_loss = run_cont_loss / max(1, total)
+    avg_smooth_loss = run_smooth_loss / max(1, total)
+    acc = (correct / total) if task_type == "classification" else 0.0
+    return {"total": avg_loss, "reg": avg_reg_loss, "kin": avg_kin_loss, "pos": avg_pos_loss, "limit": avg_limit_loss, "cont": avg_cont_loss, "smooth": avg_smooth_loss, "acc": acc}
+
+
+def init_loss_plot():
+    plt.ion()
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.set_title("Training / Validation Loss")
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    line_tr, = ax.plot([], [], label="train", linestyle="-", marker="o")
+    line_va, = ax.plot([], [], label="val", linestyle="-", marker="s")
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.3)
+    return fig, ax, line_tr, line_va
+
+def update_loss_plot(fig, ax, line_tr, line_va, ep_list, tr_losses, va_losses, save_path=None):
+    line_tr.set_data(ep_list, tr_losses)
+    line_va.set_data(ep_list, va_losses)
+    ax.set_xlim(1, max(1, ep_list[-1] if len(ep_list) else 1))
+    all_losses = tr_losses + va_losses if len(va_losses) else tr_losses
+    if len(all_losses):
+        min_l = min(all_losses)
+        max_l = max(all_losses)
+        span = max(1e-6, max_l - min_l)
+        ax.set_ylim(max(0.0, min_l - 0.1 * span), max_l + 0.1 * span)
+    fig.canvas.draw()
+    plt.pause(0.001)
+    if save_path is not None:
+        try:
+            fig.savefig(save_path, bbox_inches="tight")
+        except Exception:
+            pass
+def fit_single_fold(cfg: dict, device, save_dir: str, scaler_path: str, fold_name: str = ""):
+    """
+    Train a single fold. Returns dict with fold results.
+    """
+    from copy import deepcopy
+    import numpy as np
+    
+    # Ensure directories exist
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Update scaler_path in cfg for this fold
+    cfg_fold = deepcopy(cfg)
+    cfg_fold["scaler_path"] = scaler_path
+    
+    pack = get_dataloaders(cfg_fold)
+    print(f"[{fold_name}] Dataloaders ready.")
+    
+    dl_tr = pack["loaders"]["train"]
+    dl_va = pack["loaders"]["val"]
+    dl_te = pack["loaders"]["test"]
+    in_ch = pack["channels"]["in"]
+    out_ch = pack["channels"]["out"]
+    splits = pack["splits"]
+    
+    if dl_tr is None or len(pack["datasets"]["train"]) == 0:
+        print(f"[WARN] {fold_name}: No training data, skipping fold.")
+        return None
+        
+    print(f"[{fold_name}] Getting first batch...")
+    batch = next(iter(dl_tr))
+    x, y = batch[0], batch[1]
+    print(f"[{fold_name}] x shape: {x.shape}, y shape: {y.shape}")
+    
+    # Task Type
+    task_type = cfg["train"].get("task_type", "regression").lower()
+    
+    # Model/optim/sched
+    out_ch_model = out_ch
+    if task_type == "classification":
+        out_ch_model = cfg["model"].get("num_classes", 4)
+        print(f"[{fold_name}] Classification Mode: Setting model out_dim to {out_ch_model}")
+
+    print(f"[{fold_name}] Building model (in={in_ch}, out={out_ch_model})...")
+    model = build_model(in_ch, out_ch_model, cfg).to(device)
+    print(f"[{fold_name}] Model built.")
+    
+    # [NEW] Save Model Summary and Config
+    summary_path = os.path.join(save_dir, "model_summary.txt")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(f"Fold: {fold_name}\n")
+        f.write(f"Task Type: {task_type}\n")
+        f.write(f"Input Channels: {in_ch}\n")
+        f.write(f"Output Channels: {out_ch_model}\n")
+        f.write("-" * 50 + "\n")
+        f.write(str(model) + "\n")
+        f.write("-" * 50 + "\n")
+        n_params = count_parameters(model)
+        f.write(f"Total Trainable Parameters: {n_params:,}\n")
+        # Calc size in MB
+        param_size = 0
+        for param in model.parameters():
+            param_size += param.nelement() * param.element_size()
+        buffer_size = 0
+        for buffer in model.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+        size_all_mb = (param_size + buffer_size) / 1024**2
+        f.write(f"Estimated Model Size: {size_all_mb:.3f} MB\n")
+    
+    # [NEW] Copy the relevant part of the config used for this fold
+    config_copy_path = os.path.join(save_dir, "train_config.yaml")
+    with open(config_copy_path, "w", encoding="utf-8") as f:
+        # We only save the 02_train subset but as the root for clarity
+        yaml.dump({"run_config": cfg}, f, default_flow_style=False, sort_keys=False)
+    
+    print(f"[{fold_name}] Model summary saved to {summary_path}")
+    print(f"[{fold_name}] Config backup saved to {config_copy_path}")
+    
+    # Check model capacity before training
+    n_train_samples = len(pack["datasets"]["train"])
+    window_size = cfg["data"]["window_size"]
+    stride = cfg["data"]["stride"]
+    capacity_result = check_model_capacity(model, n_train_samples, fold_name, 
+                                            window_size=window_size, stride=stride)
+    
+    if task_type == "classification":
+        # Compute class weights inversely proportional to class frequency
+        print(f"[{fold_name}] Computing class weights for imbalanced classification...")
+        ds_tr = pack["datasets"]["train"]
+        label_counts = {}
+        for i in range(len(ds_tr)):
+            _, y_item = ds_tr[i][:2]  # Get label (handle both (x, y) and (x, y, m))
+            label = int(y_item.item()) if hasattr(y_item, 'item') else int(y_item)
+            label_counts[label] = label_counts.get(label, 0) + 1
+        
+        num_classes = cfg["model"].get("num_classes", 4)
+        total_samples = sum(label_counts.values())
+        class_weights = []
+        for c in range(num_classes):
+            count = label_counts.get(c, 1)  # Avoid division by zero
+            weight = total_samples / (num_classes * count)
+            class_weights.append(weight)
+            print(f"  Class {c}: {count} samples, weight={weight:.4f}")
+        
+        class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32).to(device)
+        criterion = nn.CrossEntropyLoss(weight=class_weights_tensor)
+        print(f"[{fold_name}] Using weighted CrossEntropyLoss for class imbalance")
+    else:
+        criterion = nn.MSELoss() if cfg["model"].get("loss", "mse") == "mse" else nn.L1Loss()
+
+        
+    optim = torch.optim.AdamW(model.parameters(), lr=float(cfg["train"]["lr"]), weight_decay=float(cfg["train"]["wd"]))
+    epochs = int(cfg["train"].get("epochs", 50))
+    sched = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs)
+    scaler = torch.amp.GradScaler(device=device.type) if device.type == "cuda" else None
+
+    es = EarlyStopping(
+        patience=cfg["train"].get("early_stop_patience", 20),
+        min_delta=float(cfg["train"].get("early_stop_min_delta", 0.0)),
+        warmup=cfg["train"].get("early_stop_warmup", 0),
+    )
+
+    # [NEW] Kinematic Loss
+    kin_criterion = None
+    w_pos = float(cfg["train"].get("kinematic_loss_weight_pos", 0.0))
+    w_limit = float(cfg["train"].get("kinematic_loss_weight_limit", 0.0))
+    w_contact = float(cfg["train"].get("kinematic_loss_weight_contact", 0.0))
+    w_smoothness = float(cfg["train"].get("kinematic_loss_weight_smoothness", 0.0))
+    
+    if (w_pos > 0 or w_limit > 0 or w_contact > 0 or w_smoothness > 0) and KIN_LOSS_AVAILABLE:
+        print(f"[{fold_name}] Initializing Kinematic Loss...")
+        is_deg = bool(cfg["train"].get("kinematic_loss_degrees", True))
+        
+        # [NEW] Extract input and output names for mapping
+        input_names, output_names = None, None
+        try:
+            if len(pack["datasets"]["train"]) > 0:
+                ds_tr_obj = pack["datasets"]["train"]
+                if hasattr(ds_tr_obj, 'h5_path') and hasattr(ds_tr_obj, 'series') and len(ds_tr_obj.series) > 0:
+                     h5_path = ds_tr_obj.h5_path
+                     first_x_path = ds_tr_obj.series[0].x_paths[0]
+                     first_y_path = ds_tr_obj.series[0].y_paths[0]
+                     with h5py.File(h5_path, 'r') as h5f:
+                         # Extract input names
+                         if first_x_path in h5f:
+                             dset_x = h5f[first_x_path]
+                             if "features" in dset_x.attrs:
+                                 feats_x = dset_x.attrs["features"]
+                                 input_names = [f.decode() if isinstance(f, (bytes, bytearray)) else str(f) for f in feats_x]
+                         # Extract output names
+                         if first_y_path in h5f:
+                             dset_y = h5f[first_y_path]
+                             if "features" in dset_y.attrs:
+                                 feats_y = dset_y.attrs["features"]
+                                 output_names = [f.decode() if isinstance(f, (bytes, bytearray)) else str(f) for f in feats_y]
+                         
+                         if input_names and output_names:
+                             print(f"[{fold_name}] Found names for KinematicLoss: In={len(input_names)}, Out={len(output_names)}")
+        except Exception as e:
+            print(f"[{fold_name}] WARN: Failed to extract names for KinematicLoss: {e}")
+
+
+        kin_criterion = KinematicLoss(
+            weight_pos=w_pos, 
+            weight_limit=w_limit,
+            weight_contact=w_contact,
+            weight_smoothness=w_smoothness,
+            degrees_to_radians=is_deg, 
+            input_names=input_names, 
+            output_names=output_names
+        ).to(device)
+        print(f"[{fold_name}] Using Kinematic Loss (pos={w_pos}, limit={w_limit}, cont={w_contact}, smooth={w_smoothness}, is_deg={is_deg})")
+    
+    print(f"[{fold_name}] Starting training loop for {epochs} epochs...")
+    
+    ckpt_path = os.path.join(save_dir, "best_tcn.pt")
+    best = math.inf
+    
+    ep_list, tr_losses, va_losses = [], [], []
+    tr_reg_losses, tr_kin_losses = [], []
+    tr_pos_losses, tr_limit_losses = [], []
+    tr_cont_losses, tr_smooth_losses = [], []
+    
+    va_reg_losses, va_kin_losses = [], []
+    va_pos_losses, va_limit_losses = [], []
+    va_cont_losses, va_smooth_losses = [], []
+    csv_path = os.path.join(save_dir, "loss_curve.csv")
+
+    for ep in range(1, epochs+1):
+        tr_result = train_one_epoch(model, dl_tr, device, criterion, optim, scaler, task_type, kin_criterion=kin_criterion)
+        va_result = evaluate(model, dl_va, device, criterion, task_type, kin_criterion=kin_criterion)
+        sched.step()
+        
+        tr_loss, va_loss = tr_result["total"], va_result["total"]
+        tr_reg, tr_kin = tr_result["reg"], tr_result["kin"]
+        tr_pos, tr_limit = tr_result["pos"], tr_result["limit"]
+        tr_cont, tr_smooth = tr_result["cont"], tr_result["smooth"]
+        
+        va_reg, va_kin = va_result["reg"], va_result["kin"]
+        va_pos, va_limit = va_result["pos"], va_result["limit"]
+        va_cont, va_smooth = va_result["cont"], va_result["smooth"]
+        
+        tr_acc, va_acc = tr_result["acc"], va_result["acc"]
+        
+        log_str = f"[{fold_name}][Epoch {ep:03d}] tr={tr_loss:.4f}(reg={tr_reg:.4f},pos={tr_pos:.4f},lim={tr_limit:.4f},ct={tr_cont:.4f},sm={tr_smooth:.4f})  va={va_loss:.4f}(reg={va_reg:.4f})"
+        if task_type == "classification":
+            log_str += f" | tr_acc={tr_acc:.4f} va_acc={va_acc:.4f}"
+        print(log_str)
+
+        ep_list.append(ep)
+        tr_losses.append(tr_loss)
+        va_losses.append(va_loss)
+        tr_reg_losses.append(tr_reg)
+        tr_kin_losses.append(tr_kin)
+        tr_pos_losses.append(tr_pos)
+        tr_limit_losses.append(tr_limit)
+        tr_cont_losses.append(tr_cont)
+        tr_smooth_losses.append(tr_smooth)
+        
+        va_reg_losses.append(va_reg)
+        va_kin_losses.append(va_kin)
+        va_pos_losses.append(va_pos)
+        va_limit_losses.append(va_limit)
+        va_cont_losses.append(va_cont)
+        va_smooth_losses.append(va_smooth)
+
+        if va_loss < best:
+            best = va_loss
+            torch.save({"state_dict": model.state_dict(), "cfg": cfg, "epoch": ep, "val_loss": best, "in_ch": in_ch, "out_ch": out_ch_model}, ckpt_path)
+            print(f"  Saved {ckpt_path} (val={best:.6f})")
+            
+        if es.step(va_loss):
+            print(f"  Early stopping at epoch {ep} (best val={es.best:.6f}).")
+            break
+
+    # 3rd Evaluation: Load best and Run on Test Set
+    print(f"[{fold_name}] Final Evaluation on Test Set...")
+    if os.path.exists(ckpt_path):
+        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False) # weights_only=False to avoid warning if older torch, or True if strictly state_dict
+        model.load_state_dict(checkpoint['state_dict'])
+        test_result = evaluate(model, dl_te, device, criterion, task_type, kin_criterion=kin_criterion)
+    else:
+        test_result = {"total": 0.0, "reg": 0.0, "kin": 0.0, "pos": 0.0, "limit": 0.0, "acc": 0.0}
+
+    test_loss = test_result["reg"]
+    test_acc = test_result["acc"]
+    print(f"[{fold_name}] Final Test Loss: {test_loss:.6f}" + (f" | Test Acc: {test_acc:.4f}" if task_type == "classification" else ""))
+
+    # Save loss curve with detailed losses
+    # Save loss curve with detailed losses
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["epoch", "train_total", "train_reg", "train_kin", "train_pos", "train_limit", "train_cont", "train_smooth", "val_total", "val_reg", "val_kin", "val_pos", "val_limit", "val_cont", "val_smooth"])
+        for e, tr, tr_r, tr_k, tr_p, tr_l, tr_c, tr_s, va, va_r, va_k, va_p, va_l, va_c, va_s in zip(ep_list, tr_losses, tr_reg_losses, tr_kin_losses, tr_pos_losses, tr_limit_losses, tr_cont_losses, tr_smooth_losses, va_losses, va_reg_losses, va_kin_losses, va_pos_losses, va_limit_losses, va_cont_losses, va_smooth_losses):
+            writer.writerow([e, tr, tr_r, tr_k, tr_p, tr_l, tr_c, tr_s, va, va_r, va_k, va_p, va_l, va_c, va_s])
+    print(f"[SAVE] Training log saved to {csv_path}")
+
+    # [NEW] Append test results to model_summary.txt
+    with open(summary_path, "a", encoding="utf-8") as f:
+        f.write("\n" + "=" * 50 + "\n")
+        f.write("Final Performance Metrics\n")
+        f.write("=" * 50 + "\n")
+        f.write(f"Best Val Loss: {best:.6f}\n")
+        f.write(f"Final Test Loss (reg): {test_loss:.6f}\n")
+        if task_type == "classification":
+            f.write(f"Final Test Acc:  {test_acc:.4f}\n")
+    
+    return {
+        "fold_name": fold_name,
+        "test_subjects": splits.get("test", []),
+        "train_subjects": splits.get("train", []),
+        "val_subjects": splits.get("val", []),
+        "best_val_loss": best,
+        "test_loss": test_loss,
+        "test_acc": test_acc,
+        "epochs_trained": len(ep_list),
+        "ckpt_path": ckpt_path,
+    }
+
+
+def fit_loso(cfg_path: str, override_save_dir: str = None):
+    """
+    Leave-One-Subject-Out cross-validation.
+    """
+    from copy import deepcopy
+    from pathlib import Path
+    import numpy as np
+    
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg_root = yaml.safe_load(f)
+    cfg = cfg_root["02_train"]
+    device = torch.device(cfg["train"].get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+    task_type = cfg["train"].get("task_type", "regression").lower()
+    
+    # Dynamic Pathing
+    cfg_stem = Path(cfg_path).stem
+    cfg_dir = Path(cfg_path).parent
+    
+    def prepend_root(path_str):
+        if path_str and (path_str.startswith("./") or not os.path.isabs(path_str)):
+            # If path already starts with the config directory, don't prepend
+            if str(cfg_dir) in path_str:
+                return path_str
+                
+            p = Path(path_str)
+            parts = list(p.parts)
+            if parts[0] == ".":
+                parts = parts[1:]
+            
+            # Combine config dir with relative path
+            new_path = cfg_dir / Path(*parts)
+            return str(new_path).replace("\\", "/")
+        return path_str
+    
+    if override_save_dir:
+        base_save_dir = prepend_root(override_save_dir)
+        print(f"[LOSO] Override base_save_dir (prepended): {base_save_dir}")
+    else:
+        base_save_dir = prepend_root(cfg["train"].get("save_dir", "./runs_tcn"))
+        print(f"[LOSO] Base save_dir: {base_save_dir}")
+    
+    # [NEW] Ensure summary and other outputs go here
+    if "scaler_path" in cfg and cfg["scaler_path"]:
+        if cfg["scaler_path"].startswith("./"):
+            cfg["scaler_path"] = os.path.join(base_save_dir, os.path.basename(cfg["scaler_path"]))
+    
+    if "split" in cfg and "save_to" in cfg["split"] and cfg["split"]["save_to"]:
+        if cfg["split"]["save_to"].startswith("./"):
+            cfg["split"]["save_to"] = os.path.join(base_save_dir, os.path.basename(cfg["split"]["save_to"]))
+
+    # [NEW] Resolve io_h5 relative to config (if relative path)
+    if "io_h5" in cfg:
+         cfg["io_h5"] = prepend_root(cfg["io_h5"])
+    
+    # Get all subjects from IO H5
+    io_h5 = cfg.get("io_h5")
+    subjects = list_units(io_h5, "subject")
+    print(f"[LOSO] Found {len(subjects)} subjects: {subjects}")
+    
+    # LOSO config
+    loso_cfg = cfg["split"].get("loso", {})
+    val_ratio = loso_cfg.get("val_ratio", 0.15)
+    seed = loso_cfg.get("seed", 42)
+    rng = np.random.default_rng(seed)
+    
+    results = []
+    
+    for test_subj in subjects:
+        print(f"\n{'='*60}")
+        print(f"[LOSO] Fold: Test Subject = {test_subj}")
+        print(f"{'='*60}")
+        
+        # Train subjects = all except test
+        train_val_subjects = [s for s in subjects if s != test_subj]
+        rng.shuffle(train_val_subjects)
+        
+        # Split into train/val
+        n_val = max(1, int(len(train_val_subjects) * val_ratio))
+        val_subjects = train_val_subjects[:n_val]
+        train_subjects = train_val_subjects[n_val:]
+        
+        print(f"  Train: {train_subjects}")
+        print(f"  Val:   {val_subjects}")
+        print(f"  Test:  [{test_subj}]")
+        
+        # Create fold-specific config
+        cfg_fold = deepcopy(cfg)
+        cfg_fold["split"]["mode"] = "manual"
+        cfg_fold["split"]["manual"] = {
+            "train": train_subjects,
+            "val": val_subjects,
+            "test": [test_subj]
+        }
+        cfg_fold["split"]["save_to"] = None  # Don't save per-fold split
+        
+        # Fold-specific paths
+        fold_dir = os.path.join(base_save_dir, f"fold_{test_subj}")
+        fold_scaler = os.path.join(fold_dir, "scaler.npz")
+        
+        # [NEW] Resume capability: Skip if loss_curve.csv exists
+        if os.path.exists(os.path.join(fold_dir, "loss_curve.csv")):
+            print(f"[LOSO] Skipping fold_{test_subj} (Found loss_curve.csv).")
+            continue
+        
+        # Train this fold
+        result = fit_single_fold(cfg_fold, device, fold_dir, fold_scaler, fold_name=f"LOSO_{test_subj}")
+        if result:
+            results.append(result)
+            
+            # [NEW] Notify per-fold completion
+            subj_subject = f"[LOSO Fold Done] {test_subj} ({cfg_stem})"
+            subj_body = f"Fold training completed for subject: {test_subj}\n"
+            subj_body += f"Config: {cfg_stem}\n"
+            subj_body += f"Fold Directory: {fold_dir}\n"
+            subj_body += f"Best Val Loss: {result['best_val_loss']:.6f}\n"
+            subj_body += f"Test Loss:     {result['test_loss']:.6f}\n"
+            if task_type == "classification":
+                subj_body += f"Test Acc:      {result['test_acc']:.4f}\n"
+            subj_body += f"Epochs: {result['epochs_trained']}\n"
+            subj_body += f"\nProgress: {len(results)}/{len(subjects)} subjects completed."
+            send_notification_email(subj_subject, subj_body)
+    
+    # Save LOSO summary
+    summary_path = os.path.join(base_save_dir, "loso_summary.csv")
+    with open(summary_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["fold_name", "test_subject", "train_subjects", "val_subjects", "best_val_loss", "test_loss (reg_loss)", "epochs_trained"])
+        for r in results:
+            writer.writerow([
+                r["fold_name"],
+                ",".join(r["test_subjects"]),
+                ",".join(r["train_subjects"]),
+                ",".join(r["val_subjects"]),
+                f"{r['best_val_loss']:.6f}",
+                f"{r['test_loss']:.6f}",
+                r["epochs_trained"]
+            ])
+    print(f"\n[LOSO] Summary saved to {summary_path}")
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("[LOSO] Cross-Validation Summary")
+    print("="*60)
+    for r in results:
+        print(f"  {r['fold_name']}: val_loss={r['best_val_loss']:.4f}, epochs={r['epochs_trained']}")
+    
+    avg_loss = np.mean([r["best_val_loss"] for r in results]) if results else 0
+    avg_test = np.mean([r["test_loss"] for r in results]) if results else 0
+    print(f"\n  Average Val Loss:  {avg_loss:.4f}")
+    print(f"  Average Test Loss (reg): {avg_test:.4f}")
+    
+    # Notify via email
+    subject = f"[LOSO DONE] {cfg_stem}"
+    body = f"LOSO Cross-Validation completed for config: {cfg_stem}\n"
+    body += f"Base Dir: {base_save_dir}\n"
+    body += f"Average Val Loss:  {avg_loss:.4f}\n"
+    body += f"Average Test Loss (reg): {avg_test:.4f}\n"
+    body += f"Folds: {len(results)}\n"
+    send_notification_email(subject, body)
+
+    return results
+ 
+ 
+
+
+
+def _get_unique_save_dir(base_dir):
+    """
+    If base_dir exists, return base_dir_1, base_dir_2, etc.
+    Otherwise return base_dir.
+    """
+    if not os.path.exists(base_dir):
+        return base_dir
+    
+    counter = 1
+    while True:
+        new_dir = f"{base_dir}_{counter}"
+        if not os.path.exists(new_dir):
+            return new_dir
+        counter += 1
+
+def fit(cfg_path: str, override_save_dir: str = None):
+    """
+    Main training entry point. Dispatches to LOSO or standard training based on config.
+    """
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg_root = yaml.safe_load(f)
+    cfg = cfg_root["02_train"]
+    
+    split_mode = cfg["split"].get("mode", "random").lower()
+    
+    if split_mode == "loso":
+        print("[MODE] LOSO Cross-Validation")
+        return fit_loso(cfg_path, override_save_dir=override_save_dir)
+    else:
+        print(f"[MODE] Standard Training (split mode: {split_mode})")
+        return fit_standard(cfg_path, override_save_dir=override_save_dir)
+
+
+def fit_standard(cfg_path: str, override_save_dir: str = None):
+    """
+    Standard single-split training (original fit function).
+    """
+    from pathlib import Path
+    
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg_root = yaml.safe_load(f)
+    cfg = cfg_root["02_train"]
+    device = torch.device(cfg["train"].get("device", "cuda" if torch.cuda.is_available() else "cpu"))
+
+    # Dynamic Pathing
+    cfg_stem = Path(cfg_path).stem
+    task_type = cfg["train"].get("task_type", "regression").lower()
+    
+    cfg_dir = Path(cfg_path).parent
+    
+    def prepend_root(path_str):
+        if path_str and (path_str.startswith("./") or not os.path.isabs(path_str)):
+            # If path already starts with the config directory, don't prepend
+            if str(cfg_dir) in path_str:
+                return path_str
+                
+            p = Path(path_str)
+            parts = list(p.parts)
+            if parts[0] == ".":
+                parts = parts[1:]
+            
+            # Combine config dir with relative path
+            new_path = cfg_dir / Path(*parts)
+            return str(new_path).replace("\\", "/")
+        return path_str
+
+    # Apply to known output keys
+    # [NEW] Override command line save_dir if provided
+    if override_save_dir:
+        # Also apply prepend_root to the override if it's a relative path for consistency
+        save_dir = prepend_root(override_save_dir)
+        # Re-apply auto-increment logic if override is used (optional, but good for safety)
+        if not os.path.exists(save_dir) or "run" in save_dir or "_" in os.path.basename(save_dir):
+             save_dir = _get_unique_save_dir(save_dir)
+        print(f"[CFG] Override save_dir (prepended): {save_dir}")
+    else:
+        save_dir = cfg["train"].get("save_dir", "./runs_tcn")
+        if "save_dir" in cfg["train"]:
+            base_dir = prepend_root(cfg["train"]["save_dir"])
+            save_dir = _get_unique_save_dir(base_dir)
+        else:
+            save_dir = _get_unique_save_dir(prepend_root("./runs_tcn"))
+        print(f"[CFG] Final save_dir: {save_dir}")
+
+    # Ensure scaler_path follows the final save_dir if not explicitly set to something else
+    # [MOD] If starts with ./, it's relative to save_dir
+    scaler_path_cfg = cfg.get("scaler_path")
+    if scaler_path_cfg and scaler_path_cfg.startswith("./"):
+        scaler_path = os.path.join(save_dir, os.path.basename(scaler_path_cfg))
+    elif scaler_path_cfg:
+        scaler_path = prepend_root(scaler_path_cfg)
+    else:
+        scaler_path = os.path.join(save_dir, "scaler.npz")
+    
+    # [NEW] Also for split save_to
+    if "split" in cfg and "save_to" in cfg["split"] and cfg["split"]["save_to"]:
+        if cfg["split"]["save_to"].startswith("./"):
+            cfg["split"]["save_to"] = os.path.join(save_dir, os.path.basename(cfg["split"]["save_to"]))
+        else:
+            cfg["split"]["save_to"] = prepend_root(cfg["split"]["save_to"])
+    
+    # [NEW] Resolve io_h5 relative to config (if relative path)
+    if "io_h5" in cfg:
+         cfg["io_h5"] = prepend_root(cfg["io_h5"])
+    
+    print(f"[CFG] Final scaler_path: {scaler_path}")
+    
+    result = fit_single_fold(cfg, device, save_dir, scaler_path, fold_name="Standard")
+    
+    # Notify via email
+    if result:
+        subject = f"[TRAIN DONE] {cfg_stem}"
+        body = f"Training completed for config: {cfg_stem}\n"
+        body += f"Result Dir: {save_dir}\n"
+        body += f"Best Val Loss: {result['best_val_loss']:.6f}\n"
+        body += f"Final Test Loss: {result['test_loss']:.6f}\n"
+        if task_type == "classification":
+            body += f"Final Test Acc:  {result['test_acc']:.4f}\n"
+        body += f"Epochs: {result['epochs_trained']}\n"
+        send_notification_email(subject, body)
+
+    return result["ckpt_path"] if result else None
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--cfg", type=str, default="config_tcn.yaml", help="Path to YAML config.")
+    ap.add_argument("--save_dir", type=str, default=None, help="Override save directory.")
+    args = ap.parse_args()
+    fit(args.cfg, override_save_dir=args.save_dir)
+
+utilities.py
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+utilities.py
+- IO HDF5 생성에 필요한 유틸/클래스/함수 모음
+- 전처리, 스플릿, 시각화, 데이터로더 구성 포함
+- 글로벌 캐시 제거: mass_cache(dict)를 실행측에서 만들어 인자로 전달
+"""
+from dataclasses import dataclass, field
+from typing import List, Tuple, Dict, Optional
+import os, re, json, time, math
+import numpy as np
+import h5py
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import matplotlib.pyplot as plt
+import matplotlib
+
+# =========================
+# 데이터 구조
+# =========================
+from tcn import TCNModel  # Make sure tcn is importable
+
+@dataclass
+class SeriesItem:
+    subject: str         # e.g., "S001"
+    condition: str       # e.g., "level_10"
+    trial: str           # e.g., "trial01"
+    x_paths: List[str]   # absolute paths to X datasets for this trial
+    y_paths: List[str]   # absolute paths to Y datasets for this trial
+    length_T: int
+    metadata: dict = field(default_factory=dict) # [NEW] height, leg_length, etc.
+
+# =========================
+# 모델 빌더 & 로더 (Centralized)
+# =========================
+def build_model(in_ch: int, out_ch: int, cfg: dict) -> nn.Module:
+    """
+    Construct model based on config.
+    cfg["model"]["type"] defaults to "TCN" if not present.
+    Future: support "LSTM", "Transformer", etc.
+    """
+    m_cfg = cfg.get("model", {})
+    m_type = m_cfg.get("type", "TCN").upper()
+
+    if m_type == "TCN":
+        return TCNModel(
+            in_dim=in_ch,
+            out_dim=out_ch,
+            channels=m_cfg.get("channels", [64, 64, 128, 128]),
+            kernel_size=m_cfg.get("kernel_size", 3),
+            dropout=m_cfg.get("dropout", 0.1),
+            head_mode="seq2one",
+            use_norm=m_cfg.get("use_norm", True),
+            head_hidden=m_cfg.get("head_hidden", None),
+            head_dropout=m_cfg.get("head_dropout", 0.0),
+        )
+    else:
+        raise ValueError(f"Unknown model type: {m_type}")
+
+def load_model_checkpoint(ckpt_path: str, device: torch.device) -> Tuple[nn.Module, dict, int, int]:
+    """
+    Load model from checkpoint.
+    Returns: (model, train_cfg, in_ch, out_ch)
+    """
+    if not os.path.exists(ckpt_path):
+        raise FileNotFoundError(f"Checkpoint not found: {ckpt_path}")
+        
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    
+    # Checkpoint keys: {"state_dict", "cfg", "epoch", "val_loss", "in_ch", "out_ch"}
+    train_cfg = ckpt.get("cfg")
+    in_ch = ckpt.get("in_ch")
+    out_ch = ckpt.get("out_ch")
+    state = ckpt.get("state_dict", ckpt.get("model", ckpt)) # Fallback for raw state_dict
+
+    if train_cfg is None or in_ch is None or out_ch is None:
+        raise ValueError(f"Checkpoint {ckpt_path} is missing metadata (cfg, in_ch, out_ch).")
+
+    model = build_model(in_ch, out_ch, train_cfg)
+    model.to(device)
+    model.load_state_dict(state, strict=True)
+    model.eval()
+    
+    return model, train_cfg, in_ch, out_ch
+
+# =========================
+
+# =========================
+# 공통 유틸
+# =========================
+def concat_paths(h5: h5py.File, paths: List[str]) -> np.ndarray:
+    """여러 dataset 경로를 받아 [T, sum(C)]로 채널 방향 concat."""
+    arrays = []
+    T_ref = None
+    for p in paths:
+        if p not in h5:
+            raise KeyError(f"Dataset path not found in H5: {p}")
+        data = np.asarray(h5[p][...])
+        data = np.squeeze(data)
+
+        if data.ndim == 1:
+            data = data[:, None]
+        elif data.ndim != 2:
+            raise ValueError(f"{p} must be 1D or 2D, got {data.shape}")
+
+        T = data.shape[0]
+        if T_ref is None:
+            T_ref = T
+        elif T != T_ref:
+            raise ValueError(f"Time mismatch in {p}: {T} vs {T_ref}")
+
+        arrays.append(data.astype(np.float32))
+    return np.concatenate(arrays, axis=1)
+
+def _is_meta_condition(name: str) -> bool:
+    return name.strip().lower() == "sub_info"
+
+def _match_filter(name: str, allow: List[str]) -> bool:
+    return (not allow) or (name in allow)
+
+def _concat_paths_same_T(h5: h5py.File, paths: List[str]) -> int:
+    T = None
+    for p in paths:
+        ds = h5[p]
+        if ds.ndim == 1:
+            t_curr = ds.shape[0]
+        elif ds.ndim == 2:
+            t_curr = ds.shape[0]
+        else:
+            raise ValueError(f"{p} must be 1D or 2D, got {ds.shape}")
+            
+        if T is None:
+            T = t_curr
+        elif t_curr != T:
+            raise ValueError(f"Time length mismatch in {paths}: {t_curr} vs {T}")
+    return T
+
+def _parse_trial_abs(trial_abs: str):
+    toks = trial_abs.strip("/").split("/")
+    if len(toks) < 3:
+        raise ValueError(f"Invalid trial path: {trial_abs}")
+    return toks[0], toks[1], toks[2]
+
+def _ensure_group(dst: h5py.File, path: str) -> h5py.Group:
+    if path in dst:
+        return dst[path]
+    cur = dst
+    for name in path.strip("/").split("/"):
+        if name not in cur:
+            cur = cur.create_group(name)
+        else:
+            cur = cur[name]
+    return cur
+
+def _resolve_path(trial_abs_path: str, feature_path: str) -> str:
+    if feature_path.startswith("/"):
+        return feature_path
+    return f"{trial_abs_path.rstrip('/')}/{feature_path.lstrip('/')}"
+
+def _check_trial_sync_lag(X: np.ndarray, Y: np.ndarray, ch_map_in: dict, ch_map_out: dict, 
+                         threshold_ms: float = 100.0, fs: float = 100.0,
+                         fin: Optional[h5py.File] = None, trial_abs: Optional[str] = None) -> Tuple[bool, float, str]:
+    """
+    Check if the lag between motor angles (input) and hip flexion (output or source ref) is within threshold.
+    Returns: (is_ok, lag_ms, side)
+    """
+    try:
+        from scipy.signal import correlate
+    except ImportError:
+        def correlate(a, b, mode='full'):
+            return np.correlate(a, b, mode=mode)
+    
+    # Identify pairs
+    sides = ["Left", "Right"]
+    for side in sides:
+        l_mot = None; l_hip_sig = None
+        
+        # 1. Find Motor Angle in Input
+        for p, (s, e) in ch_map_in.items():
+            lp = p.lower()
+            if "motor_angle" in lp and (f"/{side.lower()}/" in lp or f"_{side.lower()[0]}" in lp or side.lower() in lp):
+                l_mot = X[:, s]; break
+        
+        # [NEW] Fallback: Load from Source File if not in Input
+        if l_mot is None and fin is not None and trial_abs is not None:
+             # Try common paths
+             cands_mot = [
+                 f"{trial_abs}/robot/{side.lower()}/motor_angle",
+                 f"{trial_abs}/robot/motor_angle_{side.lower()}",
+             ]
+             for cm in cands_mot:
+                 if cm in fin:
+                     l_mot = np.asarray(fin[cm][...]).squeeze()
+                     break
+
+        if l_mot is None: continue
+        
+        # 2. Find Hip Flexion Angle (in Output or Source)
+        # Try Output first
+        for p, (s, e) in ch_map_out.items():
+            lp = p.lower()
+            if "hip_flexion" in lp and "moment" not in lp and (f"/{side.lower()}/" in lp or f"_{side.lower()[0]}" in lp or side.lower() in lp):
+                l_hip_sig = Y[:, s]; break
+        
+        # Try Source File if still missing
+        if l_hip_sig is None and fin is not None and trial_abs is not None:
+            # Common paths for hip flexion angle
+            candidates = [
+                f"{trial_abs}/mocap/kin_q/hip_flexion_{side.lower()[0]}",
+                f"{trial_abs}/mocap/kin_q/hip_flexion_{side.lower()}",
+                f"{trial_abs}/output/hip_flexion_{side.lower()[0]}",
+            ]
+            for cand in candidates:
+                if cand in fin:
+                    l_hip_sig = np.asarray(fin[cand][...]).squeeze()
+                    # Match length if needed (though usually they match)
+                    if len(l_hip_sig) > len(l_mot): l_hip_sig = l_hip_sig[:len(l_mot)]
+                    elif len(l_hip_sig) < len(l_mot): continue # Should not happen in good data
+                    break
+        
+        if l_mot is not None and l_hip_sig is not None:
+            # Center and Normalize
+            s1 = (l_mot - np.mean(l_mot)) / (np.std(l_mot) + 1e-6)
+            s2 = (l_hip_sig - np.mean(l_hip_sig)) / (np.std(l_hip_sig) + 1e-6)
+            
+            # Cross-correlation
+            corr = correlate(s1, s2, mode='full')
+            lag_samples = np.argmax(corr) - (len(s1) - 1)
+            lag_ms = abs(lag_samples * (1000.0 / fs))
+            
+            if lag_ms >= threshold_ms:
+                return False, lag_ms, side
+                
+    return True, 0.0, "All"
+
+# =========================
+# 스캔 & 스플릿
+# =========================
+def scan_series_by_trial(
+    h5_path: str,
+    sensors_x: List[str],
+    sensors_y: List[str],
+    include_subjects: List[str],
+    include_conditions: List[str],
+    include_levels: List[str], # [NEW]
+    include_trials: List[str],
+) -> List[SeriesItem]:
+    series: List[SeriesItem] = []
+    with h5py.File(h5_path, "r") as h5:
+        for subj in h5.keys():
+            if not subj.startswith("S"):
+                continue
+            if not _match_filter(subj, include_subjects):
+                continue
+            g_subj = h5[subj]
+            for cond in g_subj.keys():
+                if _is_meta_condition(cond):
+                    continue
+                if not _match_filter(cond, include_conditions):
+                    continue
+                g_cond = g_subj[cond]
+                
+                # [NEW] Handle optional 'Level' hierarchy
+                # We collect all potential trial groups: (trial_name, full_group_path_str)
+                # If structure is S/C/Trial -> straightforward
+                # If structure is S/C/Level/Trial -> recurse one level
+                
+                trial_candidates = []
+                for k in g_cond.keys():
+                    # k might be 'trial_01' or 'lv0'
+                    obj = g_cond[k]
+                    if not isinstance(obj, h5py.Group):
+                        continue
+                    
+                    # Check if this group behaves like a trial (has 'input' or first sensor)
+                    # Use the first requested sensor to test
+                    test_sensor = sensors_x[0] if sensors_x else (sensors_y[0] if sensors_y else "")
+                    
+                    # If the sensor exists directly here, it's a trial (no level hierarchy)
+                    if test_sensor and test_sensor in obj:
+                        # No level: condition is just 'cond'
+                        trial_candidates.append((k, f"/{subj}/{cond}/{k}", cond))
+                    else:
+                        # Otherwise, assume it might be a level, check its children
+                        # But only if it DOESN'T contain the sensor. 
+                        # If it's a level, it should contain trials.
+                        
+                        # [NEW] Check Level Filter if it's a level
+                        if not _match_filter(k, include_levels):
+                            continue
+
+                        for sub_k in obj.keys():
+                            sub_obj = obj[sub_k]
+                            if isinstance(sub_obj, h5py.Group):
+                                # If this child has the sensor, it's a trial
+                                if test_sensor and test_sensor in sub_obj:
+                                    # [FIX] Include level in condition: "level_100mps/lv0"
+                                    cond_with_level = f"{cond}/{k}"
+                                    trial_candidates.append((sub_k, f"/{subj}/{cond}/{k}/{sub_k}", cond_with_level))
+                
+                # [NEW] Get subject metadata (height, leg length)
+                sub_info_path = f"/{subj}/sub_info"
+                height = 1.7  # Defaults
+                leg_length = 0.9
+                thigh_len = 0.9 * 0.53
+                shank_len = 0.9 * 0.47
+                foot_len = 1.7 * 0.15
+                pelvis_width = 1.7 * 0.17
+                if sub_info_path in h5:
+                    si = h5[sub_info_path]
+                    if 'height' in si: 
+                        h_val = si['height'][()]
+                        h_float = float(h_val)
+                        height = h_float / 1000.0 if h_float > 10 else h_float # mm to m if looks like mm
+                    
+                    l_leg = 0.9
+                    r_leg = 0.9
+                    if 'left/leg length' in si:
+                        l_val = si['left/leg length'][()]
+                        l_float = float(l_val)
+                        l_leg = l_float / 1000.0 if l_float > 10 else l_float
+                    if 'right/leg length' in si:
+                        r_val = si['right/leg length'][()]
+                        r_float = float(r_val)
+                        r_leg = r_float / 1000.0 if r_float > 10 else r_float
+                    leg_length = (l_leg + r_leg) / 2.0
+                    
+                    # [NEW] Detailed segments
+                    def _get_avg(k):
+                        v, c = 0.0, 0
+                        for side in ['left', 'right']:
+                            sk = f"{side}/{k}"
+                            if sk in si:
+                                val = float(si[sk][()])
+                                if val > 10: val /= 1000.0
+                                v += val; c += 1
+                        return v / c if c > 0 else None
+
+                    tl = _get_avg("thigh length")
+                    if tl: thigh_len = tl
+                    
+                    sl = _get_avg("shank length")
+                    if sl: shank_len = sl
+                    
+                    fl = _get_avg("foot length")
+                    if fl: foot_len = fl
+                    
+                    # Pelvis width
+                    for cand in ['inter_asis_distance', 'pelvis width', 'pelvis_width', 'ASIS_breadth']:
+                        if cand in si:
+                            val = float(si[cand][()])
+                            if val > 10: val /= 1000.0
+                            pelvis_width = val
+                            break
+
+                for tr, tr_abs_path, cond_effective in trial_candidates:
+                    if not _match_filter(tr, include_trials):
+                        continue
+                    
+                    x_paths, y_paths = [], []
+                    valid_trial = True
+                    for s in sensors_x:
+                        p = f"{tr_abs_path}/{s}"
+                        if p in h5:
+                            x_paths.append(p)
+                        else:
+                            # If any input missing, skip? Or strict?
+                            # Original code skipped if not x_paths at the end.
+                            pass
+                            
+                    for s in sensors_y:
+                        p = f"{tr_abs_path}/{s}"
+                        if p in h5:
+                            y_paths.append(p)
+                            
+                    if not x_paths or not y_paths:
+                        continue
+                        
+                    T_x = _concat_paths_same_T(h5, x_paths)
+                    T_y = _concat_paths_same_T(h5, y_paths)
+                    
+                    if T_x != T_y:
+                         # Decide how to handle mismatch. Raise or Skip?
+                         # Original raised ValueError.
+                         raise ValueError(f"[{tr_abs_path}] X(T={T_x}) and Y(T={T_y}) length mismatch")
+                         
+                    # [FIX] Use cond_effective (may include level like "level_100mps/lv0")
+                    series.append(SeriesItem(subj, cond_effective, tr, x_paths, y_paths, T_x, 
+                                             metadata={
+                                                 'height': height, 
+                                                 'leg_length': leg_length,
+                                                 'thigh_length': thigh_len,
+                                                 'shank_length': shank_len,
+                                                 'foot_length': foot_len,
+                                                 'pelvis_width': pelvis_width
+                                             }))
+    return series
+
+def list_units(h5_path: str, level: str, include_subjects: List[str] = [], include_conditions: List[str] = []) -> List[str]:
+    units = []
+    with h5py.File(h5_path, "r") as h5:
+        for subj in sorted(h5.keys()):
+            if not subj.startswith("S"):
+                continue
+            if not _match_filter(subj, include_subjects):
+                continue
+            if level == "subject":
+                units.append(subj)
+                continue
+                
+            g_subj = h5[subj]
+            for cond in sorted(g_subj.keys()):
+                if _is_meta_condition(cond):
+                    continue
+                if not _match_filter(cond, include_conditions):
+                    continue
+                
+                if level == "condition":
+                    units.append(f"{subj}/{cond}")
+                elif level == "trial":
+                    g_cond = g_subj[cond]
+                    TRIAL_INDICATORS = {"common", "forceplate", "mocap", "robot", "treadmill", "input", "output", "mocap_measured"}
+                    # Recurse for trials or levels
+                    for k in sorted(g_cond.keys()):
+                        obj = g_cond[k]
+                        if not isinstance(obj, h5py.Group): continue
+                        
+                        # Test if it's a trial
+                        if any(ind in obj for ind in TRIAL_INDICATORS):
+                            units.append(f"{subj}/{cond}/{k}")
+                        else:
+                            # Assume Level
+                            for sub_k in sorted(obj.keys()):
+                                sub_obj = obj[sub_k]
+                                if isinstance(sub_obj, h5py.Group) and any(ind in sub_obj for ind in TRIAL_INDICATORS):
+                                    units.append(f"{subj}/{cond}/{k}/{sub_k}")
+    if not units:
+        raise RuntimeError(f"No units found for level={level} with current filters.")
+    return units
+
+def _check_manual_units_exist(all_units: List[str], groups: Dict[str, List[str]]):
+    all_set = set(all_units)
+    used = set()
+    for k in ("train","val","test"):
+        g = groups.get(k, [])
+        missing = [u for u in g if u not in all_set]
+        if missing:
+            raise ValueError(f"Manual split contains unknown {k} units: {missing}")
+        overlap = used.intersection(g)
+        if overlap:
+            raise ValueError(f"Manual split has overlaps across sets: {overlap}")
+        used.update(g)
+
+def _random_split(units: List[str], ratio: Tuple[float,float,float], seed: int) -> Dict[str, List[str]]:
+    rng = np.random.default_rng(seed)
+    perm = units.copy()
+    rng.shuffle(perm)
+    n = len(perm)
+    n_tr = int(round(n * ratio[0]))
+    n_va = int(round(n * ratio[1]))
+    train = perm[:n_tr]
+    val   = perm[n_tr:n_tr+n_va]
+    test  = perm[n_tr+n_va:]
+    if n >= 3:
+        if len(train)==0: train, val = val[:1], train + val[1:]
+        if len(val)==0:   val, test = test[:1], val + test[1:]
+        if len(test)==0:  test, train = train[:1], test + train[1:]
+    return {"train": sorted(train), "val": sorted(val), "test": sorted(test)}
+
+def make_unit_splits(cfg_split: dict, h5_path: str, include_subjects: List[str] = [], include_conditions: List[str] = [], items: List[SeriesItem] = None) -> Dict[str, List[str]]:
+    level = cfg_split.get("level","subject").lower()
+    if level == "trial" and items is not None:
+        units = sorted(list(set(unit_id_for_item(it, "trial") for it in items)))
+    else:
+        units = list_units(h5_path, level, include_subjects, include_conditions)
+    mode = cfg_split.get("mode","random").lower()
+    if mode == "manual":
+        groups = cfg_split.get("manual", {"train":[], "val":[], "test":[]})
+        _check_manual_units_exist(units, groups)
+        splits = {k: sorted(groups.get(k, [])) for k in ("train","val","test")}
+    elif mode == "random":
+        ratio = tuple(cfg_split.get("ratio",[0.7,0.15,0.15]))
+        if abs(sum(ratio)-1.0) > 1e-6:
+            raise ValueError(f"ratio must sum to 1.0, got {ratio}")
+        seed = int(cfg_split.get("seed",0))
+        splits = _random_split(units, ratio, seed)
+    else:
+        raise ValueError(f"Unknown split mode: {mode}")
+
+    save_to = cfg_split.get("save_to")
+    if save_to:
+        os.makedirs(os.path.dirname(save_to), exist_ok=True)
+        payload = {
+            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "mode": mode,
+            "level": level,
+            "seed": cfg_split.get("seed", None),
+            "ratio": cfg_split.get("ratio", None),
+            "units_all": units,
+            "splits": splits,
+            "h5_path": h5_path,
+        }
+        with open(save_to, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+        print(f"[SPLIT] Saved unit split to {save_to}")
+
+    print(f"[SPLIT] level={level}")
+    print(f"[SPLIT] Train({len(splits['train'])}): {splits['train']}")
+    print(f"[SPLIT] Val  ({len(splits['val'])}): {splits['val']}")
+    print(f"[SPLIT] Test ({len(splits['test'])}): {splits['test']}")
+    return splits
+
+def unit_id_for_item(item: SeriesItem, level: str) -> str:
+    if level == "subject":
+        return item.subject
+    elif level == "condition":
+        return f"{item.subject}/{item.condition.split('/')[0]}" # Base condition only? No, items already have cond_effective
+    elif level == "trial":
+        return f"{item.subject}/{item.condition}/{item.trial}"
+    else:
+        raise ValueError(f"Unknown split level: {level}")
+
+def partition_series_by_splits(series_items: List[SeriesItem],
+                               splits: Dict[str, List[str]],
+                               level: str):
+    train_u = set(splits["train"]); val_u = set(splits["val"]); test_u = set(splits["test"])
+    tr, va, te = [], [], []
+    for it in series_items:
+        uid = unit_id_for_item(it, level)
+        if uid in train_u:   tr.append(it)
+        elif uid in val_u:   va.append(it)
+        elif uid in test_u:  te.append(it)
+    return tr, va, te
+
+# =========================
+# 전처리
+# =========================
+def _path_selected(full_path: str, include_patterns, include_paths, exclude_patterns) -> bool:
+    fp = full_path
+    parts = fp.strip("/").split("/")
+    tail = "/" + "/".join(parts[-3:])
+    target = tail
+
+    if include_paths and fp in include_paths:
+        ok = True
+    else:
+        ok = False
+        if include_patterns:
+            for pat in include_patterns:
+                if re.search(pat, target, flags=re.IGNORECASE):
+                    ok = True; break
+    if ok and exclude_patterns:
+        for pat in exclude_patterns:
+            if re.search(pat, target, flags=re.IGNORECASE):
+                ok = False; break
+    return ok
+
+
+def _infer_fs_from_time(fin: h5py.File, trial_abs: str, fallback_fs: Optional[float]) -> Optional[float]:
+    p_time = f"{trial_abs}/time"
+    if p_time in fin:
+        t = np.asarray(fin[p_time][...]).squeeze()
+        if t.ndim == 1 and t.size >= 3:
+            dt = np.median(np.diff(t))
+            if dt > 0: return float(1.0/dt)
+    return fallback_fs
+
+def _lpf_one_pole(x: np.ndarray, fs: float, fc: float, nan_policy="ffill") -> np.ndarray:
+    if fs is None or fs <= 0 or fc <= 0:
+        return x.astype(np.float32, copy=False)
+    xn = np.asarray(x, dtype=np.float64)
+    if nan_policy == "ffill":
+        if xn.ndim == 1:
+            mask = np.isnan(xn)
+            if mask.any():
+                first = np.argmax(~mask)
+                xn[:first] = xn[first]
+                prev = xn[first]
+                for i in range(first+1, xn.shape[0]):
+                    if np.isnan(xn[i]): xn[i] = prev
+                    else: prev = xn[i]
+        elif xn.ndim == 2:
+            for c in range(xn.shape[1]):
+                col = xn[:, c]
+                mask = np.isnan(col)
+                if mask.any():
+                    first = np.argmax(~mask)
+                    col[:first] = col[first]
+                    prev = col[first]
+                    for i in range(first+1, col.shape[0]):
+                        if np.isnan(col[i]): col[i] = prev
+                        else: prev = col[i]
+                    xn[:, c] = col
+    alpha = 1.0 - math.exp(-2.0*math.pi*fc/float(fs))
+    y = np.empty_like(xn)
+    if xn.ndim == 1:
+        y[0] = xn[0]
+        for i in range(1, xn.shape[0]):
+            y[i] = alpha*xn[i] + (1.0-alpha)*y[i-1]
+    else:
+        y[0, :] = xn[0, :]
+        for i in range(1, xn.shape[0]):
+            y[i, :] = alpha*xn[i, :] + (1.0-alpha)*y[i-1, :]
+    return y.astype(np.float32)
+
+def _lpf_one_pole_filtfilt(x: np.ndarray, fs: float, fc: float, nan_policy="ffill") -> np.ndarray:
+    y_fwd = _lpf_one_pole(x, fs, fc, nan_policy=nan_policy)
+    if y_fwd.ndim == 1:
+        y_rev = _lpf_one_pole(y_fwd[::-1], fs, fc, nan_policy=nan_policy)[::-1]
+    else:
+        y_rev = _lpf_one_pole(y_fwd[::-1, :], fs, fc, nan_policy=nan_policy)[::-1, :]
+    return y_rev
+
+def _maybe_deg_to_rad(arr: np.ndarray, dset: h5py.Dataset) -> tuple[np.ndarray, bool]:
+    was_deg = False
+    unit = None
+    for k in ("unit", "units", "Unit", "Units"):
+        if k in dset.attrs:
+            try:
+                v = dset.attrs[k]
+                unit = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+            except Exception:
+                pass
+    if unit and ("deg" in unit.lower() or "degree" in unit.lower()):
+        was_deg = True
+        arr = np.deg2rad(arr)
+    return arr, was_deg
+
+def _unwrap_angle_signal(arr: np.ndarray) -> np.ndarray:
+    a = np.asarray(arr)
+    if a.ndim == 1:
+        return np.unwrap(a)
+    elif a.ndim == 2:
+        out = np.empty_like(a, dtype=np.float64)
+        for c in range(a.shape[1]):
+            out[:, c] = np.unwrap(a[:, c])
+        return out
+    else:
+        raise ValueError(f"unwrap expects 1D/2D, got {a.shape}")
+
+def _get_total_mass(fin: h5py.File, subject: str, mass_cache: Optional[Dict[str, float]]=None) -> float:
+    """ /S###/sub_info/total_mass_kg → float(kg), 캐시 dict 사용 가능 """
+    if mass_cache is not None and subject in mass_cache:
+        return mass_cache[subject]
+
+    candidates = [
+        f"/{subject}/sub_info/weight",
+        f"/{subject}/sub_info/total_mass_kg",
+        f"/{subject}/sub_info/total_mass",
+        f"/{subject}/sub_info/body_mass_kg",
+    ]
+    mass = 0.0
+    for cand in candidates:
+        if cand in fin:
+            try:
+                arr = np.asarray(fin[cand][...]).squeeze()
+                if arr.size == 1:
+                    mass = float(arr.item())
+                    break
+            except Exception:
+                pass
+    if mass_cache is not None:
+        mass_cache[subject] = mass
+    return mass
+
+# =========================
+# Dynamic Import Helper
+# =========================
+import importlib.util
+
+def load_custom_function(py_path: str, func_name: str):
+    """
+    Load a function from a .py file dynamically.
+    """
+    if not os.path.exists(py_path):
+        raise FileNotFoundError(f"Custom filter file not found: {py_path}")
+    
+    spec = importlib.util.spec_from_file_location("custom_module", py_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module from {py_path}")
+    
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    
+    if not hasattr(module, func_name):
+        raise AttributeError(f"Function '{func_name}' not found in {py_path}")
+    
+    return getattr(module, func_name)
+
+def _apply_preprocess(
+    fin: h5py.File, trial_abs: str, full_path: str, dset: h5py.Dataset, arr_TC: np.ndarray,
+    *, role: str, lpf_cfg: dict, fs_hz_trial: Optional[float], out_cfg: dict,
+    mass_cache: Optional[Dict[str, float]] = None,
+    nan_cfg: Optional[dict] = None, angle_cfg: Optional[dict] = None, 
+    acc_cfg: Optional[dict] = None, fsr_cfg: Optional[dict] = None,
+    custom_func=None  # [NEW] custom function
+) -> np.ndarray:
+    # 🔹 보조 채널용 딕셔너리 (예: CoP mask 채널 저장)
+    aux = {}
+
+    # 🔹 nan_cfg 기본값 방어
+    nan_cfg = nan_cfg or {}
+    subject, _, _ = _parse_trial_abs(trial_abs)
+    
+    # [NEW] 0) Custom Filter (User-defined) REPLACES standard processing
+    if custom_func is not None:
+        # Pre-calculate mass if possible to pass to custom function
+        mass = _get_total_mass(fin, subject, mass_cache=mass_cache)
+        
+        # Signature: func(arr, meta={"path":..., "fs":...}) -> arr
+        meta = {
+            "full_path": full_path,
+            "trial_abs": trial_abs,
+            "subject": subject,
+            "fs_hz": fs_hz_trial,
+            "role": role,
+            "mass": mass,
+            # Pass all configs so user can use/respect them if they want
+            "lpf_cfg": lpf_cfg,
+            "out_cfg": out_cfg,
+            "nan_cfg": nan_cfg,
+            "angle_cfg": angle_cfg,
+            "acc_cfg": acc_cfg,
+            "fsr_cfg": fsr_cfg,
+        }
+        try:
+            arr_TC = custom_func(arr_TC, meta)
+            # If custom function returns, we assume it did everything.
+            # We return immediately, SKIPPING steps 2-6 for this channel.
+            if isinstance(arr_TC, tuple): # Support returning aux
+                return arr_TC[0].astype(np.float32), arr_TC[1]
+            return arr_TC.astype(np.float32)
+        except Exception as e:
+            print(f"[WARN] Custom filter failed on {full_path}: {e}")
+            # If failed, do we fall back? User probably wants to know.
+            # But let's assume we proceed to standard pipeline if it fails?
+            # Or raise? "Warn and proceed" seems safer for now, but user said "I want to execute...".
+            # If it fails, standard pipeline runs as fallback.
+
+
+    # 1) (옵션) 각도 unwrap이 필요하면 여기서 처리 (현재 비활성)
+    # name = full_path.strip("/").split("/")[-1]
+    # if name.lower() in ("pitch", "roll", "yaw"):
+    #     arr_rad, was_deg = _maybe_deg_to_rad(arr_TC, dset)
+    #     arr_unwrapped = _unwrap_angle_signal(arr_rad)
+    #     if was_deg:
+    #         arr_unwrapped = np.rad2deg(arr_unwrapped)
+    #     arr_TC = arr_unwrapped.astype(np.float32)
+
+    # 2) GRF 정규화 (body weight)
+    lpath = full_path.lower()
+    # print("================================\nlpath:",lpath)
+    if "back_imu/pitch" in lpath:
+        arr_TC +=90.0
+    if role == "input":
+        if "/mocap/grf_measured/left/force" in lpath or "/mocap/grf_measured/right/force" in lpath:
+            mass = _get_total_mass(fin, subject, mass_cache=mass_cache)
+            if mass and mass > 0:
+                arr_TC = (arr_TC / float(mass*9.81)).astype(np.float32)
+                # print(f"mass={mass:.1f} kg")
+
+    # 3) 입력 LPF (인과)
+    if role == "input" and lpf_cfg.get("enable", False):
+        if _path_selected(full_path, lpf_cfg.get("include_patterns", []),
+                          lpf_cfg.get("include_paths", []),
+                          lpf_cfg.get("exclude_patterns", [])):
+            fs_eff = fs_hz_trial if fs_hz_trial is not None else lpf_cfg.get("fs_hz", None)
+            fc = float(lpf_cfg.get("fc_hz", 0.0))
+            if fs_eff and fc > 0:
+                arr_TC = _lpf_one_pole(arr_TC, fs=fs_eff, fc=fc, nan_policy=lpf_cfg.get("nan_policy","ffill"))
+
+    # 4) 출력 라벨 제로위상 스무딩
+    if role == "output" and out_cfg.get("enable", False):
+        apply_target = False
+        inc_paths = out_cfg.get("include_paths", [])
+        if inc_paths:
+            apply_target = full_path in inc_paths
+        else:
+            pat = out_cfg.get("target_regex", r"")
+            apply_target = bool(pat) and re.search(pat, full_path, flags=re.IGNORECASE)
+        if apply_target:
+            fs_eff = fs_hz_trial if fs_hz_trial is not None else out_cfg.get("fs_hz", None)
+            fc = float(out_cfg.get("fc_hz", 0.0))
+            if fs_eff and fc > 0:
+                arr_TC = _lpf_one_pole_filtfilt(arr_TC, fs=fs_eff, fc=fc, nan_policy=out_cfg.get("nan_policy","ffill"))
+                
+    # 5) CoP 한정 NaN 처리/마스크 추가 — 경로 매칭되면 arr_TC 전체가 CoP라고 간주
+    if role == "input" and nan_cfg and nan_cfg.get("enable", False):
+        if "/mocap/grf_measured/left/cop/y" in lpath or "/mocap/grf_measured/right/cop/y" in lpath:
+            mask_vec = np.isfinite(arr_TC).all(axis=1).astype(np.float32)  # (T,)
+                        
+            # (B) 정책 적용: 데이터셋 전체(=CoP)에 NaN→0
+            policy = nan_cfg.get("policy", "mask_zero")
+            if policy in ("mask_zero", "zero"):
+                arr_TC = np.nan_to_num(arr_TC, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+            # (C) 마스크 채널 추가
+            if policy == "mask_zero":
+                aux_name = full_path + nan_cfg.get("mask_suffix", "::mask")
+                aux[aux_name] = mask_vec[:, None].astype(np.float32)
+            if policy == "mask":
+                arr_TC = mask_vec[:, None].astype(np.float32)
+    if role == "input" and nan_cfg and nan_cfg.get("enable", False):
+        if "/mocap/grf_measured/left/cop/x" in lpath or "/mocap/grf_measured/right/cop/x" in lpath:
+            # (B) 정책 적용: 데이터셋 전체(=CoP)에 NaN→0
+            policy = nan_cfg.get("policy", "mask_zero")
+            if policy in ("mask_zero", "zero"):
+                arr_TC = np.nan_to_num(arr_TC, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    angle_cfg = angle_cfg or {}
+    if angle_cfg and angle_cfg.get("enable", False):
+        apply_target = False
+        sensor_applied = angle_cfg.get("apply_sensors", [])
+        if sensor_applied: 
+            has_any = any(s in full_path for s in sensor_applied)
+            if has_any:
+               if angle_cfg.get("policy") == "deg2rad":
+                   arr_TC = np.deg2rad(arr_TC)
+                   # print(full_path,"***************")
+    acc_cfg = acc_cfg or {}
+    if acc_cfg and acc_cfg.get("enable", False):
+        apply_target = False
+        sensor_applied = acc_cfg.get("apply_sensors", [])
+        if sensor_applied:
+           has_any = any(s in full_path for s in sensor_applied)
+           if has_any:
+               if acc_cfg.get("policy") == "unit_g": 
+                   # print(full_path,"===============")
+                   arr_TC = (arr_TC / 9.81).astype(np.float32)
+    fsr_cfg = fsr_cfg or {}
+    if fsr_cfg and fsr_cfg.get("enable", False):
+        apply_target = False
+        sensor_applied = fsr_cfg.get("apply_sensors", [])
+        if sensor_applied:
+           has_any = any(s in full_path for s in sensor_applied)
+           if has_any:
+               if fsr_cfg.get("policy") == "devided_by_500": 
+                   # print(full_path,"-----------------")
+                   arr_TC = (arr_TC / 500.0).astype(np.float32)
+    # 마지막에 반환
+    if aux:
+        return arr_TC.astype(np.float32), aux
+    return arr_TC
+
+def _concat_features(
+    h5: h5py.File, trial_abs_path: str, feature_paths: List[str],
+    *, role: str, fs_hz_trial: Optional[float] = None,
+    custom_func=None,
+    src_h5_path: str = None  # [NEW]
+) -> Tuple[np.ndarray, Dict[str, Tuple[int,int]]]:
+    
+    T_ref = None
+    fs_hz_trial = _infer_fs_from_time(
+        h5,
+        trial_abs_path,
+        None
+    )
+
+    def to_TC(arr: np.ndarray, p: str, T_ref_local: Optional[int]) -> np.ndarray:
+        arr = np.asarray(arr)
+        arr = np.squeeze(arr)
+        if arr.ndim == 1:
+            arr = arr[:, None]
+        elif arr.ndim == 2:
+            A, B = arr.shape
+            if T_ref_local is None:
+                if A < B:
+                    arr = arr.T
+            else:
+                if A != T_ref_local and B == T_ref_local:
+                    arr = arr.T
+        else:
+            raise ValueError(f"{p} must be 1D or 2D after squeeze, got shape {arr.shape}")
+        return arr
+
+    # =========================================================
+    # Unified Batch Mode
+    # Load all RAW -> Concat -> (Optional) Custom Process
+    # =========================================================
+    raw_arrays = []
+    ch_map = {}
+    c_ofs = 0
+    
+    # 1. Load All Raw Data
+    for feat in feature_paths:
+        p = _resolve_path(trial_abs_path, feat)
+        if p not in h5:
+            # print(f"[WARN] Feature missing: {p} (skipping)")
+            raise KeyError(f"Feature path not found in H5: {p}")
+        dset = h5[p]
+        arr = to_TC(dset[...], p, T_ref)
+        
+        # Sync Time Length
+        T, C = arr.shape
+        if T_ref is None:
+            T_ref = T
+        elif T != T_ref:
+            raise ValueError(f"Time length mismatch: {p} has T={T}, ref T={T_ref}")
+            
+        raw_arrays.append(arr.astype(np.float32))
+        ch_map[p] = (c_ofs, c_ofs + C)
+        c_ofs += C
+        
+    if not raw_arrays:
+            raise RuntimeError(f"No valid features for trial: {trial_abs_path}")
+            
+    # 2. Concat Raw
+    X_raw = np.concatenate(raw_arrays, axis=1) # (T, Total_Channels)
+    
+    # 3. Prepare Meta & Execute Custom Function (if exists)
+    subject, _, _ = _parse_trial_abs(trial_abs_path)
+    # Fetch mass and leg length
+    mass = _get_total_mass(h5, subject)
+    
+    # [NEW] Simple helper to get leg length (avg)
+    leg_length = 0.9 # default
+    sub_info_path = f"/{subject}/sub_info"
+    if sub_info_path in h5:
+        si = h5[sub_info_path]
+        l_len = 0.9; r_len = 0.9
+        if 'left/leg length' in si:
+            v = si['left/leg length'][()]
+            l_len = float(v)/1000.0 if float(v) > 10 else float(v)
+        if 'right/leg length' in si:
+            v = si['right/leg length'][()]
+            r_len = float(v)/1000.0 if float(v) > 10 else float(v)
+        leg_length = (l_len + r_len) / 2.0
+
+    meta = {
+        "trial_abs": trial_abs_path,
+        "subject": subject,
+        "fs_hz": fs_hz_trial,
+        "role": role,
+        "mass": mass,
+        "leg_length": leg_length,    # [NEW]
+        "ch_map": ch_map,            # {path: (start, end)} info for splitting
+        "feature_paths": feature_paths,
+        "src_h5": src_h5_path,
+    }
+    
+    if custom_func is not None:
+        try:
+            ret = custom_func(X_raw, meta)
+            
+            # [MOD] Support returning (X_processed, new_ch_map)
+            # If custom_func returns tuple, check if 2nd element is dict (ch_map) or str/dict (aux)
+            # For backward compatibility, check type.
+            
+            if isinstance(ret, tuple):
+                if len(ret) == 2 and isinstance(ret[1], dict):
+                    # Check if it looks like a channel map (values are tuples)?
+                    # Or just assume if it returns a dict it might be ch_map or aux.
+                    # We assume it is ch_map if the keys overlap or looks like map.
+                    # For safety, user must ensure format. 
+                    # Let's assume it IS the new ch_map if returned.
+                    X_processed, new_ch_map = ret
+                    return X_processed.astype(np.float32), new_ch_map
+                else:
+                    X_processed = ret[0]
+                    # ignore aux
+                    return X_processed.astype(np.float32), ch_map
+            else:
+                X_processed = ret
+                return X_processed.astype(np.float32), ch_map
+            
+        except Exception as e:
+            print(f"[ERROR] Custom filter failed: {e}")
+            raise e
+    else:
+        # If no custom filter, return RAW data (Identity)
+        return X_raw.astype(np.float32), ch_map
+
+
+
+# =========================
+# IO H5 빌더
+# =========================
+def build_io_h5(cfg: dict):
+    """
+    cfg keys:
+      - src_h5 (str or List[str]), dst_h5, include_subjects, include_conditions, include_levels, include_trials
+      - inputs (List[str]), outputs (List[str])
+      - compression, compression_lvl, dtype, overwrite_dst
+      - custom_filter: { file: "path.py", function: "func_name", enable: bool }
+    """
+    # Normalize src_h5 to a list
+    src_paths = cfg["src_h5"]
+    if isinstance(src_paths, str):
+        src_paths = [src_paths]
+    
+    dst = cfg["dst_h5"]
+    if os.path.exists(dst) and not cfg["overwrite_dst"]:
+        raise FileExistsError(f"Destination exists: {dst}")
+    if os.path.exists(dst) and cfg["overwrite_dst"]:
+        os.remove(dst)
+
+    # Load custom function if defined
+    custom_func = None
+    if "custom_filter" in cfg:
+        cf = cfg["custom_filter"]
+        if cf.get("enable", True):
+            fpath = cf.get("file")
+            fname = cf.get("function")
+            if fpath and fname:
+                try:
+                    custom_func = load_custom_function(fpath, fname)
+                    print(f"[INFO] Loaded custom filter: {fname} from {fpath}")
+                except Exception as e:
+                    print(f"[ERROR] Failed to load custom filter: {e}")
+                    raise e
+
+    print(f"[INFO] Starting merge into: {dst}")
+    with h5py.File(dst, "w") as fout:
+        first_file = True
+        
+        for src in src_paths:
+            if not os.path.exists(src):
+                print(f"[WARN] Source file missing: {src} (skipping)")
+                continue
+                
+            print(f"[INFO] Processing source: {src}")
+            with h5py.File(src, "r") as fin:
+                # 1. Copy global attributes from the first file
+                if first_file:
+                    for k, v in fin.attrs.items():
+                        fout.attrs[k] = v
+                    first_file = False
+
+                for subj in fin.keys():
+                    if not subj.startswith("S"):
+                        continue
+                    if not _match_filter(subj, cfg["include_subjects"]):
+                        continue
+                    
+                    g_subj_in = fin[subj]
+                    # Ensure subject group exists in output
+                    g_subj_out = _ensure_group(fout, subj)
+
+                    # 2. Copy sub_info once per subject
+                    if "sub_info" in g_subj_in and "sub_info" not in g_subj_out:
+                        try:
+                            fin.copy(f"/{subj}/sub_info", fout, name=f"/{subj}/sub_info")
+                            print(f"[INFO] Copied sub_info for {subj}")
+                        except Exception as e:
+                            print(f"[WARN] Failed to copy sub_info for {subj}: {e}")
+
+                    for cond in g_subj_in.keys():
+                        if _is_meta_condition(cond):
+                            continue
+                        if not _match_filter(cond, cfg["include_conditions"]):
+                            continue
+                        
+                        g_cond_in = g_subj_in[cond]
+
+                        for level in g_cond_in.keys():
+                            if not _match_filter(level, cfg.get("include_levels", [])):
+                                continue
+                            
+                            g_level_in = g_cond_in[level]
+                            if not isinstance(g_level_in, h5py.Group):
+                                 continue
+                                 
+                            for trial in g_level_in.keys():
+                                if not _match_filter(trial, cfg["include_trials"]):
+                                    continue
+                                
+                                trial_abs = f"/{subj}/{cond}/{level}/{trial}"
+                                if trial_abs in fout:
+                                    print(f"[SKIP] Trial already exists in target: {trial_abs}")
+                                    continue
+                                
+                                if any(ex in trial_abs for ex in cfg.get("exclude_paths", [])):
+                                    print(f"[SKIP] Excluded path matched: {trial_abs}")
+                                    continue
+                                
+                                try:
+                                    X, ch_map_in = _concat_features(fin, trial_abs, cfg["inputs"], role="input",
+                                                                    custom_func=custom_func, src_h5_path=src)
+                                    
+                                    Y, ch_map_out = _concat_features(fin, trial_abs, cfg["outputs"], role="output",
+                                                                     custom_func=custom_func, src_h5_path=src)
+                                except Exception as e:
+                                     print(f"[SKIP] Error in trial {trial_abs}: {type(e).__name__}: {e}")
+                                     continue
+
+                                if np.isnan(X).any() or np.isnan(Y).any():
+                                    print(f"[SKIP] NaN values found in trial: {trial_abs}")
+                                    continue
+
+                                fs_trial = _infer_fs_from_time(fin, trial_abs, 100.0)
+                                is_sync_ok, lag, side = _check_trial_sync_lag(X, Y, ch_map_in, ch_map_out, 
+                                                                            threshold_ms=100.0, fs=fs_trial,
+                                                                            fin=fin, trial_abs=trial_abs)
+                                if not is_sync_ok:
+                                    print(f"[SKIP] High Sync Lag detected in {trial_abs}: {lag:.1f}ms on {side} side. (> 100ms)")
+                                    continue
+
+                                # 3. Save Global Maps (Only once for the whole merge)
+                                if "input_map" not in fout:
+                                    in_names = []
+                                    norm_trial = trial_abs.strip("/")
+                                    for p, (s, e) in ch_map_in.items():
+                                        norm_p = p.strip("/")
+                                        rel_p = norm_p[len(norm_trial):].strip("/") if norm_p.startswith(norm_trial) else norm_p
+                                        n_ch = e - s
+                                        if n_ch == 1:
+                                            in_names.append(rel_p.encode('utf-8'))
+                                        else:
+                                            for i in range(n_ch):
+                                                in_names.append(f"{rel_p}_{i}".encode('utf-8'))
+                                    fout.create_dataset("input_map", data=np.array(in_names))
+
+                                if "output_map" not in fout:
+                                    out_names = []
+                                    norm_trial = trial_abs.strip("/")
+                                    for p, (s, e) in ch_map_out.items():
+                                        norm_p = p.strip("/")
+                                        rel_p = norm_p[len(norm_trial):].strip("/") if norm_p.startswith(norm_trial) else norm_p
+                                        n_ch = e - s
+                                        if n_ch == 1:
+                                            out_names.append(rel_p.encode('utf-8'))
+                                        else:
+                                            for i in range(n_ch):
+                                                out_names.append(f"{rel_p}_{i}".encode('utf-8'))
+                                    fout.create_dataset("output_map", data=np.array(out_names))
+
+                                # 4. Save Trial Data
+                                g_trial_out = _ensure_group(fout, trial_abs)
+                                d_in = g_trial_out.create_dataset(
+                                    "input", data=X.astype(cfg["dtype"]),
+                                    compression=cfg["compression"], compression_opts=cfg["compression_lvl"],
+                                    chunks=True
+                                )
+                                d_in.attrs["channels"] = X.shape[1]
+                                d_in.attrs["features"] = np.array(list(ch_map_in.keys()), dtype="S256")
+                                for p, (s_idx, e_idx) in ch_map_in.items():
+                                    d_in.attrs[f"chmap::{p}"] = f"{s_idx}:{e_idx}"
+
+                                d_out = g_trial_out.create_dataset(
+                                    "output", data=Y.astype(cfg["dtype"]),
+                                    compression=cfg["compression"], compression_opts=cfg["compression_lvl"],
+                                    chunks=True
+                                )
+                                d_out.attrs["channels"] = Y.shape[1]
+                                d_out.attrs["features"] = np.array(list(ch_map_out.keys()), dtype="S256")
+                                for p, (s_idx, e_idx) in ch_map_out.items():
+                                    d_out.attrs[f"chmap::{p}"] = f"{s_idx}:{e_idx}"
+
+                                time_copied = False
+                                for candidate in [f"{trial_abs}/Common/time", f"{trial_abs}/time"]:
+                                    if candidate in fin and fin[candidate].ndim == 1:
+                                        t = np.asarray(fin[candidate])
+                                        g_trial_out.create_dataset("time", data=t,
+                                                                   compression=cfg["compression"],
+                                                                   compression_opts=cfg["compression_lvl"],
+                                                                   chunks=True)
+                                        time_copied = True
+                                        break
+
+                                g_trial_out.attrs["input_shape"]  = f"{X.shape}"
+                                g_trial_out.attrs["output_shape"] = f"{Y.shape}"
+                                g_trial_out.attrs["has_time"]     = bool(time_copied)
+                                print(f"[OK] {trial_abs}: input {X.shape}, output {Y.shape}")
+
+    print(f"\n[DONE] Merged dataset saved to: {dst}")
+
+# =========================
+# 데이터셋 & 로더
+# =========================
+class WindowSeq2OneByTrial(Dataset):
+    def __init__(self, h5_path: str, series: List[SeriesItem], window: int, stride: int, y_delay: int, x_mean: Optional[np.ndarray]=None, x_std: Optional[np.ndarray]=None):
+        super().__init__()
+        self.h5_path = h5_path
+        self.series = series
+        self.window = window
+        self.stride = stride
+        self.y_delay = y_delay
+        self.x_mean = x_mean
+        self.x_std = x_std
+        
+        self.X_list = []
+        self.Y_list = []
+        self.meta_list = [] # [NEW] Store metadata for each trial
+        with h5py.File(h5_path, "r") as h5:
+            for it in series:
+                X = concat_paths(h5, it.x_paths)
+                Y = concat_paths(h5, it.y_paths)
+                self.X_list.append(X)
+                self.Y_list.append(Y)
+                self.meta_list.append(it.metadata)
+        self.global_index = []
+        for ti, (X, Y) in enumerate(zip(self.X_list, self.Y_list)):
+            T = X.shape[0]
+            max_i = T - window - y_delay
+            for s in range(0, max_i + 1, stride):
+                e = s + window - 1
+                yt = e + y_delay
+                self.global_index.append((ti, s, e, yt))
+        if len(self.X_list) > 0:
+            self.in_channels  = self.X_list[0].shape[1]
+            self.out_channels = self.Y_list[0].shape[1]
+        else:
+            self.in_channels = 0
+            self.out_channels = 0
+
+    def __len__(self):
+        return len(self.global_index)
+
+    def __getitem__(self, i):
+        ti, s, e, yt = self.global_index[i]
+        X = self.X_list[ti][s:e+1]
+        Y = self.Y_list[ti][yt]
+        
+        # [NEW] Normalize input X using stored mean/std (if available)
+        if self.x_mean is not None and self.x_std is not None:
+             # X is (W, C), mean/std is (C,) or (1, C)
+             # Adding small epsilon to std is handled during computation, but safety here too
+             X = (X - self.x_mean) / (self.x_std + 1e-12)
+
+        x = torch.from_numpy(X.astype(np.float32)).transpose(0,1)  # [Cx, W]
+        y = torch.from_numpy(Y.astype(np.float32))                 # [Cy]
+        
+        # [NEW] Return metadata as well
+        m = self.meta_list[ti]
+        # Order: height, leg, thigh, shank, foot, pelvis
+        m_vals = [
+            m.get('height', 1.7),
+            m.get('leg_length', 0.9),
+            m.get('thigh_length', 0.0),
+            m.get('shank_length', 0.0),
+            m.get('foot_length', 0.0),
+            m.get('pelvis_width', 0.0)
+        ]
+        m_tensor = torch.tensor(m_vals, dtype=torch.float32)
+        
+        return x, y, m_tensor
+    # 편의 메소드(플롯 함수가 메타를 쉽게 접근)
+    def get_trial_meta(self, trial_idx: int) -> SeriesItem:
+        return self.series[trial_idx]
+    
+def get_dataloaders(cfg: dict) -> dict:
+    """
+    cfg:
+      - io_h5
+      - split: {mode, level, ratio, seed, manual, save_to}
+      - data: {window_size, stride, y_delay, normalize? (현재 미사용)}
+      - loader: {batch_size, num_workers, pin_memory, drop_last, persistent_workers}
+    """
+    io_h5 = cfg.get("io_h5")
+    if io_h5 is None:
+        raise ValueError("cfg['io_h5'] must be set to the IO H5 path.")
+
+    train_cfg = cfg.get("train", {})
+    series = scan_series_by_trial(
+        h5_path=io_h5,
+        sensors_x=["input"],
+        sensors_y=["output"],
+        include_subjects=train_cfg.get("include_subjects", []),
+        include_conditions=train_cfg.get("include_conditions", []),
+        include_levels=train_cfg.get("include_levels", []),
+        include_trials=train_cfg.get("include_trials", []),
+    )
+    if not series:
+        raise RuntimeError("No trials found in IO H5. Check filters or input/output datasets.")
+
+    splits = make_unit_splits(
+        cfg["split"], 
+        io_h5, 
+        include_subjects=train_cfg.get("include_subjects", []), 
+        include_conditions=train_cfg.get("include_conditions", []),
+        items=series
+    )
+    level = cfg["split"]["level"].lower()
+    train_items, val_items, test_items = partition_series_by_splits(series, splits, level)
+    # [MOD] Relaxed check: Only warn if train is empty (allows eval-only mode if scaler exists)
+    if len(train_items) == 0:
+        print("[DataLoader] WARN: Train split is empty. This is OK for evaluation if model/scaler are loaded.")
+    else:
+        print(f"[DataLoader] Train split has {len(train_items)} trials.")
+
+    w = cfg["data"]["window_size"]
+    s = cfg["data"]["stride"]
+    s_inf = cfg["data"].get("stride_inf", s)  # Use stride_inf for inference if available
+    d = cfg["data"]["y_delay"]
+    
+    # [NEW] Normalization Logic (Train-set based)
+    x_mean = None
+    x_std = None
+    if cfg["data"].get("normalize", False):
+        scaler_path = cfg.get("scaler_path")
+        loaded = False
+        
+        # 1) Try loading existing scaler
+        if scaler_path and os.path.exists(scaler_path):
+            try:
+                data = np.load(scaler_path)
+                x_mean = data["mean"]
+                x_std  = data["std"]
+                print(f"[DataLoader] Loaded scaler from: {scaler_path}")
+                print(f"  > Mean: {x_mean.shape}, Std: {x_std.shape}")
+                loaded = True
+            except Exception as e:
+                print(f"[DataLoader] Failed to load scaler: {e}")
+
+        # 2) If not loaded, compute from TRAIN set
+        if not loaded:
+            print("[DataLoader] Calculating Mean/Std from TRAINING set...")
+            all_x_list = []
+            with h5py.File(io_h5, "r") as h5:
+                for it in train_items:
+                    all_x_list.append(concat_paths(h5, it.x_paths))
+            
+            if all_x_list:
+                # Concatenate all (T, C) -> (Total_T, C)
+                full_X = np.concatenate(all_x_list, axis=0)
+                x_mean = np.mean(full_X, axis=0)
+                x_std  = np.std(full_X, axis=0)
+                print(f"  > Computed Mean: {x_mean.shape}, Std: {x_std.shape}")
+                
+                # Save scaler if path is provided
+                if scaler_path:
+                    os.makedirs(os.path.dirname(scaler_path), exist_ok=True)
+                    np.savez(scaler_path, mean=x_mean, std=x_std)
+                    print(f"  > Scaler saved to: {scaler_path}")
+            else:
+                print("  [WARN] Train split is empty and no scaler found! Normalization will NOT be applied correctly (using raw data).")
+
+    ds_tr = WindowSeq2OneByTrial(io_h5, train_items, w, s, d, x_mean=x_mean, x_std=x_std)
+    ds_va = WindowSeq2OneByTrial(io_h5, val_items,   w, s, d, x_mean=x_mean, x_std=x_std)
+    # [NEW] Use stride_inf for test set (dense inference for animation/visualization)
+    ds_te = WindowSeq2OneByTrial(io_h5, test_items,  w, s_inf, d, x_mean=x_mean, x_std=x_std)
+    if s_inf != s:
+        print(f"[DataLoader] Using stride_inf={s_inf} for test set (dense inference)")
+    loader_cfg = cfg.get("loader", {})
+    batch_size = int(loader_cfg.get("batch_size", 128))
+    num_workers = int(loader_cfg.get("num_workers", 4))
+    drop_last   = bool(loader_cfg.get("drop_last", True))
+    pin_memory  = bool(loader_cfg.get("pin_memory", True)) if torch.cuda.is_available() else False
+    persistent_workers = bool(loader_cfg.get("persistent_workers", True)) if (num_workers > 0) else False
+
+    bs = int(loader_cfg.get("batch_size", 128))
+    nw = int(loader_cfg.get("num_workers", 4))
+    dl = bool(loader_cfg.get("drop_last", True))
+    pm = bool(loader_cfg.get("pin_memory", True)) if torch.cuda.is_available() else False
+    pw = bool(loader_cfg.get("persistent_workers", True)) if (nw > 0) else False
+
+    dl_tr = DataLoader(ds_tr, batch_size=bs, shuffle=True,  num_workers=nw, pin_memory=pm, drop_last=dl, persistent_workers=pw, prefetch_factor=1) if len(ds_tr) > 0 else None
+    dl_va = DataLoader(ds_va, batch_size=bs, shuffle=False, num_workers=nw, pin_memory=pm, drop_last=dl, persistent_workers=pw, prefetch_factor=1) if len(ds_va) > 0 else None
+    dl_te = DataLoader(ds_te, batch_size=bs, shuffle=False, num_workers=nw, pin_memory=pm, drop_last=False, persistent_workers=pw) if len(ds_te) > 0 else None
+    
+    # [FIX] Get channels from first populated dataset
+    in_ch = 0
+    out_ch = 0
+    for ds in [ds_tr, ds_va, ds_te]:
+        if ds.in_channels > 0:
+            in_ch = ds.in_channels
+            out_ch = ds.out_channels
+            break
+            
+    if in_ch == 0:
+         # Consider warning? But if all empty, downstream will likely fail anyway.
+         pass
+
+    print(f"[DataLoader] windows train/val/test = {len(ds_tr)}/{len(ds_va)}/{len(ds_te)}")
+    print(f"[DataLoader] in_channels={in_ch}, out_channels={out_ch}, batch_size={bs}")
+
+    return {
+        "datasets": {"train": ds_tr, "val": ds_va, "test": ds_te},
+        "loaders":  {"train": dl_tr, "val": dl_va, "test": dl_te},
+        "channels": {"in": in_ch, "out": out_ch},
+        "splits":   splits,
+    }
+
+# =========================
+# 플롯 유틸 (옵션)
+# =========================
+def _load_trial_arrays(h5: h5py.File, trial_abs: str) -> Tuple[np.ndarray, np.ndarray, Optional[np.ndarray], Dict[int,str], Dict[int,str]]:
+    if f"{trial_abs}/input" not in h5 or f"{trial_abs}/output" not in h5:
+        raise KeyError(f"input/output dataset missing under {trial_abs}")
+    d_in  = h5[f"{trial_abs}/input"]
+    d_out = h5[f"{trial_abs}/output"]
+    X = np.asarray(d_in[...])
+    Y = np.asarray(d_out[...])
+
+    t = None
+    if f"{trial_abs}/time" in h5:
+        t_arr = np.asarray(h5[f"{trial_abs}/time"][...]).squeeze()
+        if t_arr.ndim == 1 and t_arr.size == X.shape[0]:
+            t = t_arr
+
+    def _labels(dset) -> Dict[int,str]:
+        labels = {}
+        features = dset.attrs.get("features", None)
+        if features is not None:
+            try:
+                features = [f.decode() if isinstance(f, (bytes, bytearray)) else str(f) for f in features]
+            except Exception:
+                features = [str(f) for f in features]
+        else:
+            features = []
+        chmap = {}
+        for k, v in dset.attrs.items():
+            if isinstance(k, str) and k.startswith("chmap::"):
+                p = k.split("chmap::",1)[1]
+                rng = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+                s, e = [int(x) for x in rng.split(":")]
+                chmap[p] = (s, e)
+        for p, (s, e) in chmap.items():
+            base = p.strip("/").split("/")[-1]
+            for c in range(s, e):
+                labels[c] = f"{base}[{c-s}]"
+        nC = dset.shape[1]
+        for c in range(nC):
+            if c not in labels:
+                labels[c] = f"ch{c}"
+        return labels
+
+    x_labels = _labels(d_in)
+    y_labels = _labels(d_out)
+    return X, Y, t, x_labels, y_labels
+
+def _select_columns_by_regex(labels: Dict[int,str], include: Optional[str], exclude: Optional[str], max_cols: Optional[int]) -> List[int]:
+    cols = sorted(list(labels.keys()))
+    if include:
+        inc = re.compile(include)
+        cols = [c for c in cols if inc.search(labels[c])]
+    if exclude:
+        exc = re.compile(exclude)
+        cols = [c for c in cols if not exc.search(labels[c])]
+    if max_cols is not None and len(cols) > max_cols:
+        cols = cols[:max_cols]
+    return cols
+
+def plot_trial_io(
+    io_h5_path: str,
+    subject: str,
+    condition: str,
+    trial: str,
+    out_dir: str = "./figs_trial_io",
+    downsample: int = 1,
+    x_include: Optional[str] = None,
+    x_exclude: Optional[str] = None,
+    y_include: Optional[str] = None,
+    y_exclude: Optional[str] = None,
+    x_max_cols: Optional[int] = 12,
+    y_max_cols: Optional[int] = 12,
+    sharex: bool = True
+):
+    os.makedirs(out_dir, exist_ok=True)
+    trial_abs = f"/{subject}/{condition}/{trial}"
+    with h5py.File(io_h5_path, "r") as h5:
+        X, Y, t, x_labels, y_labels = _load_trial_arrays(h5, trial_abs)
+
+    if downsample > 1:
+        X = X[::downsample]; Y = Y[::downsample]
+        if t is not None: t = t[::downsample]
+    if t is None:
+        t = np.arange(X.shape[0])
+
+    x_cols = _select_columns_by_regex(x_labels, x_include, x_exclude, x_max_cols)
+    y_cols = _select_columns_by_regex(y_labels, y_include, y_exclude, y_max_cols)
+
+    nX = len(x_cols)
+    rows = int(math.ceil(max(nX,1) / 3)); cols = min(3, max(nX,1))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*5, rows*2.2), sharex=sharex)
+    axes = np.atleast_1d(axes).ravel()
+    for i, c in enumerate(x_cols):
+        axes[i].plot(t, X[:, c]); axes[i].set_title(f"input: {x_labels[c]}"); axes[i].grid(True, alpha=0.3)
+    for j in range(nX, len(axes)): fig.delaxes(axes[j])
+    axes[min(nX-1,0)].set_xlabel("time")
+    fig.suptitle(f"{subject} / {condition} / {trial} — INPUT"); fig.tight_layout()
+    out_png_in = os.path.join(out_dir, f"{subject}_{condition}_{trial}_INPUT.png")
+    fig.savefig(out_png_in, dpi=150); plt.close(fig)
+
+    nY = len(y_cols)
+    rows = int(math.ceil(max(nY,1) / 3)); cols = min(3, max(nY,1))
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*5, rows*2.2), sharex=sharex)
+    axes = np.atleast_1d(axes).ravel()
+    for i, c in enumerate(y_cols):
+        axes[i].plot(t, Y[:, c]); axes[i].set_title(f"output: {y_labels[c]}"); axes[i].grid(True, alpha=0.3)
+    for j in range(nY, len(axes)): fig.delaxes(axes[j])
+    axes[min(nY-1,0)].set_xlabel("time")
+    fig.suptitle(f"{subject} / {condition} / {trial} — OUTPUT"); fig.tight_layout()
+    out_png_out = os.path.join(out_dir, f"{subject}_{condition}_{trial}_OUTPUT.png")
+    fig.savefig(out_png_out, dpi=150); plt.close(fig)
+
+    print(f"[PLOT] saved:\n  {out_png_in}\n  {out_png_out}")
+
+    # ==== add near the top of the file (after imports) ============================
+class EarlyStopping:
+    """Stop training when val metric stops improving."""
+    def __init__(self, patience: int = 20, min_delta: float = 0.0, warmup: int = 0):
+        """
+        patience : allow this many non-improving epochs before stopping
+        min_delta: minimum improvement required to reset the counter
+        warmup   : ignore early-stopping check for the first 'warmup' epochs
+        """
+        self.patience = int(patience)
+        self.min_delta = float(min_delta)
+        self.warmup = int(warmup)
+        self.best = math.inf
+        self.counter = 0
+        self.epoch = 0
+
+    def step(self, val: float) -> bool:
+        """Returns True if we should stop."""
+        self.epoch += 1
+        # During warmup, just track the best.
+        if self.epoch <= self.warmup:
+            if val < self.best:
+                self.best = val
+            self.counter = 0
+            return False
+
+        # Improvement?
+        if val < self.best - self.min_delta:
+            self.best = val
+            self.counter = 0
+            return False
+
+        # No improvement
+        self.counter += 1
+        return self.counter > self.patience
+
+## Evaluation Utils
+
+# Feature Importance =================================================================================
+def calculate_overall_feature_importance(model: nn.Module, dl, device, criterion) -> np.ndarray:
+    model.eval()
+    in_ch = dl.dataset.in_channels
+    abs_grad_sum = torch.zeros(in_ch, device=device, dtype=torch.float32)
+    total_samples = 0  # B * W
+
+    for batch in dl:
+        x, y = batch[0], batch[1]
+        # x: (B, C, W) -> (B, W, C)
+        if x.ndim == 3:
+            x = x.permute(0, 2, 1)
+        x = x.to(device).float()
+        y = y.to(device).float()
+
+        x.requires_grad = True
+
+        pred = model(x)
+        loss = criterion(pred, y)
+
+        model.zero_grad()
+        loss.backward()
+
+        if x.grad is not None:
+            # x.grad shape: (B, W, C)
+            batch_grad_sum = torch.abs(x.grad).sum(dim=(0, 1))
+            abs_grad_sum += batch_grad_sum
+            total_samples += x.shape[0] * x.shape[1]  # B * W
+        
+        x.requires_grad = False
+
+    if total_samples == 0:
+        return np.zeros(in_ch)
+
+    mean_abs_grad = abs_grad_sum / total_samples
+    return mean_abs_grad.cpu().numpy()
+
+def calculate_feature_importance_per_output(model: nn.Module, dl, device, criterion) -> np.ndarray:
+    model.eval()
+    out_ch = dl.dataset.out_channels
+    in_ch = dl.dataset.in_channels
+    
+    # Shape: (num_output_channels, num_input_features)
+    all_output_abs_grads = torch.zeros(out_ch, in_ch, device=device, dtype=torch.float32)
+    total_samples_per_output = torch.zeros(out_ch, device=device, dtype=torch.float32)
+
+    for batch in dl:
+        x, y = batch[0], batch[1]
+        # x: (B, C, W) -> (B, W, C)
+        if x.ndim == 3:
+            x = x.permute(0, 2, 1)
+        x = x.to(device).float()
+        y = y.to(device).float()
+
+        for k in range(out_ch):
+            x.requires_grad = True
+            pred = model(x)
+            loss_k = criterion(pred[:, k], y[:, k]).mean()
+
+            model.zero_grad()
+            if x.grad is not None:
+                x.grad.zero_()
+            
+            loss_k.backward(retain_graph=True if k < out_ch - 1 else False)
+
+            if x.grad is not None:
+                batch_grad_sum = torch.abs(x.grad).sum(dim=(0, 1))
+                all_output_abs_grads[k, :] += batch_grad_sum
+                total_samples_per_output[k] += x.shape[0] * x.shape[1]
+            
+            x.requires_grad = False
+
+    final_importance = torch.zeros_like(all_output_abs_grads)
+    for k in range(out_ch):
+        if total_samples_per_output[k] > 0:
+            final_importance[k, :] = all_output_abs_grads[k, :] / total_samples_per_output[k]
+
+    return final_importance.cpu().numpy()
+
+def get_feature_labels(h5_path: str, ds_te, dset_name: str) -> List[str]:
+    if not ds_te.series:
+        if dset_name == 'input':
+            return [f"ch_{i}" for i in range(ds_te.in_channels)]
+        elif dset_name == 'output':
+            return [f"ch_{i}" for i in range(ds_te.out_channels)]
+        else:
+            return []
+
+    # 테스트셋의 첫 번째 trial 경로를 사용
+    first_trial_item = ds_te.series[0]
+    trial_abs = f"/{first_trial_item.subject}/{first_trial_item.condition}/{first_trial_item.trial}"
+    def _labels(dset) -> List[str]:
+        labels: Dict[int, str] = {}
+        chmap: Dict[str, Tuple[int, int]] = {}
+        
+        for k, v in dset.attrs.items():
+            if isinstance(k, str) and k.startswith("chmap::"):
+                try:
+                    p = k.split("chmap::", 1)[1]
+                    rng_str = v.decode() if isinstance(v, (bytes, bytearray)) else str(v)
+                    s, e = [int(x) for x in rng_str.split(":")]
+                    chmap[p] = (s, e)
+                except Exception:
+                    pass  # 파싱 오류 무시
+        
+        for p, (s, e) in chmap.items():
+            base = p.strip("/").split("/")[-1]
+            # [MOD] Distinguish independent variables (Pos vs Vel)
+            if "kin_dq" in p:
+                base += "_vel"
+            elif "kin_q" in p:
+                base += "_pos"
+            elif "joint_moment" in p:
+                base += "_moment"
+
+            if (e - s) > 1:
+                for i, c in enumerate(range(s, e)):
+                    labels[c] = f"{base}[{i}]"
+            elif s < e:
+                labels[s] = base  # 채널이 하나면 [0] 접미사 생략
+        
+        nC = dset.shape[1]
+        # 순서대로 정렬된 리스트 반환
+        final_labels = [labels.get(i, f"ch_{i}") for i in range(nC)]
+        return final_labels
+
+    try:
+        with h5py.File(h5_path, "r") as h5:
+            dset_obj = h5[f"{trial_abs}/{dset_name}"]
+            return _labels(dset_obj)
+    except Exception as e:
+        print(f"[WARN] Could not load {dset_name} feature labels from HDF5: {e}")
+        if dset_name == 'input':
+            return [f"ch_{i}" for i in range(ds_te.in_channels)]
+        elif dset_name == 'output':
+            return [f"ch_{i}" for i in range(ds_te.out_channels)]
+        else:
+            return []
+
+def plot_feature_importance(importance: np.ndarray, labels: List[str], save_dir: str, title: str, filename: str):
+    os.makedirs(save_dir, exist_ok=True)
+    # GUI 백엔드 없이 파일로 저장하기 위해 Agg 사용
+    matplotlib.use('Agg')
+    
+    # 중요도 순으로 정렬
+    sorted_idx = np.argsort(importance)[::-1]
+    sorted_importance = importance[sorted_idx]
+    sorted_labels = [labels[i] for i in sorted_idx]
+
+    # 0-100%로 정규화
+    norm_importance = 100.0 * sorted_importance / (sorted_importance.max() + 1e-9)
+
+    fig, ax = plt.subplots(figsize=(10, max(5, len(labels) * 0.35)))
+    y_pos = np.arange(len(labels))
+    
+    ax.barh(y_pos, norm_importance, align='center', color='skyblue', edgecolor='black')
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(sorted_labels)
+    ax.invert_yaxis()  # 중요도 높은 순으로
+    ax.set_xlabel("Relative Importance (%)")
+    ax.set_title(title)
+    ax.grid(True, axis='x', linestyle='--', alpha=0.6)
+
+    fig.tight_layout()
+    out_path = os.path.join(save_dir, filename)
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print(f"[PLOT] Feature importance saved to {out_path}")
+
+    # txt_path = os.path.join(save_dir, os.path.splitext(filename)[0] + ".txt")
+    # with open(txt_path, "w", encoding="utf-8") as f:
+    #     f.write(f"{title} (descending order)\n")
+    #     f.write("Rank | Feature | Relative Importance (%) | Raw Score\n")
+    #     f.write("---- | ------- | ----------------------- | ---------\n")
+    #     for i, idx in enumerate(sorted_idx):
+    #         f.write(f"{i+1:02d} | {labels[idx]} | {norm_importance[i]:.2f}% | {importance[idx]:.6e}\n")
+    # print(f"[SAVE] Feature importance scores saved to {txt_path}")
+    
+    # ======================================================================================================
+# [NEW] Helper to get output labels from config
+def build_output_labels_from_cfg(cfg: dict) -> List[str]:
+    """
+    Parse cfg['outputs'] or cfg['01_construction']['outputs'] to get list of channel names.
+    Use naive recursive search or direct access.
+    """
+    # 1. Direct access in cfg dict (if whole config passed)
+    if "01_construction" in cfg and "outputs" in cfg["01_construction"]:
+        return cfg["01_construction"]["outputs"]
+    
+    # 2. If 'outputs' key is at top level (e.g. subset passed)
+    if "outputs" in cfg:
+        return cfg["outputs"]
+    
+    # 3. If passed cfg is '03_eval', it might have 'data'->'outputs'? 
+    # Actually 03_eval uses *DATA_CONFIG which doesn't list channels.
+    # It usually relies on src/dst h5.
+    
+    # Fallback: empty -> calling code will auto-generate y[0], y[1]...
+    return []

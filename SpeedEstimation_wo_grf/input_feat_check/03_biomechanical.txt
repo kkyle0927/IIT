@@ -1,0 +1,34 @@
+====================================================================================================
+BIOMECHANICAL VALIDITY CHECK
+====================================================================================================
+
+Found 28 issues:
+
+  S003/incline_10deg/lv4/trial_01 | mocap/knee_angle_r: [0.1, 91.7] outside (-10, 90)
+  S004/level_075mps/lv4/trial_01 | mocap/knee_angle_l: [12.8, 101.7] outside (-10, 90)
+  S004/level_075mps/lv4/trial_01 | mocap/knee_angle_r: [8.4, 116.2] outside (-10, 90)
+  S004/incline_10deg/lv7/trial_01 | robot/left/hip_angle: [-11.6, 81.1] outside (-40, 80)
+  S005/level_100mps/lv0/trial_01 | mocap/knee_angle_l: [1.5, 94.3] outside (-10, 90)
+  S005/level_100mps/lv7/trial_01 | mocap/knee_angle_r: [2.4, 94.9] outside (-10, 90)
+  S005/level_125mps/lv4/trial_01 | mocap/knee_angle_r: [0.9, 90.3] outside (-10, 90)
+  S005/level_125mps/lv7/trial_01 | mocap/knee_angle_r: [1.7, 92.2] outside (-10, 90)
+  S005/incline_10deg/lv4/trial_01 | mocap/knee_angle_r: [0.2, 94.6] outside (-10, 90)
+  S007/level_075mps/lv4/trial_01 | mocap/knee_angle_l: [0.2, 93.5] outside (-10, 90)
+  S007/level_075mps/lv4/trial_01 | mocap/knee_angle_r: [0.2, 92.1] outside (-10, 90)
+  S007/level_075mps/lv7/trial_01 | mocap/knee_angle_l: [0.2, 98.3] outside (-10, 90)
+  S007/level_100mps/lv0/trial_01 | mocap/knee_angle_l: [0.3, 91.0] outside (-10, 90)
+  S007/level_100mps/lv4/trial_01 | mocap/knee_angle_l: [0.3, 93.4] outside (-10, 90)
+  S007/level_100mps/lv7/trial_01 | mocap/knee_angle_l: [0.2, 97.9] outside (-10, 90)
+  S007/level_100mps/lv7/trial_01 | mocap/knee_angle_r: [0.2, 91.2] outside (-10, 90)
+  S007/level_125mps/lv7/trial_01 | mocap/knee_angle_l: [0.2, 95.5] outside (-10, 90)
+  S007/incline_10deg/lv7/trial_01 | mocap/knee_angle_l: [0.2, 92.3] outside (-10, 90)
+  S007/stopandgo/lv0/trial_02 | mocap/knee_angle_l: [0.3, 92.2] outside (-10, 90)
+  S007/stopandgo/lv4/trial_01 | mocap/knee_angle_l: [0.3, 95.3] outside (-10, 90)
+  S007/stopandgo/lv4/trial_02 | mocap/knee_angle_l: [0.3, 94.9] outside (-10, 90)
+  S007/stopandgo/lv7/trial_01 | mocap/knee_angle_l: [0.3, 97.2] outside (-10, 90)
+  S007/stopandgo/lv7/trial_02 | mocap/knee_angle_l: [0.3, 95.1] outside (-10, 90)
+  S008/incline_10deg/lv4/trial_01 | robot/left/hip_angle: [-3.4, 84.0] outside (-40, 80)
+  S008/incline_10deg/lv7/trial_01 | robot/left/hip_angle: [-5.0, 87.7] outside (-40, 80)
+  S008/incline_10deg/lv7/trial_01 | robot/right/hip_angle: [-7.0, 83.7] outside (-40, 80)
+  S008/stopandgo/lv7/trial_01 | mocap/knee_angle_l: [0.3, 94.2] outside (-10, 90)
+  S008/stopandgo/lv7/trial_01 | robot/left/hip_angle: [-3.5, 83.0] outside (-40, 80)

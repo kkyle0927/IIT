@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/tmp/archive2_top_model_feature_importance.py", line 222, in <module>
+    main()
+  File "/tmp/archive2_top_model_feature_importance.py", line 128, in main
+    res = load_and_evaluate(exp_path, device, return_extras=True, eval_stride=1)
+  File "/home/chanyoungko/IIT/SpeedEstimation_wo_grf/compare_results.py", line 918, in load_and_evaluate
+    eval_batch_size = 64 if device.type == "cpu" else 128
+AttributeError: 'str' object has no attribute 'type'

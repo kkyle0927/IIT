@@ -1,0 +1,84 @@
+{
+  "experiment": "exp_WG_S1A2_raw_full_w200_base_clamp20_Test-m2_S008_seed42",
+  "device": "cuda",
+  "fi_stride_multipliers": [
+    3,
+    6,
+    12,
+    18
+  ],
+  "fi_stride_used": 12,
+  "perm_batch_size": 512,
+  "data_shape": {
+    "x": [
+      383555,
+      26
+    ],
+    "y": [
+      383555,
+      1
+    ]
+  },
+  "test_metrics": {
+    "mae": 0.025977184996008873,
+    "rmse": 0.0374610461294651,
+    "r2": 0.989800751209259,
+    "lag_ms": 0.0,
+    "smoothness": 0.0022502392530441284
+  },
+  "meta": {
+    "data_path": "./combined_data_S008.h5",
+    "real_sub": "S008",
+    "conditions": [
+      "level_075mps",
+      "level_100mps",
+      "level_125mps",
+      "accel_sine",
+      "decline_5deg",
+      "incline_10deg",
+      "stopandgo"
+    ]
+  },
+  "top10": [
+    {
+      "feature": "IMU_vel_forward",
+      "importance": 0.0037076791134674995
+    },
+    {
+      "feature": "Deg_Hip_Flex_R_dot",
+      "importance": 0.0036574437195578714
+    },
+    {
+      "feature": "Deg_Hip_Flex_L_dot",
+      "importance": 0.0029847377447443715
+    },
+    {
+      "feature": "Deg_Ankle_R",
+      "importance": 0.001063783398807769
+    },
+    {
+      "feature": "Deg_Ankle_L_dot",
+      "importance": 0.0008333838539946574
+    },
+    {
+      "feature": "Deg_Hip_Flex_R",
+      "importance": 0.0007927926790286624
+    },
+    {
+      "feature": "IMU_yaw",
+      "importance": 0.000748456952709639
+    },
+    {
+      "feature": "Deg_Knee_R",
+      "importance": 0.0007390740360713203
+    },
+    {
+      "feature": "Deg_Ankle_L",
+      "importance": 0.0007208813949024745
+    },
+    {
+      "feature": "Deg_Ankle_R_dot",
+      "importance": 0.0007166845196550076
+    }
+  ]
+}
