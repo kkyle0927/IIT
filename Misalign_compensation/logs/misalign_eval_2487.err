@@ -1,0 +1,90 @@
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1502: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1871, in analyze_automated
+    imps = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 2284, in calculate_permutation_importance
+    xb = X_cpu[i:i+batch_size].to(device)
+TypeError: to() received an invalid combination of arguments - got (list), but expected one of:
+ * (torch.device device = None, torch.dtype dtype = None, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (torch.dtype dtype, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (Tensor tensor, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1502: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1871, in analyze_automated
+    imps = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 2284, in calculate_permutation_importance
+    xb = X_cpu[i:i+batch_size].to(device)
+TypeError: to() received an invalid combination of arguments - got (list), but expected one of:
+ * (torch.device device = None, torch.dtype dtype = None, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (torch.dtype dtype, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (Tensor tensor, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1502: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1871, in analyze_automated
+    imps = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 2284, in calculate_permutation_importance
+    xb = X_cpu[i:i+batch_size].to(device)
+TypeError: to() received an invalid combination of arguments - got (list), but expected one of:
+ * (torch.device device = None, torch.dtype dtype = None, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (torch.dtype dtype, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (Tensor tensor, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1502: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1871, in analyze_automated
+    imps = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 2284, in calculate_permutation_importance
+    xb = X_cpu[i:i+batch_size].to(device)
+TypeError: to() received an invalid combination of arguments - got (list), but expected one of:
+ * (torch.device device = None, torch.dtype dtype = None, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (torch.dtype dtype, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+ * (Tensor tensor, bool non_blocking = False, bool copy = False, *, torch.memory_format memory_format = None)
+
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1803, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 700, in load_and_evaluate
+    y_pred = y_pred + robot_ref
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 1.05 TiB for an array with shape (379575, 379575, 2) and data type float32

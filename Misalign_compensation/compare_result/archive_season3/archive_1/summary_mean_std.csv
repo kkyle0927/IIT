@@ -1,0 +1,6 @@
+name,n_runs,mae_mean,mae_std,rmse_mean,host_latency_ms,host_max_freq_hz,model_size_mb,metric_source
+exp_S3A1_fact_tiny_full,6,5.396896441777547,0.3008026605352627,7.095967213312785,10.2684,97.39,0.0713,metrics_json_fallback
+exp_S3A1_ctrl_tiny_thigh,6,5.406186819076538,0.13126188264628852,7.104817787806193,2.1419,466.87,0.0867,metrics_json_fallback
+exp_S3A1_fact_teacher_full,6,5.718270619710286,0.45472641230931865,7.3928632736206055,13.4615,74.29,0.2017,metrics_json_fallback
+exp_S3A1_ctrl_teacher_thigh,6,5.775609572728475,0.3756312761385073,7.559896230697632,2.3535,424.9,0.8548,metrics_json_fallback
+exp_S3A1_fact_teacher_physonly,6,6.807630697886149,0.9852205896671229,8.57235058148702,6.513,153.54,0.1496,metrics_json_fallback

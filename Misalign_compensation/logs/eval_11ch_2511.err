@@ -1,0 +1,2 @@
+/var/spool/slurmd/job02511/slurm_script: line 5:  2334 Killed                  python eval_per_condition.py experiments/exp_no_torque_Test-m2_S008_seed42
+slurmstepd: error: Detected 1 oom_kill event in StepId=2511.batch. Some of the step tasks have been OOM Killed.

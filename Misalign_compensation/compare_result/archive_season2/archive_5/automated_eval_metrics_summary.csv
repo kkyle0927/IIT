@@ -1,0 +1,4 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S2A5_feat_quat_load_coupling_Test-m2_S008_seed42,experiments/archive_season2/archive_5/exp_S2A5_feat_quat_load_coupling_Test-m2_S008_seed42,1.84404,2.3708322,0.98273975,4.0,0.90792286
+exp_S2A5_ctrl_quat_res_kin_power_Test-m2_S008_seed42,experiments/archive_season2/archive_5/exp_S2A5_ctrl_quat_res_kin_power_Test-m2_S008_seed42,1.9964179,2.5563066,0.9799335,5.0,0.8881258
+exp_S2A5_feat_quat_all_misalign_Test-m2_S008_seed42,experiments/archive_season2/archive_5/exp_S2A5_feat_quat_all_misalign_Test-m2_S008_seed42,2.0043638,2.494348,0.98089445,4.0,0.8948843

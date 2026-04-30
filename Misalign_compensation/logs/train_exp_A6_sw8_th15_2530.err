@@ -1,0 +1,5 @@
+GPU-0 Total:   0%|          | 0/1 [00:00<?, ?it/s]/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/torch/nn/modules/loss.py:1100: UserWarning: Using a target size (torch.Size([256, 1, 2])) that is different to the input size (torch.Size([256, 2])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
+/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/torch/nn/modules/loss.py:1100: UserWarning: Using a target size (torch.Size([45, 1, 2])) that is different to the input size (torch.Size([45, 2])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
+slurmstepd: error: *** JOB 2530 ON server1 CANCELLED AT 2026-03-12T15:06:08 ***

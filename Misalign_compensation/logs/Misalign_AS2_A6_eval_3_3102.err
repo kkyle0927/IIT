@@ -1,0 +1,15 @@
+Traceback (most recent call last):
+  File "<stdin>", line 73, in <module>
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/pandas/core/frame.py", line 9366, in pivot
+    return pivot(self, index=index, columns=columns, values=values)
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/pandas/core/reshape/pivot.py", line 570, in pivot
+    result = indexed.unstack(columns_listlike)  # type: ignore[arg-type]
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/pandas/core/series.py", line 4634, in unstack
+    return unstack(self, level, fill_value, sort)
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/pandas/core/reshape/reshape.py", line 517, in unstack
+    unstacker = _Unstacker(
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/pandas/core/reshape/reshape.py", line 154, in __init__
+    self._make_selectors()
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/pandas/core/reshape/reshape.py", line 210, in _make_selectors
+    raise ValueError("Index contains duplicate entries, cannot reshape")
+ValueError: Index contains duplicate entries, cannot reshape

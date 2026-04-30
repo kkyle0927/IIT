@@ -1,0 +1,3 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S2A6F_ctrl_teacher_kinpower_Test-m2_S008_seed42,experiments/archive_season2/archive_6/exp_S2A6F_ctrl_teacher_kinpower_Test-m2_S008_seed42,1.8440249,2.3319201,0.98330164,4.0,0.899213
+exp_S2A6F_tiny_kinpower_w100_Test-m2_S008_seed42,experiments/archive_season2/archive_6/exp_S2A6F_tiny_kinpower_w100_Test-m2_S008_seed42,1.9617312,2.4789166,0.9811199,3.5,0.8940446

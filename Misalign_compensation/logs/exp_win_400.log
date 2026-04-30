@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Github\IIT\Misalign_compensation\model_training.py", line 16, in <module>
-    import seaborn as sns
-ModuleNotFoundError: No module named 'seaborn'

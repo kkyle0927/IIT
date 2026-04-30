@@ -1,0 +1,10 @@
+experiment,fold,test_mae,test_rmse,test_huber,n_params,model_size_mb,host_latency_ms,host_max_freq_hz,metric_source
+exp_S2A4_feat_quat_kinematics_Test-m2_S008_seed42,Test-m2_S008,2.0425097942352295,2.594475507736206,2.4904458490686383,223684,0.8533,2.4764,403.81,metrics_json_fallback
+exp_S2A4_ctrl_quat_res_noise001_Test-m2_S008_seed42,Test-m2_S008,2.050307035446167,2.62101149559021,2.4654452567951446,222908,0.8503,2.4219,412.9,metrics_json_fallback
+exp_S2A4_feat_quat_mech_power_Test-m2_S008_seed42,Test-m2_S008,2.059643507003784,2.631854772567749,2.459076174581894,223296,0.8518,1.8473,541.32,metrics_json_fallback
+exp_S2A4_ctrl_quat_res_kin_power_Test-m2_S008_seed42,Test-m2_S008,2.0624494552612305,2.6387827396392822,2.4888695341970783,224072,0.8548,2.8488,351.02,metrics_json_fallback
+exp_S2A4_feat_quat_mech_kin_asym_Test-m2_S008_seed42,Test-m2_S008,2.0629842281341553,2.6120760440826416,2.516604655519479,224654,0.857,2.2536,443.74,metrics_json_fallback
+exp_S2A4_feat_quat_all_biomech_Test-m2_S008_seed42,Test-m2_S008,2.102865219116211,2.618326425552368,2.4677187120071564,225430,0.8599,2.4412,409.63,metrics_json_fallback
+exp_S2A4_feat_quat_asymmetry_Test-m2_S008_seed42,Test-m2_S008,2.1147043704986572,2.6785213947296143,2.4815513899029304,223490,0.8525,2.469,405.02,metrics_json_fallback
+exp_S2A4_feat_quat_gait_asymmetry_Test-m2_S008_seed42,Test-m2_S008,2.1693050861358643,2.7380623817443848,2.458865382053234,223878,0.854,2.4876,402.0,metrics_json_fallback
+exp_S2A4_feat_quat_deflection_Test-m2_S008_seed42,Test-m2_S008,2.3691489696502686,2.9523184299468994,2.5718737286750715,223296,0.8518,2.3322,428.79,metrics_json_fallback

@@ -1,0 +1,48 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    plot_detailed_condition_trajectories(exp_path, fold_output_dir, device)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1340, in plot_detailed_condition_trajectories
+    data_sources = get_data_sources_from_config(cfg)
+NameError: name 'get_data_sources_from_config' is not defined

@@ -1,0 +1,23 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1777, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=False, return_extras=False)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 733, in load_and_evaluate
+    ref_values.append(ref_y.numpy() if hasattr(ref_y, 'numpy') else ref_y)
+MemoryError
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1484: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1859, in analyze_automated
+    imps = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 2250, in calculate_permutation_importance
+    X_cpu = torch.cat(X_list, dim=0) # (N, T, D)
+RuntimeError: [enforce fail at alloc_cpu.cpp:117] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 789599200 bytes. Error code 12 (Cannot allocate memory)
+/home/chanyoungko/IIT/Misalign_compensation/compare_results.py:1484: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1859, in analyze_automated
+    imps = calculate_permutation_importance(
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 2250, in calculate_permutation_importance
+    X_cpu = torch.cat(X_list, dim=0) # (N, T, D)
+RuntimeError: [enforce fail at alloc_cpu.cpp:117] err == 0. DefaultCPUAllocator: can't allocate memory: you tried to allocate 971814400 bytes. Error code 12 (Cannot allocate memory)
+slurmstepd: error: *** JOB 2998 ON server1 CANCELLED AT 2026-03-22T07:24:30 DUE TO TIME LIMIT ***

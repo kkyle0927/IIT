@@ -1,0 +1,10 @@
+name,path,mae,rmse,r2,lag_ms,smoothness,metric_source
+exp_S2A3_ref_euler_quat_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_ref_euler_quat_Test-m2_S008_seed42,1.903664,2.4508302,0.9815553,4.0,0.88910973,compare_results
+exp_S2A3_repr_rawimu6_quat_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_rawimu6_quat_Test-m2_S008_seed42,2.0860631,2.633499,0.9787033,2.0,0.98017645,compare_results
+exp_S2A3_repr_gravity6_quat_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_gravity6_quat_Test-m2_S008_seed42,2.158981,2.7362418,0.9770092,-0.5,0.96182096,compare_results
+exp_S2A3_repr_rawimu6_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_rawimu6_Test-m2_S008_seed42,2.2306936,2.8145163,0.975675,3.0,0.98237103,compare_results
+exp_S2A3_repr_symyaw6_quat_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_symyaw6_quat_Test-m2_S008_seed42,2.257893,2.8111722,0.97573274,2.0,0.9428562,compare_results
+exp_S2A3_repr_gravity6_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_gravity6_Test-m2_S008_seed42,2.3708048,2.9274642,0.9736834,-1.0,1.0076255,compare_results
+exp_S2A3_repr_bodypca6_quat_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_bodypca6_quat_Test-m2_S008_seed42,2.4869494438171387,3.1851389408111572,,,,metrics_json_fallback
+exp_S2A3_repr_bodypca6_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_bodypca6_Test-m2_S008_seed42,2.6772954,3.3140664,0.9662737,3.0,1.0164034,compare_results
+exp_S2A3_repr_symyaw6_Test-m2_S008_seed42,experiments/archive_season2/archive_3/exp_S2A3_repr_symyaw6_Test-m2_S008_seed42,2.7656214,3.3898036,0.9647146,2.5,0.96938336,compare_results

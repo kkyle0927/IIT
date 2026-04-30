@@ -1,0 +1,49 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1726, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True)
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 631, in load_and_evaluate
+    model.load_state_dict(ckpt["state_dict"] if "state_dict" in ckpt else ckpt, strict=False)
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/torch/nn/modules/module.py", line 2584, in load_state_dict
+    raise RuntimeError(
+RuntimeError: Error(s) in loading state_dict for TCN_MLP:
+	size mismatch for head_base.0.weight: copying a param with shape torch.Size([64, 64]) from checkpoint, the shape in current model is torch.Size([64, 128]).
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/Misalign_compensation/compare_results.py", line 1746, in analyze_automated
+    f"Trajectory: {exp_id} ({fold_name})",
+NameError: name 'exp_id' is not defined

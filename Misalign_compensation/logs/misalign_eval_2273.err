@@ -1,0 +1,1 @@
+/var/spool/slurmd/job02273/slurm_script: line 13: 3260462 Killed                  /home/chanyoungko/.conda/envs/IIT/bin/python -u compare_results.py --auto

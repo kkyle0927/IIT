@@ -1,0 +1,13 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A1_ctrl_tiny_thigh_Test-m2_S005_seed7,experiments/archive_season3/archive_1/exp_S3A1_ctrl_tiny_thigh_Test-m2_S005_seed7,4.595294,6.0420737,0.8872036,5.2631578947368425,1.0225961
+exp_S3A1_ctrl_tiny_thigh_Test-m2_S002_seed7,experiments/archive_season3/archive_1/exp_S3A1_ctrl_tiny_thigh_Test-m2_S002_seed7,4.7117558,6.2640777,0.8146299,8.75,0.8563078
+exp_S3A1_ctrl_tiny_thigh_Test-m2_S002_seed42,experiments/archive_season3/archive_1/exp_S3A1_ctrl_tiny_thigh_Test-m2_S002_seed42,4.9838805,6.652924,0.79090166,11.25,0.902899
+exp_S3A1_ctrl_teacher_thigh_Test-m2_S002_seed7,experiments/archive_season3/archive_1/exp_S3A1_ctrl_teacher_thigh_Test-m2_S002_seed7,5.2351627,7.2107058,0.7541016,12.5,0.83194464
+exp_S3A1_ctrl_teacher_thigh_Test-m2_S005_seed7,experiments/archive_season3/archive_1/exp_S3A1_ctrl_teacher_thigh_Test-m2_S005_seed7,5.246682,6.650934,0.8632855,-3.6842105263157894,1.0033413
+exp_S3A1_ctrl_teacher_thigh_Test-m2_S005_seed42,experiments/archive_season3/archive_1/exp_S3A1_ctrl_teacher_thigh_Test-m2_S005_seed42,5.27165,6.7680326,0.8584291,-0.5263157894736842,0.9910387
+exp_S3A1_ctrl_teacher_thigh_Test-m2_S002_seed42,experiments/archive_season3/archive_1/exp_S3A1_ctrl_teacher_thigh_Test-m2_S002_seed42,5.33183,7.1171474,0.7604412,2.0833333333333335,0.82329273
+exp_S3A1_ctrl_teacher_thigh_Test-m2_S008_seed42,experiments/archive_season3/archive_1/exp_S3A1_ctrl_teacher_thigh_Test-m2_S008_seed42,5.344255,6.88127,0.87021995,0.0,0.86646426
+exp_S3A1_ctrl_tiny_thigh_Test-m2_S008_seed42,experiments/archive_season3/archive_1/exp_S3A1_ctrl_tiny_thigh_Test-m2_S008_seed42,5.4270163,7.095573,0.861923,-5.5,0.90062445
+exp_S3A1_ctrl_tiny_thigh_Test-m2_S005_seed42,experiments/archive_season3/archive_1/exp_S3A1_ctrl_tiny_thigh_Test-m2_S005_seed42,5.443986,7.2987604,0.8354032,-0.5263157894736842,1.047217
+exp_S3A1_ctrl_tiny_thigh_Test-m2_S008_seed7,experiments/archive_season3/archive_1/exp_S3A1_ctrl_tiny_thigh_Test-m2_S008_seed7,5.58635,7.1515994,0.8597339,-11.0,0.878266
+exp_S3A1_ctrl_teacher_thigh_Test-m2_S008_seed7,experiments/archive_season3/archive_1/exp_S3A1_ctrl_teacher_thigh_Test-m2_S008_seed7,5.620169,7.22054,0.8571073,-4.5,0.8907591
