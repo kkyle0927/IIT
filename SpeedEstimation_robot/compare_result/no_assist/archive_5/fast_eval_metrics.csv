@@ -1,0 +1,4 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist_Test-m2_S001_seed42,experiments/exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist_Test-m2_S001_seed42,0.036440156,0.056171276,0.975313,-14.444444444444445,0.007762328
+exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist_Test-m2_S004_seed42,experiments/exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist_Test-m2_S004_seed42,0.041063644,0.059263136,0.9712412,-8.88888888888889,0.008499472
+exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist_Test-m2_S008_seed42,experiments/exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist_Test-m2_S008_seed42,0.06416009,0.088600904,0.9371075,-12.5,0.008787498

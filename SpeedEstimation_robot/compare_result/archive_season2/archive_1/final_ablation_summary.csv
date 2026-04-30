@@ -1,0 +1,6 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_S2A1_J7_hybrid_longwin_envelope,0.060987238,0.09590568,0.93195844,13.5,0.060987238,0.0
+exp_S2A1_J1_hybrid_power_base,0.06229446,0.09834384,0.9294628,7.0,0.06229446,0.0
+exp_S2A1_L7_affine_calibration_biasloss,0.06260841,0.09475488,0.93358153,11.0,0.06260841,0.0
+exp_S2A1_G2_fullkin_deeptcn,0.06268419,0.09840604,0.9283644,22.5,0.06268419,0.0
+exp_S2A1_M8_positive_residual_bestshot,0.063937835,0.09129786,0.93811774,3.0,0.063937835,0.0

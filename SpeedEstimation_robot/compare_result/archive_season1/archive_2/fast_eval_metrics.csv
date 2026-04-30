@@ -1,0 +1,2 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_G2_fullkin_multiscale_Test-m2_S008_seed42,experiments/exp_G2_fullkin_multiscale_Test-m2_S008_seed42,0.06090623,0.109577134,0.9097668,30.0,0.0035645426

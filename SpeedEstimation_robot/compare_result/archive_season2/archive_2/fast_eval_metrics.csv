@@ -1,0 +1,6 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S2A2_E1_fastslow_split_Test-m2_S008_seed42,experiments/exp_S2A2_E1_fastslow_split_Test-m2_S008_seed42,0.07152494,0.10262446,0.92211175,9.0,0.009528881
+exp_S2A2_E2_remove_raw_torque_fast_Test-m2_S008_seed42,experiments/exp_S2A2_E2_remove_raw_torque_fast_Test-m2_S008_seed42,0.058379855,0.092317715,0.936971,7.0,0.009377684
+exp_S2A2_E5_assist_proxy_aux_Test-m2_S008_seed42,experiments/exp_S2A2_E5_assist_proxy_aux_Test-m2_S008_seed42,0.06114388,0.094028935,0.93461275,5.0,0.00951419
+exp_S2A2_E6_regime_balanced_sampling_Test-m2_S008_seed42,experiments/exp_S2A2_E6_regime_balanced_sampling_Test-m2_S008_seed42,0.067872755,0.10055379,0.9252232,4.5,0.009137593
+exp_S2A2_E8_subject_calibration_probe_Test-m2_S008_seed42,experiments/exp_S2A2_E8_subject_calibration_probe_Test-m2_S008_seed42,0.07000709,0.10376329,0.9203735,6.5,0.009432325

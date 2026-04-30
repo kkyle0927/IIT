@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist,0.052937906,0.076663874,0.95089763,-30.185185185185187,0.052937906,0.0

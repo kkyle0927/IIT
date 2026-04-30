@@ -1,0 +1,6 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_H1_rt_small_baseline_Test-m2_S008_seed42,experiments/exp_H1_rt_small_baseline_Test-m2_S008_seed42,0.07956522,0.12332817,0.887778,9.5,0.012767988
+exp_H4_rt_dynamic_weighted_Test-m2_S008_seed42,experiments/exp_H4_rt_dynamic_weighted_Test-m2_S008_seed42,0.08036386,0.12438705,0.8858427,11.0,0.015892351
+exp_H5_rt_dualbranch_small_Test-m2_S008_seed42,experiments/exp_H5_rt_dualbranch_small_Test-m2_S008_seed42,0.06384874,0.112543985,0.906546,7.5,0.012224275
+exp_H7_rt_dualbranch_softprior_Test-m2_S008_seed42,experiments/exp_H7_rt_dualbranch_softprior_Test-m2_S008_seed42,0.07909294,0.12559149,0.8836212,9.5,0.01106527
+exp_H8_rt_tiny_win150_Test-m2_S008_seed42,experiments/exp_H8_rt_tiny_win150_Test-m2_S008_seed42,0.066373095,0.108561866,0.91381204,8.0,0.017045505

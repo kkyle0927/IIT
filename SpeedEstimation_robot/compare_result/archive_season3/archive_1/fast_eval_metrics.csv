@@ -1,0 +1,9 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A1_A1_adaptive_complementary_Test-m2_S008_seed42,experiments/exp_S3A1_A1_adaptive_complementary_Test-m2_S008_seed42,0.066152014,0.10075968,0.9249166,5.0,0.007882513
+exp_S3A1_B1_cadence_step_length_Test-m2_S008_seed42,experiments/exp_S3A1_B1_cadence_step_length_Test-m2_S008_seed42,0.06936148,0.10460301,0.9190795,2.0,0.008897198
+exp_S3A1_C1_invariant_nominal_slowcalib_Test-m2_S008_seed42,experiments/exp_S3A1_C1_invariant_nominal_slowcalib_Test-m2_S008_seed42,0.075137876,0.11081405,0.9091845,-2.5,0.008536625
+exp_S3A1_D1_persistent_bias_state_Test-m2_S008_seed42,experiments/exp_S3A1_D1_persistent_bias_state_Test-m2_S008_seed42,0.06689974,0.09762439,0.9295166,9.0,0.0087276
+exp_S3A1_E1_speed_mode_residual_Test-m2_S008_seed42,experiments/exp_S3A1_E1_speed_mode_residual_Test-m2_S008_seed42,0.15554164,0.2304091,0.6073827,8.0,0.013809517
+exp_S3A1_F1_frozen_nominal_bias_Test-m2_S008_seed42,experiments/exp_S3A1_F1_frozen_nominal_bias_Test-m2_S008_seed42,0.07417193,0.10932986,0.91160095,1.5,0.008787916
+exp_S3A1_R0_e2_reference_Test-m2_S008_seed42,experiments/exp_S3A1_R0_e2_reference_Test-m2_S008_seed42,0.069820076,0.10561125,0.91751206,7.5,0.008926967
+exp_S3A1_R1_j7_reference_Test-m2_S008_seed42,experiments/exp_S3A1_R1_j7_reference_Test-m2_S008_seed42,0.06686102,0.102757275,0.92191005,9.0,0.0076847514

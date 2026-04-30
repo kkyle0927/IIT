@@ -1,0 +1,2 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A5_W2_switch_wo_priors_Test-m2_S008_seed42,experiments/exp_S3A5_W2_switch_wo_priors_Test-m2_S008_seed42,0.0514001883566379,,,,0.0

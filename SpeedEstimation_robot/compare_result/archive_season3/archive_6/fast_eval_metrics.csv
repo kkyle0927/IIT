@@ -1,0 +1,11 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A6_U0_w2_reference_Test-m2_S008_seed42,experiments/exp_S3A6_U0_w2_reference_Test-m2_S008_seed42,0.049129035,0.0799639,0.9527112,1.0,0.007510903
+exp_S3A6_U1_stride_progression_Test-m2_S008_seed42,experiments/exp_S3A6_U1_stride_progression_Test-m2_S008_seed42,0.05976739,0.0955807,0.93243676,3.5,0.005730569
+exp_S3A6_U2_pdr_hybrid_Test-m2_S008_seed42,experiments/exp_S3A6_U2_pdr_hybrid_Test-m2_S008_seed42,0.06914783,0.111126624,0.9086715,4.0,0.008450276
+exp_S3A6_U3_predkin_cascade_Test-m2_S008_seed42,experiments/exp_S3A6_U3_predkin_cascade_Test-m2_S008_seed42,0.057452273,0.08351769,0.94841456,-6.5,0.009633999
+exp_S3A6_U4_progression_distill_Test-m2_S008_seed42,experiments/exp_S3A6_U4_progression_distill_Test-m2_S008_seed42,0.09431799,0.12860851,0.8776766,-3.0,0.0585665
+exp_S3A6_U5_assist_deconfound_Test-m2_S008_seed42,experiments/exp_S3A6_U5_assist_deconfound_Test-m2_S008_seed42,0.059734058,0.0927248,0.93641394,-3.5,0.009003507
+exp_S3A6_U6_multianchor_fusion_Test-m2_S008_seed42,experiments/exp_S3A6_U6_multianchor_fusion_Test-m2_S008_seed42,0.057008527,0.092530735,0.93667984,2.0,0.007211054
+exp_S3A6_U7_adaptive_bias_state_Test-m2_S008_seed42,experiments/exp_S3A6_U7_adaptive_bias_state_Test-m2_S008_seed42,0.06464184,0.09993842,0.9261356,9.5,0.014476444
+exp_S3A6_U8_monotone_progression_Test-m2_S008_seed42,experiments/exp_S3A6_U8_monotone_progression_Test-m2_S008_seed42,0.069644034,0.099852964,0.92626184,2.5,0.0079691205
+exp_S3A6_U9_k3_reference_Test-m2_S008_seed42,experiments/exp_S3A6_U9_k3_reference_Test-m2_S008_seed42,0.05473777,0.081985116,0.9502904,0.0,0.008694061

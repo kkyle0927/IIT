@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_NA_A1_T1_fixed20_screen_noassist,0.045171697,0.06353234,0.9671053,-5.9259259259259265,0.045171697,0.0

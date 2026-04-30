@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_K4_deflection_power_multibranch,0.05817549,0.10700316,0.91395617,43.0,0.05817549,0.0

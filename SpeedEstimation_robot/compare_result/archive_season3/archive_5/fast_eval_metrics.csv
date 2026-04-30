@@ -1,0 +1,8 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A5_W2_switch_wo_priors_Test-m2_S008_seed42,experiments/exp_S3A5_W2_switch_wo_priors_Test-m2_S008_seed42,0.051400188356637955,,,,0.0
+exp_S3A5_K3_privkin_memory_wo_Test-m2_S008_seed42,experiments/exp_S3A5_K3_privkin_memory_wo_Test-m2_S008_seed42,0.05197680741548538,,,,0.0
+exp_S3A5_K2_privkin_memory_Test-m2_S008_seed42,experiments/exp_S3A5_K2_privkin_memory_Test-m2_S008_seed42,0.059760577976703644,,,,0.0
+exp_S3A5_W1_memory_wo_priors_Test-m2_S008_seed42,experiments/exp_S3A5_W1_memory_wo_priors_Test-m2_S008_seed42,0.05978863313794136,,,,0.0
+exp_S3A5_S1_factorized_wo_Test-m2_S008_seed42,experiments/exp_S3A5_S1_factorized_wo_Test-m2_S008_seed42,0.0638863816857338,,,,0.0
+exp_S3A5_R0_t1_reference_Test-m2_S008_seed42,experiments/exp_S3A5_R0_t1_reference_Test-m2_S008_seed42,0.07848898321390152,,,,0.0
+exp_S3A5_K1_structured_aux_kin_Test-m2_S008_seed42,experiments/exp_S3A5_K1_structured_aux_kin_Test-m2_S008_seed42,0.07961786538362503,,,,0.0

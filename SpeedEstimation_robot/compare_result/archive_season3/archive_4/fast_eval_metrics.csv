@@ -1,0 +1,11 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A4_F1_factorized_anchor_base_Test-m2_S008_seed42,experiments/exp_S3A4_F1_factorized_anchor_base_Test-m2_S008_seed42,0.07370385,0.111019775,0.90884703,7.5,0.008752048
+exp_S3A4_F2_factorized_anchor_supervised_Test-m2_S008_seed42,experiments/exp_S3A4_F2_factorized_anchor_supervised_Test-m2_S008_seed42,0.064343095,0.09865977,0.9280136,3.5,0.0088646915
+exp_S3A4_M1_memory_calibrator_base_Test-m2_S008_seed42,experiments/exp_S3A4_M1_memory_calibrator_base_Test-m2_S008_seed42,0.0641447,0.09397998,0.9346808,7.5,0.009778545
+exp_S3A4_M2_memory_calibrator_invariant_Test-m2_S008_seed42,experiments/exp_S3A4_M2_memory_calibrator_invariant_Test-m2_S008_seed42,0.061203692,0.09408791,0.9345307,10.0,0.011616366
+exp_S3A4_M3_memory_calibrator_plateau_Test-m2_S008_seed42,experiments/exp_S3A4_M3_memory_calibrator_plateau_Test-m2_S008_seed42,0.06130451,0.095561095,0.9324645,7.5,0.0077684075
+exp_S3A4_O1_observer_base_Test-m2_S008_seed42,experiments/exp_S3A4_O1_observer_base_Test-m2_S008_seed42,0.08369478,0.117495134,0.8979037,4.5,0.014986878
+exp_S3A4_O2_observer_plateau_Test-m2_S008_seed42,experiments/exp_S3A4_O2_observer_plateau_Test-m2_S008_seed42,0.08383539,0.12067685,0.8922994,1.5,0.011792027
+exp_S3A4_O3_observer_contrastive_Test-m2_S008_seed42,experiments/exp_S3A4_O3_observer_contrastive_Test-m2_S008_seed42,0.090068996,0.12827697,0.87830645,16.5,0.009109477
+exp_S3A4_T0_p6_reference_Test-m2_S008_seed42,experiments/exp_S3A4_T0_p6_reference_Test-m2_S008_seed42,0.060115244,0.086416826,0.94477105,5.5,0.007946772
+exp_S3A4_T1_r1_reference_Test-m2_S008_seed42,experiments/exp_S3A4_T1_r1_reference_Test-m2_S008_seed42,0.05685587,0.089556314,0.9406853,4.0,0.008705146

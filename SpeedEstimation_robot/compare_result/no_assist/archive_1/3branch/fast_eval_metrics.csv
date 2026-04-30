@@ -1,0 +1,4 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_NA_A1_T1_statfix20_screen_noassist_Test-m2_S001_seed42,experiments/exp_NA_A1_T1_statfix20_screen_noassist_Test-m2_S001_seed42,0.037098434,0.059526302,0.9722759,-3.3333333333333335,0.0062439833
+exp_NA_A1_T1_statfix20_screen_noassist_Test-m2_S004_seed42,experiments/exp_NA_A1_T1_statfix20_screen_noassist_Test-m2_S004_seed42,0.033552166,0.05069576,0.9789552,0.0,0.007189042
+exp_NA_A1_T1_statfix20_screen_noassist_Test-m2_S008_seed42,experiments/exp_NA_A1_T1_statfix20_screen_noassist_Test-m2_S008_seed42,0.055540796,0.0770326,0.9524586,0.0,0.007254326

@@ -1,0 +1,11 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A7_V0_w2_reference_refresh_Test-m2_S008_seed42,experiments/exp_S3A7_V0_w2_reference_refresh_Test-m2_S008_seed42,0.04745128,0.07532075,0.9580323,6.5,0.0
+exp_S3A7_V1_w2_anchorfix_Test-m2_S008_seed42,experiments/exp_S3A7_V1_w2_anchorfix_Test-m2_S008_seed42,0.048965007,0.079823114,0.95286506,23.5,0.0
+exp_S3A7_V7_predkin_anchormain_Test-m2_S008_seed42,experiments/exp_S3A7_V7_predkin_anchormain_Test-m2_S008_seed42,0.052168954,0.07680024,0.95636743,-11.0,0.0
+exp_S3A7_V9_privkin_anchormain_125plateau_Test-m2_S008_seed42,experiments/exp_S3A7_V9_privkin_anchormain_125plateau_Test-m2_S008_seed42,0.0546705,0.08195843,0.9503096,-14.0,0.0
+exp_S3A7_V8_predkin_anchormain_125plateau_Test-m2_S008_seed42,experiments/exp_S3A7_V8_predkin_anchormain_125plateau_Test-m2_S008_seed42,0.05645601,0.082508564,0.9496403,-5.0,0.0
+exp_S3A7_V4_u6_anchorfix_125plateau_Test-m2_S008_seed42,experiments/exp_S3A7_V4_u6_anchorfix_125plateau_Test-m2_S008_seed42,0.05654718,0.09392449,0.9347406,19.0,0.0
+exp_S3A7_V3_u6_anchorfix_Test-m2_S008_seed42,experiments/exp_S3A7_V3_u6_anchorfix_Test-m2_S008_seed42,0.0570576,0.09159101,0.9379429,9.0,0.0
+exp_S3A7_V2_w2_anchorfix_125plateau_Test-m2_S008_seed42,experiments/exp_S3A7_V2_w2_anchorfix_125plateau_Test-m2_S008_seed42,0.06225869,0.09966676,0.9265171,19.5,0.0
+exp_S3A7_V5_speedscale_anchorfix_Test-m2_S008_seed42,experiments/exp_S3A7_V5_speedscale_anchorfix_Test-m2_S008_seed42,0.06356532,0.09790497,0.92909205,24.5,0.0
+exp_S3A7_V6_speedscale_anchorfix_125plateau_Test-m2_S008_seed42,experiments/exp_S3A7_V6_speedscale_anchorfix_125plateau_Test-m2_S008_seed42,0.06365688,0.09995432,0.92609245,11.5,0.0

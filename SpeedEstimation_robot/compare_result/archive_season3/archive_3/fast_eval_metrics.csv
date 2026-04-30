@@ -1,0 +1,14 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_S3A3_Q0_p4_reference_Test-m2_S008_seed42,experiments/exp_S3A3_Q0_p4_reference_Test-m2_S008_seed42,0.059707932,0.09317121,0.9358002,4.0,0.009426666
+exp_S3A3_Q10_paper_anchorplus_Test-m2_S008_seed42,experiments/exp_S3A3_Q10_paper_anchorplus_Test-m2_S008_seed42,0.07305847,0.10738629,0.91471595,9.0,0.0071013374
+exp_S3A3_Q11_paper_anchorplus_dro_Test-m2_S008_seed42,experiments/exp_S3A3_Q11_paper_anchorplus_dro_Test-m2_S008_seed42,0.06704465,0.09998949,0.9260601,10.5,0.0076765344
+exp_S3A3_Q12_split_off_on_anchorplus_Test-m2_S008_seed42,experiments/exp_S3A3_Q12_split_off_on_anchorplus_Test-m2_S008_seed42,0.08811539,0.11993774,0.89361465,5.5,0.0088375565
+exp_S3A3_Q1_p6_reference_Test-m2_S008_seed42,experiments/exp_S3A3_Q1_p6_reference_Test-m2_S008_seed42,0.058461245,0.090657726,0.9392173,5.0,0.008154898
+exp_S3A3_Q2_r1_reference_Test-m2_S008_seed42,experiments/exp_S3A3_Q2_r1_reference_Test-m2_S008_seed42,0.06811364,0.10400613,0.9200004,10.0,0.008094883
+exp_S3A3_Q3_p4_anchor_confidence_Test-m2_S008_seed42,experiments/exp_S3A3_Q3_p4_anchor_confidence_Test-m2_S008_seed42,0.065580934,0.10064954,0.92508066,10.0,0.0076333308
+exp_S3A3_Q4_p4_fullcontext_plateau_Test-m2_S008_seed42,experiments/exp_S3A3_Q4_p4_fullcontext_plateau_Test-m2_S008_seed42,0.07577873,0.11354024,0.9046612,13.0,0.00835528
+exp_S3A3_Q5_p4_calibrator_finetune_Test-m2_S008_seed42,experiments/exp_S3A3_Q5_p4_calibrator_finetune_Test-m2_S008_seed42,0.41657096,0.51095486,-0.930791,59.0,0.07351752
+exp_S3A3_Q6_p6_fullcontext_plateau_Test-m2_S008_seed42,experiments/exp_S3A3_Q6_p6_fullcontext_plateau_Test-m2_S008_seed42,0.07746619,0.11370515,0.904384,10.5,0.007846528
+exp_S3A3_Q7_p6_invariant_dro_Test-m2_S008_seed42,experiments/exp_S3A3_Q7_p6_invariant_dro_Test-m2_S008_seed42,0.065380044,0.1028103,0.9218294,7.5,0.009051545
+exp_S3A3_Q8_p7_fullcontext_plateau_Test-m2_S008_seed42,experiments/exp_S3A3_Q8_p7_fullcontext_plateau_Test-m2_S008_seed42,0.07107438,0.101258606,0.9241712,11.0,0.008924099
+exp_S3A3_Q9_r1_streaming_anchorplus_Test-m2_S008_seed42,experiments/exp_S3A3_Q9_r1_streaming_anchorplus_Test-m2_S008_seed42,0.082925856,0.11980005,0.89271444,14.0,0.0072944164

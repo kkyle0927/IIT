@@ -1,0 +1,9 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_J1_hybrid_power_base_Test-m2_S008_seed42,experiments/exp_J1_hybrid_power_base_Test-m2_S008_seed42,0.09344736,0.14145245,0.85184026,5.5,0.011513484
+exp_J2_hybrid_signed_power_Test-m2_S008_seed42,experiments/exp_J2_hybrid_signed_power_Test-m2_S008_seed42,0.07951418,0.12710276,0.88037574,12.0,0.011100102
+exp_J3_hybrid_power_timing_Test-m2_S008_seed42,experiments/exp_J3_hybrid_power_timing_Test-m2_S008_seed42,0.09662154,0.14182936,0.85104966,3.5,0.011294673
+exp_J4_hybrid_power_envelope_prior_Test-m2_S008_seed42,experiments/exp_J4_hybrid_power_envelope_prior_Test-m2_S008_seed42,0.07862775,0.12603468,0.8823778,15.5,0.0107230265
+exp_J5_hybrid_multiscale_power_timing_Test-m2_S008_seed42,experiments/exp_J5_hybrid_multiscale_power_timing_Test-m2_S008_seed42,0.06968333,0.113078035,0.9039356,7.0,0.0084907
+exp_J6_hybrid_wide_dualbranch_Test-m2_S008_seed42,experiments/exp_J6_hybrid_wide_dualbranch_Test-m2_S008_seed42,0.10698769,0.16401252,0.7993659,18.5,0.014472065
+exp_J7_hybrid_longwin_envelope_Test-m2_S008_seed42,experiments/exp_J7_hybrid_longwin_envelope_Test-m2_S008_seed42,0.050425157,0.09322121,0.9347117,8.0,0.008002798
+exp_J8_hybrid_all_best_shot_Test-m2_S008_seed42,experiments/exp_J8_hybrid_all_best_shot_Test-m2_S008_seed42,0.10004965,0.14564703,0.8406291,25.0,0.007960905

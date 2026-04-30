@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_NA_A5_V5_smoothgru_bigmag16_screen_noassist,0.047223806,0.06801453,0.96120805,-35.78703703703704,0.047223806,0.0

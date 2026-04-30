@@ -1,0 +1,5 @@
+exp_name,label,n_folds,test_mae_mean,test_rmse_mean,n_params,host_latency_ms_mean,delta_mae_vs_baseline,delta_rmse_vs_baseline
+exp_NA_A11_T0_baseline_og3fold_screen_noassist,Full-chain compensation,3,0.04121903950969378,0.061480426539977394,26401,1.6914666666666667,0.0,0.0
+exp_NA_A11_T3_scalar_only3fold_screen_noassist,Scalar input only,3,0.04686520745356878,0.06911978746453921,26497,1.7089666666666667,0.0056461679438749995,0.007639360924561821
+exp_NA_A11_T1_no_belt_acc3fold_screen_noassist,No belt acceleration,3,0.05014646674195925,0.07057598233222961,26401,1.7187999999999999,0.008927427232265472,0.00909555579225222
+exp_NA_A11_T2_acc_only_comp3fold_screen_noassist,Acceleration-only compensation,3,0.05035930871963501,0.07218409205476443,26401,1.6838666666666668,0.00914026920994123,0.01070366551478704

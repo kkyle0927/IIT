@@ -1,0 +1,4 @@
+name,path,mae,rmse,r2,lag_ms,smoothness
+exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist_Test-m2_S001_seed42,experiments/exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist_Test-m2_S001_seed42,0.04017862,0.06678054,0.9651069,-8.88888888888889,0.007240685
+exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist_Test-m2_S004_seed42,experiments/exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist_Test-m2_S004_seed42,0.04597011,0.06403312,0.9664254,-3.3333333333333335,0.008790082
+exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist_Test-m2_S008_seed42,experiments/exp_NA_A9_D6_tvcf_roll18_og_compact_screen_noassist_Test-m2_S008_seed42,0.072660245,0.09917272,0.9212035,-18.75,0.009864742
