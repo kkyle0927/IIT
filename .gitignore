@@ -106,5 +106,7 @@ Release/
 # HDF5 files
 *.h5
 
-# CSV files
-*.csv
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
