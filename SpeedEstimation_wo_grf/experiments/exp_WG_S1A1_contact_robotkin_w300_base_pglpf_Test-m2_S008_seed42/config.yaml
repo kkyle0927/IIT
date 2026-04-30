@@ -1,0 +1,178 @@
+02_train:
+  data:
+    est_tick_ranges:
+    - 0
+    input_lpf_per_group:
+      accelerations: 8.0
+      imu: 8.0
+      velocities: 4.0
+    normalize: true
+    normalize_type: standard
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_gait_phase: false
+    use_physical_velocity_model: false
+    window_size: 300
+    y_delay: 0
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model:
+    ar_feedback:
+      enable: false
+    channels: &id003
+    - 32
+    - 32
+    - 64
+    - 64
+    - 128
+    - 128
+    dropout: 0.2
+    gru_hidden: 32
+    head_dropout: 0.5
+    head_hidden:
+    - 64
+    input_norm_type: instance
+    kernel_size: 5
+    model_norm: batch
+    type: TCN_GRU
+    use_input_norm: true
+    use_norm: true
+  train:
+    amp: true
+    augment_noise_std: 0.03
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 0.0001
+    early_stop_patience: 10
+    early_stop_warmup: 10
+    epochs: 30
+    eta_min: 1.0e-05
+    huber_delta: 0.05
+    k_fold: 4
+    kinematic_loss_degrees: false
+    kinematic_loss_tolerance: 0.05
+    kinematic_loss_weight_limit: 0
+    kinematic_loss_weight_pos: 0.0
+    loss: huber
+    lr: 0.001
+    save_dir: ./runs_tcn
+    smoothness_loss_weight: 0.0
+    task_type: regression
+    train_loss_target: 0.0
+    wd: 0.001
+03_eval:
+  data:
+    est_tick_ranges:
+    - 0
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 300
+    y_delay: 0
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m2_S008
+    manual:
+      test:
+      - m2_S008
+      val:
+      - m2_S007
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id001
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data_S008.h5
+est_tick_ranges:
+- 0
+exp_name: exp_WG_S1A1_contact_robotkin_w300_base_pglpf
+shared:
+  conditions: *id001
+  data:
+    est_tick_ranges:
+    - 0
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 300
+    y_delay: 0
+  data_sources:
+    milestone2:
+      exclude_subjects: []
+      path: ./combined_data_S008.h5
+      prefix: m2_
+  input_lpf_per_group:
+    accelerations: 8.0
+    imu: 8.0
+    velocities: 4.0
+  input_vars:
+  - - robot/left
+    - - hip_angle
+      - thigh_angle
+      - torque
+  - - robot/right
+    - - hip_angle
+      - thigh_angle
+      - torque
+  - - sub_info
+    - - height
+      - weight
+  lpf_cutoff: null
+  lpf_order: null
+  model:
+    ar_feedback:
+      enable: false
+    channels:
+    - 32
+    - 32
+    - 64
+    - 64
+    - 128
+    - 128
+    dropout: 0.2
+    gru_hidden: 32
+    head_dropout: 0.5
+    head_hidden:
+    - 64
+    input_norm_type: instance
+    kernel_size: 5
+    model_norm: batch
+    type: TCN_GRU
+    use_input_norm: true
+    use_norm: true
+  output_vars:
+  - - forceplate/grf/left
+    - - contact_l
+  - - forceplate/grf/right
+    - - contact_r
+  subjects: &id002
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+subjects: *id002
+tcn_channels: *id003

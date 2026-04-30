@@ -1,0 +1,209 @@
+02_train:
+  data:
+    est_tick_ranges:
+    - 5
+    input_lpf_per_group:
+      accelerations: 8.0
+      imu: 8.0
+      velocities: 4.0
+    normalize: true
+    normalize_type: standard
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_gait_phase: false
+    use_physical_velocity_model: false
+    window_size: 200
+    y_delay: 5
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model:
+    ar_feedback:
+      enable: false
+    channels: &id003
+    - 32
+    - 32
+    - 64
+    - 64
+    - 128
+    - 128
+    dropout: 0.2
+    fusion:
+      logit_bias:
+      - 0.0
+      - 1.0
+      - 1.0
+      prior_input_channel_indices:
+      - 13
+      - 14
+      weight_temperature: 1.0
+    gru_hidden: 32
+    head_dropout: 0.5
+    head_hidden:
+    - 64
+    input_norm_type: instance
+    kernel_size: 5
+    model_norm: batch
+    type: FusionTCN_GRU
+    use_input_norm: true
+    use_norm: true
+  train:
+    amp: true
+    augment_noise_std: 0.03
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 0.0001
+    early_stop_patience: 10
+    early_stop_warmup: 10
+    epochs: 30
+    eta_min: 1.0e-05
+    huber_delta: 0.1
+    k_fold: 4
+    kinematic_loss_degrees: false
+    kinematic_loss_tolerance: 0.05
+    kinematic_loss_weight_limit: 0
+    kinematic_loss_weight_pos: 0.0
+    loss: huber
+    lr: 0.001
+    save_dir: ./runs_tcn
+    smoothness_loss_weight: 0.0
+    task_type: regression
+    train_loss_target: 0.0
+    wd: 0.001
+03_eval:
+  data:
+    est_tick_ranges:
+    - 5
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 200
+    y_delay: 5
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m2_S008
+    manual:
+      test:
+      - m2_S008
+      val:
+      - m2_S007
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+conditions: &id001
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: ./combined_data_S008.h5
+est_tick_ranges:
+- 5
+exp_name: exp_WG_S1A1_fusion_contact_kin_w200_base_pglpf
+shared:
+  conditions: *id001
+  data:
+    est_tick_ranges:
+    - 5
+    normalize: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    window_size: 200
+    y_delay: 5
+  data_sources:
+    milestone2:
+      exclude_subjects: []
+      path: ./combined_data_S008.h5
+      prefix: m2_
+  input_lpf_per_group:
+    accelerations: 8.0
+    imu: 8.0
+    velocities: 4.0
+  input_vars:
+  - - derived/body_frame_imu
+    - - accel_right
+      - accel_forward
+      - accel_up
+      - gyro_right
+      - gyro_forward
+      - gyro_up
+      - forward_accel_overground
+  - - robot/left
+    - - hip_angle
+      - thigh_angle
+      - torque
+  - - robot/right
+    - - hip_angle
+      - thigh_angle
+      - torque
+  - - derived/imu_speed_causal
+    - - imu_speed_causal
+  - - derived/stride_progression
+    - - stride_speed_robot
+  - - derived/contact_estimate
+    - - contact_prob_l_kin
+      - contact_prob_r_kin
+  - - sub_info
+    - - height
+      - weight
+  lpf_cutoff: 0.5
+  lpf_order: 4
+  model:
+    ar_feedback:
+      enable: false
+    channels:
+    - 32
+    - 32
+    - 64
+    - 64
+    - 128
+    - 128
+    dropout: 0.2
+    fusion:
+      logit_bias:
+      - 0.0
+      - 1.0
+      - 1.0
+      prior_input_channel_indices:
+      - 13
+      - 14
+      weight_temperature: 1.0
+    gru_hidden: 32
+    head_dropout: 0.5
+    head_hidden:
+    - 64
+    input_norm_type: instance
+    kernel_size: 5
+    model_norm: batch
+    type: FusionTCN_GRU
+    use_input_norm: true
+    use_norm: true
+  output_vars:
+  - - common
+    - - v_Y_true
+  subjects: &id002
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+subjects: *id002
+tcn_channels: *id003
