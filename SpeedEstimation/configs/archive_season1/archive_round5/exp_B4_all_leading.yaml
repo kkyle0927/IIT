@@ -1,0 +1,29 @@
+# =============================================================================
+# archive_round5 — B4: All Leading Indicators Combined
+# HYPOTHESIS: Combining all biomechanical leading indicators maximizes the model's
+#   ability to anticipate speed changes: GRF impulse + trunk pitch velocity +
+#   stance ratio + stride frequency + COM chain velocity.
+# CHANGES vs baseline:
+#   - Added 8 ch: grf_impulse_l/r + stance_ratio_l/r + trunk_pitch_dot +
+#     stride_freq_l/r + com_velocity_chain → total 42 features
+# =============================================================================
+
+exp_name: exp_B4_all_leading
+
+shared:
+  input_vars:
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "ankle_angle_l", "ankle_angle_r"]]
+    - ["mocap/kin_q", ["hip_flexion_l_dot", "hip_flexion_r_dot", "knee_angle_l_dot", "knee_angle_r_dot", "ankle_angle_l_dot", "ankle_angle_r_dot"]]
+    - ["mocap/kin_q", ["hip_flexion_l_ddot", "hip_flexion_r_ddot", "knee_angle_l_ddot", "knee_angle_r_ddot", "ankle_angle_l_ddot", "ankle_angle_r_ddot"]]
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward"]]
+    - ["robot/left",  ["torque"]]
+    - ["robot/right", ["torque"]]
+    - ["forceplate/grf/left",  ["x", "y", "z", "contact_l", "stride_freq_l"]]
+    - ["forceplate/grf/right", ["x", "y", "z", "contact_r", "stride_freq_r"]]
+    - ["sub_info", ["height", "weight"]]
+    - ["derived", ["com_velocity_chain", "grf_impulse_l", "grf_impulse_r", "stance_ratio_l", "stance_ratio_r", "trunk_pitch_dot"]]
+  # Total: 42 features
+
+02_train:
+  data:
+    total_input_features: 42

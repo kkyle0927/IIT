@@ -1,0 +1,22 @@
+# =============================================================================
+# archive_round7 — A1: Smooth Loss 0.01 + Time Warp
+# HYPOTHESIS: The two independently best approaches (smooth_loss_light MAE=0.011,
+#   time_warp MAE=0.011) combined should yield even smoother output.
+# CHANGES vs baseline:
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5 (required for smoothness loss)
+#   - time_warp_sigma: 0.2
+# =============================================================================
+
+exp_name: exp_A1_smooth_001_tw
+
+shared:
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.01
+    time_warp_sigma: 0.2

@@ -1,0 +1,31 @@
+# =============================================================================
+# archive_round7 — B1: Smooth Loss + Input LPF 10Hz + Deep TCN
+# HYPOTHESIS: Triple smoothing — noise removed at input (LPF), stronger model
+#   (deep TCN 8-layer), and smoothness loss penalty. Combining the #2 and #3
+#   ranked approaches from round 5 with smooth loss.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 10, input_lpf_order: 4
+#   - channels: 8-layer deep TCN
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_B1_smooth_lpf10_deep
+
+shared:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  input_lpf_cutoff_hz: 10.0
+  input_lpf_order: 4
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 10.0
+    input_lpf_order: 4
+    time_window_output: 5
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  train:
+    smoothness_loss_weight: 0.01

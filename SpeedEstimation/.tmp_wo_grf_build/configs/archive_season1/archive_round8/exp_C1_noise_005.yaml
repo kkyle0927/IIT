@@ -1,0 +1,13 @@
+# =============================================================================
+# archive_round8 — C1: Increased Noise Augmentation (0.05)
+# HYPOTHESIS: Higher training noise (0.05 vs baseline 0.03) teaches the model
+#   to be more robust against input noise, producing smoother outputs.
+# CHANGES vs baseline:
+#   - augment_noise_std: 0.05 (baseline: 0.03)
+# =============================================================================
+
+exp_name: exp_C1_noise_005
+
+02_train:
+  train:
+    augment_noise_std: 0.05

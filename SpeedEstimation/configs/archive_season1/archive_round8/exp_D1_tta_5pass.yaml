@@ -1,0 +1,17 @@
+# =============================================================================
+# archive_round8 — D1: TTA 5-pass (mean, noise=0.02)
+# HYPOTHESIS: Averaging multiple noisy forward passes smooths predictions
+#   without retraining. Uses baseline model checkpoint.
+# CHANGES vs baseline:
+#   - 03_eval.tta: 5 passes, noise_std=0.02, mean aggregation
+#   - NO retraining required
+# =============================================================================
+
+exp_name: exp_D1_tta_5pass
+
+03_eval:
+  tta:
+    enable: true
+    n_passes: 5
+    noise_std: 0.02
+    aggregation: mean

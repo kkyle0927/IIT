@@ -1,0 +1,24 @@
+# =============================================================================
+# archive_round7 — E2: Huber Delta 0.05 + Smooth Loss + Time Warp
+# HYPOTHESIS: Tighter Huber (more outlier resistance) combined with smooth loss
+#   and time warp augmentation. Triple anti-spike strategy at the loss level.
+# CHANGES vs baseline:
+#   - huber_delta: 0.05
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5
+#   - time_warp_sigma: 0.2
+# =============================================================================
+
+exp_name: exp_E2_huber005_smooth_tw
+
+shared:
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    time_window_output: 5
+  train:
+    huber_delta: 0.05
+    smoothness_loss_weight: 0.01
+    time_warp_sigma: 0.2

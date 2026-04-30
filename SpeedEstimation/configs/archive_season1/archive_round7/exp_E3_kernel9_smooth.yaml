@@ -1,0 +1,26 @@
+# =============================================================================
+# archive_round7 — E3: Large Kernel 9 + Smooth Loss
+# HYPOTHESIS: k=9 (ranked #5 overall, MAE=0.0128) combined with smooth loss
+#   for additional smoothness. Larger kernel = wider receptive field per layer =
+#   naturally smoother output.
+# CHANGES vs baseline:
+#   - kernel_size: 9
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_E3_kernel9_smooth
+
+shared:
+  model:
+    kernel_size: 9
+  data:
+    time_window_output: 5
+
+02_train:
+  model:
+    kernel_size: 9
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.01

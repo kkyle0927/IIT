@@ -1,0 +1,26 @@
+# =============================================================================
+# archive_round5 — D2: Multi-Scale TCN Fusion
+# HYPOTHESIS: Parallel TCN branches with different kernel sizes (3, 5, 7)
+#   capture multi-scale temporal features simultaneously. Short-term features
+#   (k=3) capture step-to-step dynamics, while longer-term features (k=7)
+#   capture stride-level patterns, allowing the model to handle both
+#   steady-state and transient speed changes.
+# CHANGES vs baseline:
+#   - MultiScaleTCN_GRU model with kernel_sizes [3, 5, 7]
+# =============================================================================
+
+exp_name: exp_D2_multiscale_tcn
+
+shared:
+  model:
+    type: MultiScaleTCN_GRU
+    channels: [32, 32, 64, 64, 128, 128]
+    kernel_sizes: [3, 5, 7]
+    gru_hidden: 32
+
+02_train:
+  model:
+    type: MultiScaleTCN_GRU
+    channels: [32, 32, 64, 64, 128, 128]
+    kernel_sizes: [3, 5, 7]
+    gru_hidden: 32

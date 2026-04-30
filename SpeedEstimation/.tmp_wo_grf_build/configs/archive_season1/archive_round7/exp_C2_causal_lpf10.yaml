@@ -1,0 +1,25 @@
+# =============================================================================
+# archive_round7 — C2: CausalSmooth Head + Input LPF 10Hz
+# HYPOTHESIS: Triplet: noise removed at input (LPF) + learned smoothing at
+#   output (CausalSmooth). No explicit loss penalty needed.
+# CHANGES vs baseline:
+#   - model: CausalSmoothTCN_GRU, smooth_window: 11
+#   - input_lpf_cutoff_hz: 10, input_lpf_order: 4
+# =============================================================================
+
+exp_name: exp_C2_causal_lpf10
+
+shared:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11
+  input_lpf_cutoff_hz: 10.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 10.0
+    input_lpf_order: 4
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11

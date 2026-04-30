@@ -1,0 +1,22 @@
+# =============================================================================
+# archive_round7 — A2: Smooth Loss 0.005 + Time Warp
+# HYPOTHESIS: Slightly less aggressive smoothness (0.005 vs 0.01) may avoid
+#   over-smoothing while still benefiting from time warp augmentation.
+# CHANGES vs baseline:
+#   - smoothness_loss_weight: 0.005
+#   - time_window_output: 5
+#   - time_warp_sigma: 0.2
+# =============================================================================
+
+exp_name: exp_A2_smooth_005_tw
+
+shared:
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.005
+    time_warp_sigma: 0.2

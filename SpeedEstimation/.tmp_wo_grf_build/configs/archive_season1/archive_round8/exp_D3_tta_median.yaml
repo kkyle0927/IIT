@@ -1,0 +1,16 @@
+# =============================================================================
+# archive_round8 — D3: TTA 5-pass (median, noise=0.02)
+# HYPOTHESIS: Median aggregation is more robust to outlier predictions than mean.
+# CHANGES vs baseline:
+#   - 03_eval.tta: 5 passes, noise_std=0.02, median aggregation
+#   - NO retraining required
+# =============================================================================
+
+exp_name: exp_D3_tta_median
+
+03_eval:
+  tta:
+    enable: true
+    n_passes: 5
+    noise_std: 0.02
+    aggregation: median

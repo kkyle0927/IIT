@@ -1,0 +1,23 @@
+# =============================================================================
+# archive_round7 — F4: Output LPF Tuning (Post-processing cutoff 1.0Hz)
+# HYPOTHESIS: The output low-pass filter (lpf_cutoff) applied AFTER inference
+#   is 0.5Hz by default. Loosening it to 1.0Hz preserves faster speed changes
+#   while still removing residual high-freq noise.
+# CHANGES vs baseline:
+#   - lpf_cutoff: 1.0 (output, not input)
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_F4_output_lpf_1hz
+
+shared:
+  lpf_cutoff: 1.0
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.01

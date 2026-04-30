@@ -1,0 +1,13 @@
+# =============================================================================
+# archive_round8 — C2: Strong Noise Augmentation (0.10)
+# HYPOTHESIS: Aggressive noise augmentation (3x baseline) forces the model
+#   to learn noise-invariant representations. Risk of accuracy loss.
+# CHANGES vs baseline:
+#   - augment_noise_std: 0.10 (baseline: 0.03)
+# =============================================================================
+
+exp_name: exp_C2_noise_010
+
+02_train:
+  train:
+    augment_noise_std: 0.10

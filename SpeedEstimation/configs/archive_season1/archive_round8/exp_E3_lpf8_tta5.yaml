@@ -1,0 +1,24 @@
+# =============================================================================
+# archive_round8 — E3: Global LPF 8Hz + TTA 5-pass (Combination)
+# HYPOTHESIS: Combining input filtering with TTA ensemble achieves both
+#   cleaner inputs and smoother outputs.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 8.0 (same as A2)
+#   - 03_eval.tta: 5 passes, noise_std=0.02, mean (same as D1)
+# =============================================================================
+
+exp_name: exp_E3_lpf8_tta5
+
+shared:
+  input_lpf_cutoff_hz: 8.0
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 8.0
+
+03_eval:
+  tta:
+    enable: true
+    n_passes: 5
+    noise_std: 0.02
+    aggregation: mean

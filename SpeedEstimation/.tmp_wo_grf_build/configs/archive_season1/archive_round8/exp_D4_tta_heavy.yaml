@@ -1,0 +1,17 @@
+# =============================================================================
+# archive_round8 — D4: TTA 5-pass (mean, heavy noise=0.05)
+# HYPOTHESIS: Stronger TTA noise explores wider prediction space, potentially
+#   smoother but may hurt accuracy.
+# CHANGES vs baseline:
+#   - 03_eval.tta: 5 passes, noise_std=0.05, mean aggregation
+#   - NO retraining required
+# =============================================================================
+
+exp_name: exp_D4_tta_heavy
+
+03_eval:
+  tta:
+    enable: true
+    n_passes: 5
+    noise_std: 0.05
+    aggregation: mean

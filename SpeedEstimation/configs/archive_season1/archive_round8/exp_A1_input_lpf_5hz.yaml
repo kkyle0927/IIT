@@ -1,0 +1,20 @@
+# =============================================================================
+# archive_round8 — A1: Global Input LPF 5Hz (Aggressive)
+# HYPOTHESIS: Aggressive low-pass filtering on ALL input features removes
+#   high-frequency noise that causes spiky speed estimation.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 5.0 (baseline: none)
+#   - input_lpf_order: 4
+# RISK: May remove useful high-frequency dynamics (gait transitions).
+# =============================================================================
+
+exp_name: exp_A1_input_lpf_5hz
+
+shared:
+  input_lpf_cutoff_hz: 5.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 5.0
+    input_lpf_order: 4

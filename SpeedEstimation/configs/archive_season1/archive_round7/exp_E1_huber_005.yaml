@@ -1,0 +1,13 @@
+# =============================================================================
+# archive_round7 — E1: Huber Delta 0.05 (more robust to spikes)
+# HYPOTHESIS: Smaller huber_delta (0.05 vs default 0.1) makes the loss even
+#   more tolerant of outliers, learning to ignore extreme errors = fewer spikes.
+# CHANGES vs baseline:
+#   - huber_delta: 0.05 (default 0.1)
+# =============================================================================
+
+exp_name: exp_E1_huber_005
+
+02_train:
+  train:
+    huber_delta: 0.05

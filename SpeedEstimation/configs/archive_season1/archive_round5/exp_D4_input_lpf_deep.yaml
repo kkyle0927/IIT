@@ -1,0 +1,24 @@
+# =============================================================================
+# archive_round5 — D4: Input LPF + Deep TCN (noise reduction at source)
+# HYPOTHESIS: Applying low-pass filter to input features at 15Hz (instead of
+#   no filter) removes sensor noise upstream, giving the model cleaner input.
+#   Combined with deep TCN for extended receptive field.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff: 15Hz, input_lpf_order: 4 (Butterworth)
+#   - 8-layer deep TCN channels
+# =============================================================================
+
+exp_name: exp_D4_input_lpf_deep
+
+shared:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  input_lpf_cutoff_hz: 15.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 15.0
+    input_lpf_order: 4
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]

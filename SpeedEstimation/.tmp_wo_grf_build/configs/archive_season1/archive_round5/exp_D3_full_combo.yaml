@@ -1,0 +1,40 @@
+# =============================================================================
+# archive_round5 — D3: Full Combo (best of all categories)
+# HYPOTHESIS: Combining the best ideas from each category:
+#   Architecture: Deep TCN (8-layer)
+#   Features: COM chain velocity + stride frequency + trunk pitch velocity
+#   Noise: Frequency penalty loss
+#   This is the "kitchen-sink, best-of-all" experiment.
+# CHANGES vs baseline:
+#   - 8-layer deep TCN
+#   - +com_velocity_chain, stride_freq_l/r, trunk_pitch_dot (5 ch) → 39 features
+#   - frequency penalty loss weight 0.005
+# =============================================================================
+
+exp_name: exp_D3_full_combo
+
+shared:
+  input_vars:
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "ankle_angle_l", "ankle_angle_r"]]
+    - ["mocap/kin_q", ["hip_flexion_l_dot", "hip_flexion_r_dot", "knee_angle_l_dot", "knee_angle_r_dot", "ankle_angle_l_dot", "ankle_angle_r_dot"]]
+    - ["mocap/kin_q", ["hip_flexion_l_ddot", "hip_flexion_r_ddot", "knee_angle_l_ddot", "knee_angle_r_ddot", "ankle_angle_l_ddot", "ankle_angle_r_ddot"]]
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward"]]
+    - ["robot/left",  ["torque"]]
+    - ["robot/right", ["torque"]]
+    - ["forceplate/grf/left",  ["x", "y", "z", "contact_l", "stride_freq_l"]]
+    - ["forceplate/grf/right", ["x", "y", "z", "contact_r", "stride_freq_r"]]
+    - ["sub_info", ["height", "weight"]]
+    - ["derived", ["com_velocity_chain", "trunk_pitch_dot"]]
+  # Total: 39 features
+
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+
+02_train:
+  data:
+    total_input_features: 39
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  train:
+    loss_penalty: frequency_cutoff_penalty
+    loss_penalty_weight: 0.005

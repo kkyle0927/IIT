@@ -1,0 +1,26 @@
+# =============================================================================
+# EXPERIMENT: IMU Orientation and Forward Velocity
+# Purpose: Replace raw IMU acc/gyr with roll, pitch, yaw, and integrated forward velocity.
+# Base Config: configs/baseline.yaml
+# =============================================================================
+
+defaults:
+  - baseline
+
+shared:
+  # Override input variables for IMU
+  input_vars:
+    # 관절 각도 (6개) - 원본 데이터
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "ankle_angle_l", "ankle_angle_r"]]
+    # 각속도 (6개) - 1차 수치미분
+    - ["mocap/kin_q", ["hip_flexion_l_dot", "hip_flexion_r_dot", "knee_angle_l_dot", "knee_angle_r_dot", "ankle_angle_l_dot", "ankle_angle_r_dot"]]
+    # 각가속도 (6개) - 2차 수치미분
+    - ["mocap/kin_q", ["hip_flexion_l_ddot", "hip_flexion_r_ddot", "knee_angle_l_ddot", "knee_angle_r_ddot", "ankle_angle_l_ddot", "ankle_angle_r_ddot"]]
+    # Advanced IMU Features (4개) - Raw 대신 RPY 및 전진 속도 사용
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward"]]
+    # GRF 왼쪽 (3개)
+    - ["forceplate/grf/left", ["x", "y", "z"]]
+    # GRF 오른쪽 (3개)
+    - ["forceplate/grf/right", ["x", "y", "z"]]
+
+exp_name: "Exp_IMU_Orientation"

@@ -1,0 +1,21 @@
+# =============================================================================
+# archive_round8 — C3: Per-Group Noise Augmentation — Moderate
+# HYPOTHESIS: Injecting noise proportional to each group's inherent noise level
+#   during training teaches the model to be robust to real sensor noise patterns.
+# CHANGES vs baseline:
+#   - augment_noise_per_group: noisier groups get more noise
+#   - Replaces global augment_noise_std
+# =============================================================================
+
+exp_name: exp_C3_pergroup_noise
+
+02_train:
+  train:
+    augment_noise_per_group:
+      accelerations: 0.10
+      imu: 0.06
+      torques: 0.05
+      velocities: 0.03
+      angles: 0.01
+      grf: 0.01
+      subject_info: 0.0

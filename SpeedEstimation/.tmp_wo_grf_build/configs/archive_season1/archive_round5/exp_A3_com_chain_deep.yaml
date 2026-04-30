@@ -1,0 +1,33 @@
+# =============================================================================
+# archive_round5 — A3: COM Chain + Deep TCN (B3 architecture)
+# HYPOTHESIS: Combining the best architecture (8-layer deep TCN from round4)
+#   with the kinematic chain feature for maximum baseline improvement.
+# CHANGES vs baseline:
+#   - 8-layer TCN channels: [32,32,64,64,128,128,128,128]
+#   - Added com_velocity_chain → 35 features
+# =============================================================================
+
+exp_name: exp_A3_com_chain_deep
+
+shared:
+  input_vars:
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "ankle_angle_l", "ankle_angle_r"]]
+    - ["mocap/kin_q", ["hip_flexion_l_dot", "hip_flexion_r_dot", "knee_angle_l_dot", "knee_angle_r_dot", "ankle_angle_l_dot", "ankle_angle_r_dot"]]
+    - ["mocap/kin_q", ["hip_flexion_l_ddot", "hip_flexion_r_ddot", "knee_angle_l_ddot", "knee_angle_r_ddot", "ankle_angle_l_ddot", "ankle_angle_r_ddot"]]
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward"]]
+    - ["robot/left",  ["torque"]]
+    - ["robot/right", ["torque"]]
+    - ["forceplate/grf/left",  ["x", "y", "z", "contact_l"]]
+    - ["forceplate/grf/right", ["x", "y", "z", "contact_r"]]
+    - ["sub_info", ["height", "weight"]]
+    - ["derived", ["com_velocity_chain"]]
+  # Total: 35 features
+
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+
+02_train:
+  data:
+    total_input_features: 35
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]

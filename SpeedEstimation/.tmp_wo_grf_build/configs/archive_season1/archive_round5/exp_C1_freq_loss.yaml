@@ -1,0 +1,15 @@
+# =============================================================================
+# archive_round5 — C1: Frequency Penalty Loss
+# HYPOTHESIS: Penalizing high-frequency spectral content in the prediction
+#   that is not present in the target reduces output noise without
+#   the accuracy degradation seen with smoothness loss.
+# CHANGES vs baseline:
+#   - loss_penalty: frequency_cutoff_penalty, weight 0.01
+# =============================================================================
+
+exp_name: exp_C1_freq_loss
+
+02_train:
+  train:
+    loss_penalty: frequency_cutoff_penalty
+    loss_penalty_weight: 0.01

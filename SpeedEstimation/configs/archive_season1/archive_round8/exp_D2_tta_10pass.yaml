@@ -1,0 +1,16 @@
+# =============================================================================
+# archive_round8 — D2: TTA 10-pass (mean, noise=0.02)
+# HYPOTHESIS: More passes yield smoother predictions at cost of inference time.
+# CHANGES vs baseline:
+#   - 03_eval.tta: 10 passes, noise_std=0.02, mean aggregation
+#   - NO retraining required
+# =============================================================================
+
+exp_name: exp_D2_tta_10pass
+
+03_eval:
+  tta:
+    enable: true
+    n_passes: 10
+    noise_std: 0.02
+    aggregation: mean

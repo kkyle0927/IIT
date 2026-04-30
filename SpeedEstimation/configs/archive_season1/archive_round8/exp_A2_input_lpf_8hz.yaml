@@ -1,0 +1,19 @@
+# =============================================================================
+# archive_round8 — A2: Global Input LPF 8Hz (Moderate)
+# HYPOTHESIS: 8Hz cutoff balances noise removal and signal preservation.
+#   Human gait fundamental frequency is ~1-2Hz, harmonics up to ~5-6Hz.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 8.0 (baseline: none)
+#   - input_lpf_order: 4
+# =============================================================================
+
+exp_name: exp_A2_input_lpf_8hz
+
+shared:
+  input_lpf_cutoff_hz: 8.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 8.0
+    input_lpf_order: 4

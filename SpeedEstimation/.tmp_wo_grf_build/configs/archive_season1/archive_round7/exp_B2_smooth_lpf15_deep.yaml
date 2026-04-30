@@ -1,0 +1,30 @@
+# =============================================================================
+# archive_round7 — B2: Smooth Loss + Input LPF 15Hz + Deep TCN
+# HYPOTHESIS: Same as B1 but with slightly higher LPF cutoff (15Hz instead of
+#   10Hz) to preserve more high-freq signal while still removing noise.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 15, input_lpf_order: 4
+#   - channels: 8-layer deep TCN
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_B2_smooth_lpf15_deep
+
+shared:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  input_lpf_cutoff_hz: 15.0
+  input_lpf_order: 4
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 15.0
+    input_lpf_order: 4
+    time_window_output: 5
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  train:
+    smoothness_loss_weight: 0.01

@@ -1,0 +1,21 @@
+# =============================================================================
+# archive_round5 — C3: Deep TCN + Kernel 7
+# HYPOTHESIS: Combining the successful 8-layer deep TCN with a larger kernel
+#   (7 instead of 5) further increases the receptive field, allowing the
+#   model to average over more gait cycles → smoother, more accurate output.
+#   Receptive field: 8 layers * (7-1) * 2^7 = ~6144 samples = ~61 seconds.
+# CHANGES vs baseline:
+#   - channels: [32,32,64,64,128,128,128,128], kernel_size: 7
+# =============================================================================
+
+exp_name: exp_C3_deep_tcn_k7
+
+shared:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    kernel_size: 7
+
+02_train:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    kernel_size: 7

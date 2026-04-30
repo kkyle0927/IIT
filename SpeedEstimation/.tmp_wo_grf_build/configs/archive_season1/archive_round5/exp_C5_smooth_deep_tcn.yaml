@@ -1,0 +1,22 @@
+# =============================================================================
+# archive_round5 — C5: Causal Smooth Head + Deep TCN
+# HYPOTHESIS: Learnable causal smoothing on top of deep TCN provides
+#   both the extended receptive field benefit (accuracy) and an optimized
+#   post-processing filter (smoothness).
+# CHANGES vs baseline:
+#   - 8-layer TCN + CausalSmoothTCN_GRU with smooth_window=11
+# =============================================================================
+
+exp_name: exp_C5_smooth_deep_tcn
+
+shared:
+  model:
+    type: CausalSmoothTCN_GRU
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    smooth_window: 11
+
+02_train:
+  model:
+    type: CausalSmoothTCN_GRU
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    smooth_window: 11

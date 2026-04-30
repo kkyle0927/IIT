@@ -1,0 +1,32 @@
+# =============================================================================
+# archive_round8 — E2: Per-Group LPF + Per-Group Noise (Combination)
+# HYPOTHESIS: Combining targeted input filtering (B2-style) with proportional
+#   noise augmentation (C3-style) achieves both cleaner inputs AND robust model.
+# CHANGES vs baseline:
+#   - input_lpf_per_group: accel=8Hz, imu=10Hz, torques=12Hz (same as B2)
+#   - augment_noise_per_group: moderate per-group noise (same as C3)
+# =============================================================================
+
+exp_name: exp_E2_pergroup_lpf_noise
+
+shared:
+  input_lpf_per_group:
+    accelerations: 8.0
+    imu: 10.0
+    torques: 12.0
+
+02_train:
+  data:
+    input_lpf_per_group:
+      accelerations: 8.0
+      imu: 10.0
+      torques: 12.0
+  train:
+    augment_noise_per_group:
+      accelerations: 0.10
+      imu: 0.06
+      torques: 0.05
+      velocities: 0.03
+      angles: 0.01
+      grf: 0.01
+      subject_info: 0.0

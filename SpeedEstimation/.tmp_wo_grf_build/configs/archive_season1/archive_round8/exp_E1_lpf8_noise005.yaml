@@ -1,0 +1,22 @@
+# =============================================================================
+# archive_round8 — E1: Global LPF 8Hz + Noise 0.05 (Combo)
+# HYPOTHESIS: Clean inputs via LPF AND noise-robust training together
+#   should produce the smoothest output with minimal accuracy loss.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 8.0 (baseline: none)
+#   - input_lpf_order: 4
+#   - augment_noise_std: 0.05 (baseline: 0.03)
+# =============================================================================
+
+exp_name: exp_E1_lpf8_noise005
+
+shared:
+  input_lpf_cutoff_hz: 8.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 8.0
+    input_lpf_order: 4
+  train:
+    augment_noise_std: 0.05

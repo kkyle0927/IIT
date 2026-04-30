@@ -1,0 +1,35 @@
+# =============================================================================
+# archive_round7 — C4: CausalSmooth Deep + LPF + Smooth Loss (Full combo)
+# HYPOTHESIS: Maximum smoothness pipeline: input LPF → deep 8-layer TCN →
+#   CausalSmooth head → smooth loss penalty. All 4 smoothness levers combined.
+# CHANGES vs baseline:
+#   - model: CausalSmoothTCN_GRU, smooth_window: 11
+#   - channels: 8-layer deep
+#   - input_lpf_cutoff_hz: 10, input_lpf_order: 4
+#   - smoothness_loss_weight: 0.005
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_C4_causal_full_smooth
+
+shared:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  input_lpf_cutoff_hz: 10.0
+  input_lpf_order: 4
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 10.0
+    input_lpf_order: 4
+    time_window_output: 5
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  train:
+    smoothness_loss_weight: 0.005

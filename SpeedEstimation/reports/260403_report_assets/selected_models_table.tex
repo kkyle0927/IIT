@@ -1,0 +1,18 @@
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{p{3.2cm} p{7.2cm} r r r p{3.4cm}}
+\toprule
+Role & Experiment & MAE & Params & Latency (ms) & Target \\
+\midrule
+Season2 best absolute & exp\_A5\_bodyframe\_plus\_imuint & 0.01125 & 409793 & 2.4362 & treadmill/left/speed\_leftbelt \\
+Fusion best (old target) & exp\_S2A5\_B1\_fusion\_imuint & 0.01474 & 409892 & 2.5825 & treadmill/left/speed\_leftbelt \\
+Dual+softprior & exp\_S2A6\_A4\_fusion\_dual\_softprior & 0.01860 & 410117 & 2.8162 & treadmill/left/speed\_leftbelt \\
+Real-time fusion & exp\_S2A6\_B1\_fusion\_dual\_rt200 & 0.02154 & 143973 & 2.5941 & treadmill/left/speed\_leftbelt \\
+Sensor-light & exp\_S2A6\_C2\_fusion\_imuint\_nogrf\_notorque & 0.02454 & 142364 & 2.627 & treadmill/left/speed\_leftbelt \\
+Tiny Pareto & exp\_S2A6\_B3\_fusion\_dual\_tiny120 & 0.04026 & 74293 & 2.6813 & treadmill/left/speed\_leftbelt \\
+Season3 corrected best & exp\_S3A1\_G009\_raw\_full\_w200\_base\_pglpf & 0.02439 & 409025 & 2.5932 & common/v\_Y\_true \\
+Season3 corrected IMU-prior best & exp\_S3A1\_G079\_imuint\_full\_w200\_base\_none & 0.02442 & 409793 & 2.441 & common/v\_Y\_true \\
+Season3 corrected fusion-lite & exp\_S3A1\_G130\_fusionimu\_lite\_w300\_compact\_none & 0.02603 & 142364 & 2.5662 & common/v\_Y\_true \\
+Season3 corrected compact raw & exp\_S3A1\_G004\_raw\_full\_w300\_compact\_none & 0.02464 & 143153 & 2.5057 & common/v\_Y\_true \\
+\bottomrule
+\end{tabular}%
+}

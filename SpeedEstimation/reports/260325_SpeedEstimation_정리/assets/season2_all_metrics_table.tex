@@ -1,0 +1,79 @@
+\begin{longtable}{r l r r r r}
+\caption{Season2 archive experiments and key metrics (single LOSO on m2\_S008).}\\
+\toprule
+Archive & Experiment & MAE & RMSE & Params & Latency (ms) \\
+\midrule
+\endfirsthead
+\toprule
+Archive & Experiment & MAE & RMSE & Params & Latency (ms) \\
+\midrule
+\endhead
+1 & \texttt{baseline\_bodyframe} & 0.0149 & 0.0418 & 409601 & 2.488 \\
+1 & \texttt{baseline\_modelbased} & 0.0133 & 0.0382 & 409985 & 2.450 \\
+1 & \texttt{exp\_S1\_com\_speed\_only} & 0.0169 & 0.0451 & 409793 & 2.571 \\
+1 & \texttt{exp\_S2\_imu\_speed\_only} & 0.0112 & 0.0304 & 409793 & 2.572 \\
+1 & \texttt{exp\_S3\_no\_grf} & 0.0285 & 0.0648 & 408449 & 2.593 \\
+1 & \texttt{exp\_S4\_no\_raw\_imu} & 0.0203 & 0.0404 & 407585 & 2.378 \\
+1 & \texttt{exp\_S5\_residual\_com} & 0.1067 & 0.1413 & 409985 & 2.467 \\
+1 & \texttt{exp\_S6\_residual\_imu} & 0.5931 & 0.7902 & 409985 & 2.469 \\
+1 & \texttt{exp\_S7\_residual\_com\_only} & 0.0923 & 0.1209 & 409793 & 2.489 \\
+2 & \texttt{exp\_A1\_rawimu\_baseline\_repro} & 0.0208 & 0.0489 & 409025 & 2.581 \\
+2 & \texttt{exp\_A2\_rawori\_plus\_imuint} & 0.0306 & 0.0646 & 409025 & 2.434 \\
+2 & \texttt{exp\_A3\_bodyframe\_imu\_only} & 0.0149 & 0.0418 & 409601 & 2.452 \\
+2 & \texttt{exp\_A4\_bodyframe\_plus\_rawvel} & 0.0208 & 0.0492 & 409793 & 2.557 \\
+2 & \texttt{exp\_A5\_bodyframe\_plus\_imuint} & 0.0112 & 0.0304 & 409793 & 2.436 \\
+2 & \texttt{exp\_B1\_dualphysics\_baseline} & 0.0133 & 0.0382 & 409985 & 2.544 \\
+2 & \texttt{exp\_B2\_dualphysics\_multiscale} & 0.0170 & 0.0434 & 1642465 & 7.065 \\
+2 & \texttt{exp\_B3\_dualphysics\_causalsmooth} & 0.0377 & 0.0816 & 410337 & 2.592 \\
+2 & \texttt{exp\_B4\_dualphysics\_attention} & 0.0264 & 0.0454 & 402978 & 2.376 \\
+2 & \texttt{exp\_C1\_dualphysics\_global\_lpf8} & 0.0386 & 0.0769 & 409985 & 2.565 \\
+2 & \texttt{exp\_C2\_dualphysics\_pergroup\_noise} & 0.0366 & 0.0778 & 409985 & 2.458 \\
+2 & \texttt{exp\_C3\_dualphysics\_lpf\_noise\_combo} & 0.0224 & 0.0515 & 409985 & 2.486 \\
+2 & \texttt{exp\_D1\_dualphysics\_longwindow400} & 0.0225 & 0.0498 & 409985 & 2.488 \\
+2 & \texttt{exp\_D2\_dualphysics\_shortwindow200} & 0.0184 & 0.0419 & 409985 & 2.460 \\
+2 & \texttt{exp\_D3\_dualphysics\_wide\_model} & 0.0156 & 0.0403 & 1618689 & 2.516 \\
+3 & \texttt{exp\_A1\_a5\_repro} & 0.0112 & 0.0304 & 409793 & 2.656 \\
+3 & \texttt{exp\_A2\_imuint\_residual} & 0.6155 & 0.8403 & 409793 & 2.594 \\
+3 & \texttt{exp\_A3\_dualphysics\_imuint\_residual} & 0.5931 & 0.7902 & 409985 & 2.757 \\
+3 & \texttt{exp\_A4\_dualphysics\_modelcom\_residual} & 0.1067 & 0.1413 & 409985 & 2.596 \\
+3 & \texttt{exp\_B1\_rt\_win200\_residual} & 0.6733 & 0.9016 & 409793 & 2.520 \\
+3 & \texttt{exp\_B2\_rt\_win150\_residual} & 0.6746 & 0.8976 & 409793 & 2.551 \\
+3 & \texttt{exp\_B3\_rt\_win200\_small\_residual} & 0.7786 & 1.0423 & 232465 & 2.477 \\
+3 & \texttt{exp\_B4\_rt\_win150\_small\_residual} & 0.7985 & 1.0444 & 232465 & 2.674 \\
+3 & \texttt{exp\_C1\_no\_grf\_residual} & 0.5596 & 0.7510 & 408257 & 2.500 \\
+3 & \texttt{exp\_C2\_no\_torque\_residual} & 0.5876 & 0.7783 & 409409 & 2.600 \\
+3 & \texttt{exp\_C3\_tcnonly\_win150\_residual} & 0.7051 & 0.9265 & 232169 & 2.341 \\
+4 & \texttt{exp\_A1\_a5\_repro} & 0.0112 & 0.0304 & 409793 & 2.656 \\
+4 & \texttt{exp\_A2\_delta\_imuint} & 0.1844 & 0.2430 & 409793 & 3.489 \\
+4 & \texttt{exp\_A3\_delta\_dual\_imuint} & 0.1865 & 0.2537 & 409985 & 2.578 \\
+4 & \texttt{exp\_A4\_delta\_dual\_modelcom} & 0.0382 & 0.0515 & 409985 & 2.548 \\
+4 & \texttt{exp\_B1\_softprior\_imuint\_light} & 0.0282 & 0.0434 & 409793 & 4.067 \\
+4 & \texttt{exp\_B2\_softprior\_imuint\_strong} & 0.0959 & 0.1272 & 409793 & 2.461 \\
+4 & \texttt{exp\_B3\_softprior\_dual\_imuint} & 0.0437 & 0.0668 & 409985 & 2.538 \\
+4 & \texttt{exp\_C1\_delta\_imuint\_win200} & 0.2002 & 0.2686 & 409793 & 2.767 \\
+4 & \texttt{exp\_C2\_delta\_imuint\_win150} & 0.2003 & 0.2692 & 409793 & 2.592 \\
+4 & \texttt{exp\_C3\_delta\_imuint\_win150\_small} & 0.2245 & 0.3000 & 232465 & 2.502 \\
+5 & \texttt{exp\_S2A5\_A1\_a5\_repro} & 0.0112 & 0.0304 & 409793 & 2.388 \\
+5 & \texttt{exp\_S2A5\_A2\_observer\_imuint} & 0.6350 & 0.8396 & 409859 & 2.486 \\
+5 & \texttt{exp\_S2A5\_A3\_observer\_imuint\_prop} & 0.6752 & 0.8878 & 409860 & 2.561 \\
+5 & \texttt{exp\_S2A5\_A4\_observer\_dual\_imuint} & 0.6930 & 0.9313 & 410052 & 2.538 \\
+5 & \texttt{exp\_S2A5\_A5\_observer\_dual\_modelcom} & 0.0898 & 0.1169 & 410052 & 2.637 \\
+5 & \texttt{exp\_S2A5\_B1\_fusion\_imuint} & 0.0147 & 0.0396 & 409892 & 2.583 \\
+5 & \texttt{exp\_S2A5\_B2\_fusion\_dual} & 0.0256 & 0.0434 & 410117 & 2.714 \\
+5 & \texttt{exp\_S2A5\_B3\_fusion\_imuint\_rt} & 0.0223 & 0.0436 & 143804 & 2.530 \\
+5 & \texttt{exp\_S2A5\_B4\_fusion\_dual\_rt} & 0.0215 & 0.0469 & 143973 & 2.511 \\
+5 & \texttt{exp\_S2A5\_C1\_distill\_small\_a5} & 0.0386 & 0.0590 & 143729 & 2.354 \\
+5 & \texttt{exp\_S2A5\_C2\_distill\_observer\_imuint} & 0.8748 & 1.1500 & 143780 & 2.522 \\
+5 & \texttt{exp\_S2A5\_C3\_distill\_fusion\_dual} & 0.0333 & 0.0556 & 143973 & 2.523 \\
+6 & \texttt{exp\_S2A6\_A1\_a5\_repro} & 0.0112 & 0.0304 & 409793 & 4.092 \\
+6 & \texttt{exp\_S2A6\_A2\_fusion\_imuint\_repro} & 0.0147 & 0.0396 & 409892 & 4.077 \\
+6 & \texttt{exp\_S2A6\_A3\_fusion\_imuint\_softprior} & 0.0294 & 0.0618 & 409892 & 4.313 \\
+6 & \texttt{exp\_S2A6\_A4\_fusion\_dual\_softprior} & 0.0186 & 0.0402 & 410117 & 2.816 \\
+6 & \texttt{exp\_S2A6\_B1\_fusion\_dual\_rt200} & 0.0215 & 0.0469 & 143973 & 2.594 \\
+6 & \texttt{exp\_S2A6\_B2\_fusion\_imuint\_rt150} & 0.0223 & 0.0436 & 143804 & 2.534 \\
+6 & \texttt{exp\_S2A6\_B3\_fusion\_dual\_tiny120} & 0.0403 & 0.0750 & 74293 & 2.681 \\
+6 & \texttt{exp\_S2A6\_C1\_fusion\_imuint\_nogrf} & 0.0360 & 0.0713 & 142652 & 4.413 \\
+6 & \texttt{exp\_S2A6\_C2\_fusion\_imuint\_nogrf\_notorque} & 0.0245 & 0.0536 & 142364 & 2.627 \\
+6 & \texttt{exp\_S2A6\_C3\_fusion\_dual\_nogrf\_notorque} & 0.0274 & 0.0553 & 142533 & 2.639 \\
+\bottomrule
+\end{longtable}

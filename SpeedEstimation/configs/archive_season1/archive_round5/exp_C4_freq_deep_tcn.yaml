@@ -1,0 +1,20 @@
+# =============================================================================
+# archive_round5 — C4: Frequency Loss + Deep TCN
+# HYPOTHESIS: Combining frequency penalty loss with deep TCN architecture
+#   addresses noise from both loss function and architecture angles.
+# CHANGES vs baseline:
+#   - 8-layer channels, frequency_cutoff_penalty with weight 0.005
+# =============================================================================
+
+exp_name: exp_C4_freq_deep_tcn
+
+shared:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+
+02_train:
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  train:
+    loss_penalty: frequency_cutoff_penalty
+    loss_penalty_weight: 0.005

@@ -1,0 +1,20 @@
+# =============================================================================
+# archive_round8 — B1: Per-Group LPF — Accelerations Only (8Hz)
+# HYPOTHESIS: Acceleration features (_ddot) are the noisiest inputs (2nd
+#   numerical derivative). Filtering ONLY them at 8Hz removes noise while
+#   keeping all other features (angles, IMU, GRF) untouched.
+# CHANGES vs baseline:
+#   - input_lpf_per_group: {accelerations: 8.0}
+#   - Replaces default 30Hz derived-feature LPF for _ddot with 8Hz
+# =============================================================================
+
+exp_name: exp_B1_lpf_accel_only
+
+shared:
+  input_lpf_per_group:
+    accelerations: 8.0
+
+02_train:
+  data:
+    input_lpf_per_group:
+      accelerations: 8.0

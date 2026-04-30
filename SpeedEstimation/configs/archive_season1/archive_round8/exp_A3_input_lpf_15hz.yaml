@@ -1,0 +1,19 @@
+# =============================================================================
+# archive_round8 — A3: Global Input LPF 15Hz (Mild)
+# HYPOTHESIS: Light filtering removes only high-frequency sensor noise
+#   while preserving all meaningful biomechanical dynamics.
+# CHANGES vs baseline:
+#   - input_lpf_cutoff_hz: 15.0 (baseline: none)
+#   - input_lpf_order: 4
+# =============================================================================
+
+exp_name: exp_A3_input_lpf_15hz
+
+shared:
+  input_lpf_cutoff_hz: 15.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 15.0
+    input_lpf_order: 4

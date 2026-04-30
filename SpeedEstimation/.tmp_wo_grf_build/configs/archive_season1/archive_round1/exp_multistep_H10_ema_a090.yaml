@@ -1,0 +1,19 @@
+# =============================================================================
+# Multi-Step H=10 + EMA α=0.90 (Multi-Step + EMA 조합 효과)
+# baseline 대비 변경: est_tick_ranges → [1..10], ema_alpha → 0.90
+# =============================================================================
+
+shared:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+02_train:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+03_eval:
+  ema_alpha: 0.90
+
+exp_name: "exp_multistep_H10_ema_a090"

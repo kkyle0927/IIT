@@ -1,0 +1,40 @@
+\contentsline {section}{\numberline {1}Project Overview}{3}{section.1}%
+\contentsline {section}{\numberline {2}Data and Evaluation Setup}{3}{section.2}%
+\contentsline {section}{\numberline {3}Pipeline Summary}{3}{section.3}%
+\contentsline {section}{\numberline {4}Input Features}{3}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Feature groups}{3}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Body-frame IMU}{4}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}IMU-integrated speed}{4}{subsection.4.3}%
+\contentsline {subsection}{\numberline {4.4}Model-based COM speed}{4}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.5}Subject information}{4}{subsection.4.5}%
+\contentsline {section}{\numberline {5}Preprocessing and Windowing}{5}{section.5}%
+\contentsline {section}{\numberline {6}Model Families}{5}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Baseline model}{5}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Additional variants}{5}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Observer model}{5}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}Fusion model}{6}{subsection.6.4}%
+\contentsline {section}{\numberline {7}Training Methodology}{6}{section.7}%
+\contentsline {section}{\numberline {8}Archive-by-Archive Progress}{6}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Season1 reference}{6}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}archive\_1}{6}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}archive\_2}{6}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}archive\_3}{6}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}archive\_4}{7}{subsection.8.5}%
+\contentsline {subsection}{\numberline {8.6}archive\_5}{7}{subsection.8.6}%
+\contentsline {subsection}{\numberline {8.7}archive\_6}{7}{subsection.8.7}%
+\contentsline {section}{\numberline {9}Key Quantitative Results}{7}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Best absolute model}{7}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Best new family}{8}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}Deployment-oriented models}{8}{subsection.9.3}%
+\contentsline {section}{\numberline {10}Qualitative Analysis}{8}{section.10}%
+\contentsline {section}{\numberline {11}Feature Importance and Interpretation}{12}{section.11}%
+\contentsline {section}{\numberline {12}Real-Time Inference Feasibility}{12}{section.12}%
+\contentsline {subsection}{\numberline {12.1}Why the final models are still online-feasible}{12}{subsection.12.1}%
+\contentsline {subsection}{\numberline {12.2}Measured model cost}{13}{subsection.12.2}%
+\contentsline {subsection}{\numberline {12.3}Input-buffer memory}{13}{subsection.12.3}%
+\contentsline {subsection}{\numberline {12.4}Best deployment choices}{13}{subsection.12.4}%
+\contentsline {section}{\numberline {13}What Worked and What Failed}{13}{section.13}%
+\contentsline {subsection}{\numberline {13.1}What worked}{13}{subsection.13.1}%
+\contentsline {subsection}{\numberline {13.2}What failed or remained weak}{13}{subsection.13.2}%
+\contentsline {section}{\numberline {14}Final Recommendations}{14}{section.14}%
+\contentsline {section}{\numberline {A}Appendix A: Season2 Experiment Table}{15}{appendix.A}%

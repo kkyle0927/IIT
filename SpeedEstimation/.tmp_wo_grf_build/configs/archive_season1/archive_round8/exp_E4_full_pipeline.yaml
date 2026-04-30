@@ -1,0 +1,41 @@
+# =============================================================================
+# archive_round8 — E4: Full Pipeline (Per-Group LPF + Per-Group Noise + TTA)
+# HYPOTHESIS: Combining all three approaches yields the smoothest output
+#   while preserving accuracy: targeted input filtering, robust training,
+#   and ensemble inference.
+# CHANGES vs baseline:
+#   - input_lpf_per_group: accel=8Hz, imu=10Hz, torques=12Hz (B2-style)
+#   - augment_noise_per_group: moderate per-group noise (C3-style)
+#   - 03_eval.tta: 5 passes, noise_std=0.02, mean (D1-style)
+# =============================================================================
+
+exp_name: exp_E4_full_pipeline
+
+shared:
+  input_lpf_per_group:
+    accelerations: 8.0
+    imu: 10.0
+    torques: 12.0
+
+02_train:
+  data:
+    input_lpf_per_group:
+      accelerations: 8.0
+      imu: 10.0
+      torques: 12.0
+  train:
+    augment_noise_per_group:
+      accelerations: 0.10
+      imu: 0.06
+      torques: 0.05
+      velocities: 0.03
+      angles: 0.01
+      grf: 0.01
+      subject_info: 0.0
+
+03_eval:
+  tta:
+    enable: true
+    n_passes: 5
+    noise_std: 0.02
+    aggregation: mean

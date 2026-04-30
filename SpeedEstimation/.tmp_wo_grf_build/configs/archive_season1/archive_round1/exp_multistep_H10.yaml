@@ -1,0 +1,17 @@
+# =============================================================================
+# Multi-Step H=10: t+1 ~ t+10 동시 예측 (강한 temporal constraint)
+# baseline 대비 변경: shared.data.est_tick_ranges, time_window_output
+#                     02_train.data.est_tick_ranges, time_window_output
+# =============================================================================
+
+shared:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+02_train:
+  data:
+    est_tick_ranges: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    time_window_output: 10
+
+exp_name: "exp_multistep_H10"

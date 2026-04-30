@@ -1,0 +1,12 @@
+# =============================================================================
+# TCN + GRU Head (hidden=32) - Stateful Head 실험
+# baseline 대비 변경: shared.model.type → "TCN_GRU", gru_hidden → 32
+# TCN 인코더는 동일, MLP 헤드를 GRU(32)로 교체
+# =============================================================================
+
+shared:
+  model:
+    type: "TCN_GRU"
+    gru_hidden: 32
+
+exp_name: "exp_tcn_gru_head_h32"

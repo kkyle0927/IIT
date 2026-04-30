@@ -1,0 +1,28 @@
+# =============================================================================
+# archive_round7 — C1: CausalSmooth Head + Smooth Loss Light
+# HYPOTHESIS: CausalSmoothTCN_GRU learns optimal smoothing kernel while
+#   smooth loss prevents residual jitter. Double smoothing at architecture
+#   AND loss level.
+# CHANGES vs baseline:
+#   - model: CausalSmoothTCN_GRU, smooth_window: 11
+#   - smoothness_loss_weight: 0.01
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_C1_causal_smooth_loss
+
+shared:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11
+  data:
+    time_window_output: 5
+
+02_train:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.01

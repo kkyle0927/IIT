@@ -1,0 +1,169 @@
+# =============================================================================
+# G1 — No-mocap enhanced (새 baseline - mocap)
+# Hypothesis: No-mocap + BatchNorm + height/weight + contact → C3 대비 개선?
+# C3 was MAE +35% on old baseline. New baseline improvements should help.
+# Total features: 16 (baseline 34 - mocap 18)
+# =============================================================================
+
+exp_name: exp_G1_no_mocap_enhanced
+cv_mode: loso
+
+shared:
+  data_sources:
+    milestone2:
+      path: ./combined_data_S008.h5
+      prefix: "m2_"
+      exclude_subjects: []
+
+  subjects:
+    - m2_S001
+    - m2_S002
+    - m2_S003
+    - m2_S004
+    - m2_S005
+    - m2_S006
+    - m2_S007
+    - m2_S008
+
+  conditions:
+    - level_075mps
+    - level_100mps
+    - level_125mps
+    - accel_sine
+    - decline_5deg
+    - incline_10deg
+    - stopandgo
+
+  input_vars:
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward"]]
+    - ["robot/left",  ["torque"]]
+    - ["robot/right", ["torque"]]
+    - ["forceplate/grf/left",  ["x", "y", "z", "contact_l"]]
+    - ["forceplate/grf/right", ["x", "y", "z", "contact_r"]]
+    - ["sub_info", ["height", "weight"]]
+  # Total: 16 features (no mocap)
+
+  output_vars:
+    - ["treadmill/left", ["speed_leftbelt"]]
+
+  lpf_cutoff: 0.5
+  lpf_order: 4
+
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges: [5]
+    normalize: true
+    time_window_output: 1
+
+  model:
+    type: TCN_GRU
+    gru_hidden: 32
+    channels: [32, 32, 64, 64, 128, 128]
+    kernel_size: 5
+    dropout: 0.2
+    use_norm: true
+    head_hidden: [64]
+    head_dropout: 0.5
+    model_norm: batch
+    use_input_norm: true
+    input_norm_type: batch
+    gating_signal: null
+    attention_type: null
+    attention_heads: 0
+    ar_feedback:
+      enable: false
+
+02_train:
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges: [5]
+    normalize: true
+    time_window_output: 1
+    normalize_type: standard
+    use_physical_velocity_model: false
+    use_gait_phase: false
+
+  model:
+    type: TCN_GRU
+    gru_hidden: 32
+    channels: [32, 32, 64, 64, 128, 128]
+    kernel_size: 5
+    dropout: 0.2
+    use_norm: true
+    head_hidden: [64]
+    head_dropout: 0.5
+    model_norm: batch
+    use_input_norm: true
+    input_norm_type: batch
+    gating_signal: null
+    attention_type: null
+    attention_heads: 0
+    ar_feedback:
+      enable: false
+
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+
+  train:
+    task_type: regression
+    loss: huber
+    huber_delta: 0.1
+    loss_penalty: null
+    loss_penalty_weight: 0.0
+    loss_penalty_cutoff: null
+    epochs: 30
+    lr: 0.001
+    wd: 0.001
+    amp: true
+    device: cuda
+    save_dir: ./runs_tcn
+    early_stop_patience: 10
+    early_stop_min_delta: "1e-04"
+    early_stop_warmup: 10
+    k_fold: 4
+    cos_T0: 10
+    cos_Tmult: 1
+    eta_min: 1.0e-05
+    augment_noise_std: 0.03
+    smoothness_loss_weight: 0.0
+    kinematic_loss_weight_pos: 0.0
+    kinematic_loss_weight_limit: 0
+    kinematic_loss_degrees: false
+    kinematic_loss_tolerance: 0.05
+    train_loss_target: 0.0
+
+03_eval:
+  split:
+    mode: loso
+    level: subject
+    seed: 42
+    ratio: [0.7, 0.15, 0.15]
+    manual:
+      val: ["m2_S007"]
+      test: ["m2_S008"]
+    save_to: null
+    loso_subjects:
+      - m2_S003
+      - m2_S006
+      - m2_S008
+
+  data:
+    window_size: 300
+    stride: 5
+    stride_inf: 1
+    y_delay: 5
+    est_tick_ranges: [5]
+    normalize: true
+    time_window_output: 1
+
+  train:
+    device: cuda
+
+  scaler_path: ./runs_tcn/scaler.npz

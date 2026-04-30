@@ -1,0 +1,20 @@
+# =============================================================================
+# archive_round5 — C2: Causal Smooth Head
+# HYPOTHESIS: A learnable causal smoothing layer applied after GRU output
+#   can learn the optimal smoothing kernel during training, potentially
+#   reducing jitter without sacrificing accuracy or introducing lag.
+# CHANGES vs baseline:
+#   - model type: CausalSmoothTCN_GRU, smooth_window: 11
+# =============================================================================
+
+exp_name: exp_C2_causal_smooth_head
+
+shared:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11
+
+02_train:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 11

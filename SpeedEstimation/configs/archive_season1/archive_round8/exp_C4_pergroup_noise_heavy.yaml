@@ -1,0 +1,20 @@
+# =============================================================================
+# archive_round8 — C4: Per-Group Noise Augmentation — Heavy
+# HYPOTHESIS: Stronger per-group noise forces the model to learn even more
+#   robust representations, potentially at cost of some accuracy.
+# CHANGES vs baseline:
+#   - augment_noise_per_group: heavier noise than C3
+# =============================================================================
+
+exp_name: exp_C4_pergroup_noise_heavy
+
+02_train:
+  train:
+    augment_noise_per_group:
+      accelerations: 0.15
+      imu: 0.10
+      torques: 0.08
+      velocities: 0.05
+      angles: 0.02
+      grf: 0.02
+      subject_info: 0.0

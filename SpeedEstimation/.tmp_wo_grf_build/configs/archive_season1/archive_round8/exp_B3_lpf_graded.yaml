@@ -1,0 +1,26 @@
+# =============================================================================
+# archive_round8 — B3: Per-Group LPF — Graded Filtering
+# HYPOTHESIS: Applying different cutoffs proportional to each group's noise
+#   level achieves optimal signal-to-noise for every feature group.
+#   Noisier groups get more aggressive filtering.
+# CHANGES vs baseline:
+#   - input_lpf_per_group: accel=5Hz, imu=8Hz, torques=10Hz, velocities=15Hz
+#   - Angles and GRF: untouched (already clean)
+# =============================================================================
+
+exp_name: exp_B3_lpf_graded
+
+shared:
+  input_lpf_per_group:
+    accelerations: 5.0
+    velocities: 15.0
+    imu: 8.0
+    torques: 10.0
+
+02_train:
+  data:
+    input_lpf_per_group:
+      accelerations: 5.0
+      velocities: 15.0
+      imu: 8.0
+      torques: 10.0

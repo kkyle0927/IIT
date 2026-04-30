@@ -1,0 +1,26 @@
+# =============================================================================
+# archive_round7 — E4: Large Kernel 9 + LPF 10Hz + Time Warp
+# HYPOTHESIS: Big kernel for natural smoothness + LPF for noise removal +
+#   time warp to teach robustness to temporal variation.
+# CHANGES vs baseline:
+#   - kernel_size: 9
+#   - input_lpf_cutoff_hz: 10
+#   - time_warp_sigma: 0.2
+# =============================================================================
+
+exp_name: exp_E4_kernel9_lpf10_tw
+
+shared:
+  model:
+    kernel_size: 9
+  input_lpf_cutoff_hz: 10.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 10.0
+    input_lpf_order: 4
+  model:
+    kernel_size: 9
+  train:
+    time_warp_sigma: 0.2

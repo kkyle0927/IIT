@@ -12,6 +12,8 @@ Exoskeleton + full biomechanics 센서(mocap, GRF, IMU) 기반 treadmill 보행 
 - 새로운 파일을 repository에 추가하기 전 반드시 사용자에게 한국어로 파일 경로, 목적, 생성 이유를 설명하고 허락을 받을 것
 - 작업 중 임시 파일을 만들었다면 같은 작업 안에서 직접 삭제할 경우 사용자 허락 없이 진행해도 됨
 - 기존 코드 실행 결과로 생성되는 `png`, `log`, `csv`, `pt`, `npz` 등의 산출물은 사용자 허락 없이 생성되어도 됨
+- `configs/archive_seasonX/archive_Y/...` 또는 `experiments/archive_seasonX/archive_Y/...`를 평가할 때 결과는 반드시 `compare_result/archive_seasonX/archive_Y/...`에 저장되도록 유지할 것
+- archive 실험용 `exp_name`은 repository 전체에서 유일해야 한다. 다른 archive와 `experiments/<exp_name>_...` 폴더가 충돌하지 않도록 `exp_S2A5_...`처럼 archive 식별자를 포함할 것
 
 ## CLAUDE.md 작성 규칙
 
@@ -34,11 +36,30 @@ Exoskeleton + full biomechanics 센서(mocap, GRF, IMU) 기반 treadmill 보행 
 - GPU 독점 방지: 최대 3개까지만 사용
 - 학습: `sbatch -p idxN --job-name="이름" --gres=gpu:idxN:1 --mem=15G --cpus-per-task=8 train.sh configs/path/to/config.yaml`
 - 평가: `sbatch -p idxN --job-name="이름" --gres=gpu:idxN:1 eval_server.sh --auto --ablation`
+- 빠른 평가가 필요하면 `EVAL_STRIDE=N` 환경변수로 evaluation stride를 늘릴 것. 1차 fast eval은 `EVAL_STRIDE=3` 이상을 우선 사용하고, 최종 full plot eval만 `EVAL_STRIDE=1`을 사용할 것
+- `model.residual_skip`을 쓰는 실험을 평가할 때는 `compare_results.py`가 동일한 `residual_skip` 설정을 모델 생성에 전달하도록 유지할 것. 학습만 skip을 쓰고 평가에서 skip이 빠진 상태로 돌리지 말 것
+- `shared.data.target_transform` 또는 `02_train.data.target_transform`을 추가한 실험은 평가와 테스트 metric 계산에서 반드시 같은 역변환을 적용할 것. delta target으로 학습하고 absolute speed metric으로 되돌리지 않은 결과를 쓰지 말 것
+- `02_train.train.prior_loss_weight`와 `prior_input_channel_idx`를 쓰는 실험은 prior 채널 기준이 normalization 전 물리 단위가 되도록 유지할 것
+- 본 프로젝트의 대목표는 treadmill belt speed를 직접 추정하는 것이 아니다. `common/v_Y_true`(프로젝트 내부에서 `common/speed_y` 의미의 corrected speed target으로 간주) 에 양방향 LPF를 적용한 값을 추정하는 것이다
+- 본 프로젝트에서 학습하는 모델은 나중에 실시간 inference가 가능해야 한다. 새 실험을 추가할 때는 입력 feature 전처리, derived feature 계산, 모델 추론까지 포함한 전체 입력 경로가 온라인 실행 가능할 정도로 충분히 가벼운지 확인할 것
+- target 생성용 offline 전처리는 실시간 제약 예외로 둔다. `common/v_Y_true`에 대한 양방향 LPF와 학습용 `_dot`, `_ddot` 생성의 `np.gradient()`는 데이터셋 생성용 전처리로 허용한다
+- 입력 feature용 전처리는 예외 없이 real-time processing 가능해야 한다. 입력 feature를 만들기 위해 양방향 LPF, 미래 구간 참조, 비인과 smoothing을 사용하지 말 것
+- 새 실험을 추가할 때 입력 feature에 `common/assist_level`을 넣지 말 것. 기존 config를 수정할 때도 `common/assist_level`을 추가하지 말 것
+- `archive_season3` 이후의 새 실험은 output target으로 `treadmill/left/speed_leftbelt`를 쓰지 말 것. `common/v_Y_true`만 사용할 것
+- `archive_season3` 이후의 새 실험은 `common/v_Y_true`에 양방향 LPF를 적용한 값을 ground truth로 사용할 것. target LPF는 cutoff `0.5 Hz`, order `4`만 사용할 것. target LPF를 끄거나 causal LPF로 바꾸지 말 것
+- distillation을 사용할 때 teacher는 학습 전용으로만 사용할 것. 최종 배포/평가 대상은 항상 student 1개 모델이어야 하며, teacher 의존 추론이나 ensemble 추론을 추가하지 말 것
+- 복잡한 실험 설계, 논문 아이디어 제안, 결과 해석 요청에서는 바로 결론을 내리지 말 것. 먼저 기존 결과에서 성공한 가설과 실패한 가설을 분리하고, 대안 3개 이상을 비교한 뒤 최종안을 제시할 것
+- 새 archive를 설계할 때는 accuracy, latency, parameter count, sensor reduction, deployability 중 어떤 축의 기여를 노리는지 먼저 명시하고, 그 축에서 baseline 대비 기대 이점을 설명할 것
+- 사용자가 병렬 조사, delegation, subagent 활용을 명시적으로 요청한 경우에는 subagent를 적극 사용할 것. 요청이 없으면 현재 agent가 직접 수행할 것
+- 추상적인 슬로건이나 감각적인 표현으로 제안을 정당화하지 말 것. 구조, 입력 feature, 계산량, 실시간성, 비교 기준을 근거로 설명할 것
 - 로컬 테스트: `conda run -n IIT python SpeedEstimator_TCN_MLP_experiments.py --config configs/...`
+- `train.sh`에 config 여러 개를 넘기면 같은 GPU 안에서 worker pool로 학습한다. 기본 worker 수는 3개이며, 기본 상태에서는 GPU util 기반 자동 증감을 끄고 OOM이 발생할 때만 target worker를 3→2→1로 낮춘다. 낮아진 상태에서 성공 완료가 나오면 target worker를 다시 3으로 복구한다. OOM이 난 config만 재큐잉한다.
+- Slurm 로그로 리다이렉트되는 non-interactive 학습에서는 batch/validation `tqdm`를 출력하지 말 것. 학습 로그에는 epoch 요약과 주요 이벤트만 남길 것
 
 ### GPU 사용 규칙
 - 사용자가 `gpu:idxN:1`로 지정할 때 N은 http://143.248.65.114:5050/ 대시보드 기준 GPU 번호 (nvidia-smi 번호 아님)
 - train/eval 제출 시 반드시 `--job-name`을 지정하여 대시보드에서 job으로 식별 가능하게 할 것
+- `configs/archive_seasonX/archive_Y/...` 또는 `experiments/archive_seasonX/archive_Y/...`를 서버에 제출할 때 `--job-name`은 반드시 `Speed_ASX_AY_train_N` 또는 `Speed_ASX_AY_eval_N` 형식을 사용할 것. 예: `Speed_AS2_A2_train_1`, `Speed_AS2_A2_eval_1`
 - 작업 제출 전 대시보드(http://143.248.65.114:5050/)에서 다른 사용자가 점유 중인 GPU를 확인하고, 점유 중인 GPU에는 절대 작업을 올리지 말 것 (사용자가 특정 idx를 지정하더라도 해당 GPU가 타인 점유 중이면 사용자에게 알리고 다른 GPU를 제안)
 
 ## 프로젝트 구조
@@ -67,15 +88,18 @@ SpeedEstimation/
 
 ## 데이터 파이프라인
 
-- 데이터: `combined_data.h5`, 구조: `Subject/Condition/Level/Trial`
+- 데이터: `combined_data_S008.h5`, 구조: `Subject/Condition/Level/Trial`
 - 피험자: S001~S008, 조건: level_075/100/125mps, accel_sine, decline_5deg, incline_10deg, stopandgo
-- 샘플링: 100Hz, 출력: treadmill belt speed (m/s)
+- 샘플링: 100Hz, 출력: `common/v_Y_true`에 양방향 LPF(cutoff 0.5Hz, order 4)를 적용한 corrected speed target (m/s)
 
 ### 입력 feature 그룹
 - `mocap/kin_q`: hip_flexion, knee_angle, ankle_angle (l/r) + _dot, _ddot (18ch)
 - `derived/body_frame_imu`: body-aligned accel/gyro + forward_accel_overground (7ch)
 - `derived/model_com_speed`: forward kinematics 기반 COM speed (1ch)
 - `derived/imu_integrated_speed`: forward_accel_overground의 leaky integration (1ch)
+- `derived/imu_speed_causal`: treadmill acceleration 없이 body-frame forward accel만 적분한 causal inertial prior (1ch)
+- `derived/stride_progression`: robot 좌우 hip angle excursion과 cadence proxy로 만든 causal stride progression prior (1ch)
+- `derived/interaction_power`: robot hip encoder + torque로 만든 causal interaction power/work (`interaction_power_l/r`, `interaction_work_pos/neg`) (4ch)
 - `robot/left`, `robot/right`: exo torque (2ch)
 - `forceplate/grf/left`, `right`: x, y, z force + contact (8ch)
 - `sub_info`: height, weight (2ch)
@@ -84,6 +108,9 @@ SpeedEstimation/
 - `derived/body_frame_imu`: quaternion 기반 body frame 변환
 - `derived/model_com_speed`: joint angle forward kinematics + GRF stance detection
 - `derived/imu_integrated_speed`: leaky integrator
+- `derived/imu_speed_causal`: treadmill-independent leaky integrator
+- `derived/stride_progression`: exoskeleton hip-angle 기반 저주파 progression proxy
+- `derived/interaction_power`: torque × causal hip angular velocity + exponentially weighted work
 - `_dot`, `_ddot` 변수: `np.gradient() * fs`
 - `contact_l/r`: GRF z-force thresholding
 

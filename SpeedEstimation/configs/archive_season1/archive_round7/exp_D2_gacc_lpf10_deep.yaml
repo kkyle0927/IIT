@@ -1,0 +1,35 @@
+# =============================================================================
+# archive_round7 — D2: Global Acc + Input LPF 10Hz + Deep
+# HYPOTHESIS: Global_acc_additive gave best MAE (#1 overall). Combining with
+#   LPF 10Hz (best noise removal) + Deep TCN should push both accuracy and smoothness.
+# CHANGES vs baseline:
+#   - Add global_acc_y to input_vars
+#   - input_lpf_cutoff_hz: 10, input_lpf_order: 4
+#   - channels: 8-layer deep
+# Total features: 35
+# =============================================================================
+
+exp_name: exp_D2_gacc_lpf10_deep
+
+shared:
+  input_vars:
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "ankle_angle_l", "ankle_angle_r"]]
+    - ["mocap/kin_q", ["hip_flexion_l_dot", "hip_flexion_r_dot", "knee_angle_l_dot", "knee_angle_r_dot", "ankle_angle_l_dot", "ankle_angle_r_dot"]]
+    - ["mocap/kin_q", ["hip_flexion_l_ddot", "hip_flexion_r_ddot", "knee_angle_l_ddot", "knee_angle_r_ddot", "ankle_angle_l_ddot", "ankle_angle_r_ddot"]]
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward", "global_acc_y"]]
+    - ["robot/left",  ["torque"]]
+    - ["robot/right", ["torque"]]
+    - ["forceplate/grf/left",  ["x", "y", "z", "contact_l"]]
+    - ["forceplate/grf/right", ["x", "y", "z", "contact_r"]]
+    - ["sub_info", ["height", "weight"]]
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+  input_lpf_cutoff_hz: 10.0
+  input_lpf_order: 4
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 10.0
+    input_lpf_order: 4
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]

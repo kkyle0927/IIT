@@ -1,0 +1,22 @@
+# =============================================================================
+# archive_round7 — A3: Smooth Loss 0.002 + Time Warp
+# HYPOTHESIS: Very gentle smoothness (0.002) preserves nearly all accuracy
+#   while still nudging the model toward continuity. Combined with time warp.
+# CHANGES vs baseline:
+#   - smoothness_loss_weight: 0.002
+#   - time_window_output: 5
+#   - time_warp_sigma: 0.2
+# =============================================================================
+
+exp_name: exp_A3_smooth_002_tw
+
+shared:
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.002
+    time_warp_sigma: 0.2

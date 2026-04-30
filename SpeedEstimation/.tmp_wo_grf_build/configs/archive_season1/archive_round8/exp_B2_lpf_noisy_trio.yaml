@@ -1,0 +1,22 @@
+# =============================================================================
+# archive_round8 — B2: Per-Group LPF — Noisy Trio (accel + IMU + torques)
+# HYPOTHESIS: The three noisiest feature groups (accelerations, IMU, torques)
+#   benefit from targeted LPF while clean groups (angles, GRF) are preserved.
+# CHANGES vs baseline:
+#   - input_lpf_per_group: accelerations=8Hz, imu=10Hz, torques=12Hz
+# =============================================================================
+
+exp_name: exp_B2_lpf_noisy_trio
+
+shared:
+  input_lpf_per_group:
+    accelerations: 8.0
+    imu: 10.0
+    torques: 12.0
+
+02_train:
+  data:
+    input_lpf_per_group:
+      accelerations: 8.0
+      imu: 10.0
+      torques: 12.0

@@ -1,0 +1,247 @@
+====================================================================================================
+BASIC SANITY CHECK — NaN, Inf, Out-of-range
+====================================================================================================
+
+Found 204 flagged entries:
+
+  S001/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S001/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=5.29>5
+  S001/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S001/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S001/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=5.29>5
+  S001/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S001/incline_10deg/lv4/trial_01                    | robot/left/torque                   | max=5.67>5
+  S001/incline_10deg/lv4/trial_01                    | robot/right/torque                  | max=5.53>5
+  S001/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=8.00>5
+  S001/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=7.84>5
+  S001/stopandgo/lv4/trial_01                        | robot/left/torque                   | max=5.42>5
+  S001/stopandgo/lv4/trial_01                        | robot/right/torque                  | max=5.34>5
+  S001/stopandgo/lv4/trial_02                        | robot/left/torque                   | max=5.38>5
+  S001/stopandgo/lv4/trial_02                        | robot/right/torque                  | max=5.31>5
+  S001/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=7.72>5
+  S001/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.66>5
+  S001/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.77>5
+  S001/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.67>5
+  S002/level_075mps/lv4/trial_01                     | robot/back_imu/accel_y              | min=-31.66<-30
+  S002/level_075mps/lv4/trial_01                     | robot/left/torque                   | max=10.38>5
+  S002/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=5.29>5
+  S002/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S002/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S002/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S002/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S002/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=5.31>5
+  S002/incline_10deg/lv4/trial_01                    | robot/left/torque                   | max=5.16>5
+  S002/incline_10deg/lv4/trial_01                    | robot/right/torque                  | max=5.14>5
+  S002/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=5.30>5
+  S002/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=5.30>5
+  S002/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=7.37>5
+  S002/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.32>5
+  S002/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.42>5
+  S002/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.27>5
+  S002/stopandgo/lv7/trial_03                        | robot/left/torque                   | max=7.28>5
+  S002/stopandgo/lv7/trial_03                        | robot/right/torque                  | max=7.29>5
+  S003/level_075mps/lv4/trial_01                     | robot/left/torque                   | max=5.40>5
+  S003/level_075mps/lv4/trial_01                     | robot/right/torque                  | max=5.29>5
+  S003/level_075mps/lv7/trial_01                     | robot/back_imu/accel_y              | min=-32.39<-30
+  S003/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=7.65>5
+  S003/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=7.55>5
+  S003/level_100mps/lv4/trial_01                     | robot/left/torque                   | max=5.27>5
+  S003/level_100mps/lv4/trial_01                     | robot/right/torque                  | max=5.17>5
+  S003/level_100mps/lv4/trial_02                     | robot/left/torque                   | max=5.35>5
+  S003/level_100mps/lv4/trial_02                     | robot/right/torque                  | max=5.25>5
+  S003/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S003/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S003/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S003/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=5.31>5
+  S003/incline_10deg/lv4/trial_01                    | mocap/kin_q/knee_angle_r            | max=91.68>90
+  S003/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=5.30>5
+  S003/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=5.30>5
+  S003/stopandgo/lv4/trial_02                        | robot/left/torque                   | max=5.46>5
+  S003/stopandgo/lv4/trial_02                        | robot/right/torque                  | max=5.37>5
+  S003/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=7.76>5
+  S003/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.69>5
+  S003/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.75>5
+  S003/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.80>5
+  S004/level_075mps/lv4/trial_01                     | mocap/kin_q/knee_angle_l            | max=101.74>90
+  S004/level_075mps/lv4/trial_01                     | mocap/kin_q/knee_angle_r            | max=116.20>90
+  S004/level_075mps/lv4/trial_02                     | robot/right/torque                  | max=5.12>5
+  S004/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S004/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S004/level_075mps/lv7/trial_02                     | robot/back_imu/accel_y              | max=32.14>30
+  S004/level_075mps/lv7/trial_02                     | robot/left/torque                   | max=7.29>5
+  S004/level_075mps/lv7/trial_02                     | robot/right/torque                  | max=7.53>5
+  S004/level_100mps/lv4/trial_01                     | robot/left/torque                   | max=5.44>5
+  S004/level_100mps/lv4/trial_01                     | robot/right/torque                  | max=5.23>5
+  S004/level_100mps/lv4/trial_02                     | robot/left/torque                   | max=5.24>5
+  S004/level_100mps/lv4/trial_02                     | robot/right/torque                  | max=5.25>5
+  S004/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=7.69>5
+  S004/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=7.53>5
+  S004/level_125mps/lv4/trial_01                     | robot/left/torque                   | max=5.46>5
+  S004/level_125mps/lv4/trial_01                     | robot/right/torque                  | max=5.26>5
+  S004/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=7.62>5
+  S004/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=7.50>5
+  S004/incline_10deg/lv7/trial_01                    | robot/back_imu/accel_y              | max=30.39>30
+  S004/incline_10deg/lv7/trial_01                    | robot/left/hip_angle                | max=81.10>80
+  S004/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=7.83>5
+  S004/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=7.76>5
+  S004/incline_10deg/lv7/trial_02                    | robot/left/torque                   | max=7.91>5
+  S004/incline_10deg/lv7/trial_02                    | robot/right/torque                  | max=7.81>5
+  S004/stopandgo/lv4/trial_01                        | robot/left/torque                   | max=5.27>5
+  S004/stopandgo/lv4/trial_01                        | robot/right/torque                  | max=5.18>5
+  S004/stopandgo/lv4/trial_02                        | robot/left/torque                   | max=5.29>5
+  S004/stopandgo/lv4/trial_02                        | robot/right/torque                  | max=5.14>5
+  S004/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=7.71>5
+  S004/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.55>5
+  S004/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.61>5
+  S004/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.49>5
+  S005/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S005/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S005/level_100mps/lv0/trial_01                     | mocap/kin_q/knee_angle_l            | max=94.34>90
+  S005/level_100mps/lv4/trial_01                     | robot/left/torque                   | max=5.49>5
+  S005/level_100mps/lv4/trial_01                     | robot/right/torque                  | max=5.37>5
+  S005/level_100mps/lv7/trial_01                     | mocap/kin_q/knee_angle_r            | max=94.93>90
+  S005/level_100mps/lv7/trial_01                     | robot/back_imu/accel_x              | max=32.94>30
+  S005/level_100mps/lv7/trial_01                     | robot/back_imu/accel_y              | max=34.32>30
+  S005/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=7.82>5
+  S005/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=7.88>5
+  S005/level_125mps/lv4/trial_01                     | mocap/kin_q/knee_angle_r            | max=90.30>90
+  S005/level_125mps/lv7/trial_01                     | mocap/kin_q/knee_angle_r            | max=92.22>90
+  S005/level_125mps/lv7/trial_01                     | robot/back_imu/accel_x              | max=35.01>30
+  S005/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=5.32>5
+  S005/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=5.31>5
+  S005/incline_10deg/lv4/trial_01                    | mocap/kin_q/knee_angle_r            | max=94.60>90
+  S005/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=5.29>5
+  S005/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=5.30>5
+  S005/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.80>5
+  S005/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.72>5
+  S006/level_075mps/lv4/trial_01                     | robot/left/torque                   | max=5.54>5
+  S006/level_075mps/lv4/trial_01                     | robot/right/torque                  | max=5.37>5
+  S006/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=7.92>5
+  S006/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=7.60>5
+  S006/level_100mps/lv4/trial_01                     | robot/left/torque                   | max=5.46>5
+  S006/level_100mps/lv4/trial_01                     | robot/right/torque                  | max=5.32>5
+  S006/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=7.55>5
+  S006/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=7.54>5
+  S006/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S006/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=5.31>5
+  S006/incline_10deg/lv4/trial_01                    | robot/left/torque                   | max=5.63>5
+  S006/incline_10deg/lv4/trial_01                    | robot/right/torque                  | max=5.33>5
+  S006/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=7.87>5
+  S006/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=7.66>5
+  S006/stopandgo/lv4/trial_01                        | robot/left/torque                   | max=5.39>5
+  S006/stopandgo/lv4/trial_01                        | robot/right/torque                  | max=5.23>5
+  S006/stopandgo/lv4/trial_02                        | robot/left/torque                   | max=5.39>5
+  S006/stopandgo/lv4/trial_02                        | robot/right/torque                  | max=5.18>5
+  S006/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=7.74>5
+  S006/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.50>5
+  S006/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.74>5
+  S006/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.48>5
+  S007/level_075mps/lv4/trial_01                     | mocap/kin_q/knee_angle_l            | max=93.47>90
+  S007/level_075mps/lv4/trial_01                     | mocap/kin_q/knee_angle_r            | max=92.14>90
+  S007/level_075mps/lv4/trial_01                     | robot/left/torque                   | max=5.49>5
+  S007/level_075mps/lv4/trial_01                     | robot/right/torque                  | max=5.42>5
+  S007/level_075mps/lv7/trial_01                     | mocap/kin_q/knee_angle_l            | max=98.32>90
+  S007/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=7.73>5
+  S007/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=7.72>5
+  S007/level_100mps/lv0/trial_01                     | mocap/kin_q/knee_angle_l            | max=90.99>90
+  S007/level_100mps/lv4/trial_01                     | mocap/kin_q/knee_angle_l            | max=93.41>90
+  S007/level_100mps/lv7/trial_01                     | mocap/kin_q/knee_angle_l            | max=97.85>90
+  S007/level_100mps/lv7/trial_01                     | mocap/kin_q/knee_angle_r            | max=91.15>90
+  S007/level_100mps/lv7/trial_01                     | robot/back_imu/accel_x              | max=34.97>30
+  S007/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=7.69>5
+  S007/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=7.75>5
+  S007/level_125mps/lv7/trial_01                     | mocap/kin_q/knee_angle_l            | max=95.50>90
+  S007/level_125mps/lv7/trial_01                     | robot/back_imu/accel_x              | max=31.31>30
+  S007/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=5.29>5
+  S007/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S007/incline_10deg/lv7/trial_01                    | mocap/kin_q/knee_angle_l            | max=92.28>90
+  S007/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=5.30>5
+  S007/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=5.30>5
+  S007/stopandgo/lv0/trial_02                        | mocap/kin_q/knee_angle_l            | max=92.22>90
+  S007/stopandgo/lv4/trial_01                        | mocap/kin_q/knee_angle_l            | max=95.30>90
+  S007/stopandgo/lv4/trial_01                        | robot/left/torque                   | max=5.35>5
+  S007/stopandgo/lv4/trial_01                        | robot/right/torque                  | max=5.42>5
+  S007/stopandgo/lv4/trial_02                        | mocap/kin_q/knee_angle_l            | max=94.91>90
+  S007/stopandgo/lv4/trial_02                        | robot/left/torque                   | max=5.37>5
+  S007/stopandgo/lv4/trial_02                        | robot/right/torque                  | max=5.37>5
+  S007/stopandgo/lv7/trial_01                        | mocap/kin_q/knee_angle_l            | max=97.21>90
+  S007/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=7.74>5
+  S007/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.73>5
+  S007/stopandgo/lv7/trial_02                        | mocap/kin_q/knee_angle_l            | max=95.15>90
+  S007/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.61>5
+  S007/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.63>5
+  S008/level_075mps/lv7/trial_01                     | robot/back_imu/accel_y              | min=-32.98<-30
+  S008/level_075mps/lv7/trial_01                     | robot/back_imu/accel_z              | min=-41.25<-30, max=40.45>30
+  S008/level_075mps/lv7/trial_01                     | robot/left/torque                   | max=7.84>5
+  S008/level_075mps/lv7/trial_01                     | robot/right/torque                  | max=7.67>5
+  S008/level_100mps/lv7/trial_01                     | robot/back_imu/accel_z              | min=-38.73<-30, max=46.26>30
+  S008/level_100mps/lv7/trial_01                     | robot/left/torque                   | max=5.30>5
+  S008/level_100mps/lv7/trial_01                     | robot/right/torque                  | max=5.30>5
+  S008/level_125mps/lv4/trial_01                     | robot/back_imu/accel_z              | min=-43.29<-30
+  S008/level_125mps/lv4/trial_01                     | robot/left/torque                   | max=5.61>5
+  S008/level_125mps/lv4/trial_01                     | robot/right/torque                  | max=5.48>5
+  S008/level_125mps/lv7/trial_01                     | robot/back_imu/accel_y              | min=-30.60<-30
+  S008/level_125mps/lv7/trial_01                     | robot/back_imu/accel_z              | min=-38.77<-30, max=42.51>30
+  S008/level_125mps/lv7/trial_01                     | robot/left/torque                   | max=7.99>5
+  S008/level_125mps/lv7/trial_01                     | robot/right/torque                  | max=7.94>5
+  S008/incline_10deg/lv4/trial_01                    | robot/left/hip_angle                | max=84.00>80
+  S008/incline_10deg/lv4/trial_01                    | robot/left/torque                   | max=5.91>5
+  S008/incline_10deg/lv4/trial_01                    | robot/right/torque                  | max=5.77>5
+  S008/incline_10deg/lv7/trial_01                    | robot/back_imu/accel_y              | min=-33.66<-30
+  S008/incline_10deg/lv7/trial_01                    | robot/back_imu/accel_z              | min=-50.26<-30, max=38.13>30
+  S008/incline_10deg/lv7/trial_01                    | robot/left/hip_angle                | max=87.74>80
+  S008/incline_10deg/lv7/trial_01                    | robot/left/torque                   | max=7.98>5
+  S008/incline_10deg/lv7/trial_01                    | robot/right/hip_angle               | max=83.72>80
+  S008/incline_10deg/lv7/trial_01                    | robot/right/torque                  | max=7.85>5
+  S008/stopandgo/lv4/trial_01                        | robot/back_imu/accel_z              | min=-35.24<-30
+  S008/stopandgo/lv4/trial_01                        | robot/left/torque                   | max=5.63>5
+  S008/stopandgo/lv4/trial_01                        | robot/right/torque                  | max=5.41>5
+  S008/stopandgo/lv4/trial_02                        | robot/left/torque                   | max=5.64>5
+  S008/stopandgo/lv4/trial_02                        | robot/right/torque                  | max=5.42>5
+  S008/stopandgo/lv7/trial_01                        | mocap/kin_q/knee_angle_l            | max=94.16>90
+  S008/stopandgo/lv7/trial_01                        | robot/back_imu/accel_y              | min=-33.31<-30
+  S008/stopandgo/lv7/trial_01                        | robot/back_imu/accel_z              | min=-65.45<-30, max=34.31>30
+  S008/stopandgo/lv7/trial_01                        | robot/left/hip_angle                | max=82.99>80
+  S008/stopandgo/lv7/trial_01                        | robot/left/torque                   | max=8.01>5
+  S008/stopandgo/lv7/trial_01                        | robot/right/torque                  | max=7.94>5
+  S008/stopandgo/lv7/trial_02                        | robot/back_imu/accel_y              | min=-35.87<-30
+  S008/stopandgo/lv7/trial_02                        | robot/back_imu/accel_z              | min=-46.85<-30, max=38.47>30
+  S008/stopandgo/lv7/trial_02                        | robot/left/torque                   | max=7.99>5
+  S008/stopandgo/lv7/trial_02                        | robot/right/torque                  | max=7.95>5
+
+
+====================================================================================================
+FEATURE SUMMARY STATISTICS (aggregated across all trials)
+====================================================================================================
+
+Feature                                  | N_trials |        Min |        Max |       Mean |        Std |  NaN_tot |  Inf_tot
+----------------------------------------------------------------------------------------------------------------------------------
+forceplate/grf/left/x                    |      169 |   -99.6883 |   171.7080 |    25.0556 |    26.1450 |        0 |        0
+forceplate/grf/left/y                    |      169 |  -280.5780 |   287.2580 |    10.3084 |    53.0887 |        0 |        0
+forceplate/grf/left/z                    |      169 | -1201.9300 |    67.5097 |  -382.0652 |   304.7756 |        0 |        0
+forceplate/grf/right/x                   |      169 |  -157.1850 |    98.1311 |   -22.5437 |    24.3939 |        0 |        0
+forceplate/grf/right/y                   |      169 |  -287.0510 |   313.2060 |     8.4997 |    54.4887 |        0 |        0
+forceplate/grf/right/z                   |      169 | -1175.9700 |    60.1419 |  -381.4344 |   305.6725 |        0 |        0
+mocap/kin_q/ankle_angle_l                |      169 |   -29.1334 |    29.8144 |     9.6344 |     7.2303 |        0 |        0
+mocap/kin_q/ankle_angle_r                |      169 |   -32.4293 |    29.8132 |     8.8091 |     7.1605 |        0 |        0
+mocap/kin_q/hip_flexion_l                |      169 |   -29.8495 |    63.5197 |     4.2244 |    16.8318 |        0 |        0
+mocap/kin_q/hip_flexion_r                |      169 |   -29.8295 |    73.3536 |     2.9033 |    17.8769 |        0 |        0
+mocap/kin_q/knee_angle_l                 |      169 |     0.1066 |   101.7437 |    30.2296 |    20.3874 |        0 |        0
+mocap/kin_q/knee_angle_r                 |      169 |     0.1007 |   116.1952 |    29.1897 |    20.6290 |        0 |        0
+robot/back_imu/accel_x                   |      169 |   -15.8935 |    35.0087 |     9.7621 |     1.6915 |        0 |        0
+robot/back_imu/accel_y                   |      169 |   -35.8660 |    34.3193 |     0.1706 |     2.0557 |        0 |        0
+robot/back_imu/accel_z                   |      169 |   -65.4517 |    46.2603 |     0.4447 |     1.2008 |        0 |        0
+robot/back_imu/gyro_x                    |      169 |    -3.6904 |     3.3826 |     0.0024 |     0.3407 |        0 |        0
+robot/back_imu/gyro_y                    |      169 |    -1.5765 |     1.6088 |     0.0017 |     0.1895 |        0 |        0
+robot/back_imu/gyro_z                    |      169 |    -1.2336 |     1.5459 |     0.0012 |     0.2180 |        0 |        0
+robot/back_imu/quat_w                    |      169 |    -0.7375 |     0.7651 |     0.4979 |     0.0158 |        0 |        0
+robot/back_imu/quat_x                    |      169 |    -0.4608 |     0.7178 |    -0.1545 |     0.0195 |        0 |        0
+robot/back_imu/quat_y                    |      169 |    -0.9129 |     0.7483 |    -0.4775 |     0.0159 |        0 |        0
+robot/back_imu/quat_z                    |      169 |    -0.4960 |     0.7659 |    -0.1673 |     0.0221 |        0 |        0
+robot/left/hip_angle                     |      169 |   -23.7524 |    87.7368 |    18.8718 |    18.5956 |        0 |        0
+robot/left/thigh_angle                   |      169 |   -27.5537 |    70.9937 |    14.7224 |    18.3627 |        0 |        0
+robot/left/torque                        |      169 |    -4.7351 |    10.3821 |     0.2980 |     1.7367 |        0 |        0
+robot/right/hip_angle                    |      169 |   -25.5542 |    83.7158 |    17.5147 |    18.5926 |        0 |        0
+robot/right/thigh_angle                  |      169 |   -30.0806 |    67.7637 |    13.3648 |    18.2535 |        0 |        0
+robot/right/torque                       |      169 |    -4.6692 |     7.9523 |     0.2922 |     1.7253 |        0 |        0
+treadmill/left/speed_leftbelt            |      169 |    -0.0071 |     1.4238 |     0.7653 |     0.2621 |        0 |        0

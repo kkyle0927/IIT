@@ -1,0 +1,24 @@
+# =============================================================================
+# archive_round5 — D1: Temporal Attention + Deep TCN
+# HYPOTHESIS: Adding temporal attention after deep TCN encoder allows
+#   the model to focus on the most relevant time-steps within the window
+#   for speed estimation, reducing lag by attending to "gait transition" frames.
+# CHANGES vs baseline:
+#   - AttentionTCN model with 8-layer deep channels
+# =============================================================================
+
+exp_name: exp_D1_attention_deep
+
+shared:
+  model:
+    type: AttentionTCN
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    attention_type: temporal
+    attention_heads: 4
+
+02_train:
+  model:
+    type: AttentionTCN
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    attention_type: temporal
+    attention_heads: 4

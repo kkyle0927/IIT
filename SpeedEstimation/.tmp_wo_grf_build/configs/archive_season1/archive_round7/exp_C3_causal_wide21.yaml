@@ -1,0 +1,27 @@
+# =============================================================================
+# archive_round7 — C3: CausalSmooth w/ wider window (21) + Smooth Loss
+# HYPOTHESIS: Wider smooth_window (21 vs 11) allows the causal smoother to
+#   average over more timesteps, potentially catching longer-range jitter.
+# CHANGES vs baseline:
+#   - model: CausalSmoothTCN_GRU, smooth_window: 21
+#   - smoothness_loss_weight: 0.005
+#   - time_window_output: 5
+# =============================================================================
+
+exp_name: exp_C3_causal_wide21
+
+shared:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 21
+  data:
+    time_window_output: 5
+
+02_train:
+  model:
+    type: CausalSmoothTCN_GRU
+    smooth_window: 21
+  data:
+    time_window_output: 5
+  train:
+    smoothness_loss_weight: 0.005

@@ -1,0 +1,16 @@
+# =============================================================================
+# AR Feedback + Scheduled Sampling (Teacher Forcing 1.0 → 0.0 선형 감소)
+# baseline 대비 변경: shared.model.ar_feedback (enable + schedule)
+# =============================================================================
+
+shared:
+  model:
+    ar_feedback:
+      enable: true
+      k: 1
+      teacher_forcing_schedule:
+        start: 1.0
+        end: 0.0
+        mode: "linear"
+
+exp_name: "exp_ar_feedback_sched"

@@ -1,0 +1,39 @@
+# =============================================================================
+# archive_round7 — F3: Balanced + Kernel 9 (wider receptive field variant)
+# HYPOTHESIS: Same as F2 balanced but with k=9 instead of k=5.
+#   Wider receptive field per layer = more temporal averaging = smoother output.
+# Total features: 35
+# =============================================================================
+
+exp_name: exp_F3_balanced_k9
+
+shared:
+  input_vars:
+    - ["mocap/kin_q", ["hip_flexion_l", "hip_flexion_r", "knee_angle_l", "knee_angle_r", "ankle_angle_l", "ankle_angle_r"]]
+    - ["mocap/kin_q", ["hip_flexion_l_dot", "hip_flexion_r_dot", "knee_angle_l_dot", "knee_angle_r_dot", "ankle_angle_l_dot", "ankle_angle_r_dot"]]
+    - ["mocap/kin_q", ["hip_flexion_l_ddot", "hip_flexion_r_ddot", "knee_angle_l_ddot", "knee_angle_r_ddot", "ankle_angle_l_ddot", "ankle_angle_r_ddot"]]
+    - ["robot/back_imu", ["roll", "pitch", "yaw", "vel_forward", "global_acc_y"]]
+    - ["robot/left",  ["torque"]]
+    - ["robot/right", ["torque"]]
+    - ["forceplate/grf/left",  ["x", "y", "z", "contact_l"]]
+    - ["forceplate/grf/right", ["x", "y", "z", "contact_r"]]
+    - ["sub_info", ["height", "weight"]]
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    kernel_size: 9
+  input_lpf_cutoff_hz: 10.0
+  input_lpf_order: 4
+  data:
+    time_window_output: 5
+
+02_train:
+  data:
+    input_lpf_cutoff_hz: 10.0
+    input_lpf_order: 4
+    time_window_output: 5
+  model:
+    channels: [32, 32, 64, 64, 128, 128, 128, 128]
+    kernel_size: 9
+  train:
+    smoothness_loss_weight: 0.005
+    time_warp_sigma: 0.2
