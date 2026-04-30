@@ -1,0 +1,57 @@
+이상한 것
+S001
+- 원래 accel_sine trial이 있었는데 이번에 빠짐
+- incline_10deg/lv4 에서 ankle_angle_r의 데이터 범위가 이상함(lv0과 비교해봐도 얘만 이상함, 이전 h5파일에서도 동일한 문제 있었음)
+S003
+- level_125mps/lv0/trial01 에서 robot hip angle과 mocap hip angle 간 correlation이 이상함.(다른 trial 및 sub에서는 나타나지 않는 현상, 애초에 frequency가 다른걸 보아하니, 잘못된 robot/mocap trial끼리 합친 것 같음)
+S004
+- 모든 trial에 대해서 mocap hip angle, ankle angle 값이 다른 피험자에 비해서 큰 offset을 가짐(15-25도 정도). 이상함.
+S007
+- 원래 level_125mps/lv0 trial이 있었는데 이번에 빠짐
+- 모든 trial에 대해서 mocap hip angle에 offset이 큼 (아마 static model이 이상한듯)
+S009
+- level_075mps/lv0/trial01 에서 treadmill 데이터가 없음(다 0으로 찍힘)
+- accel_sine/lv0에서 robot torque가 0이 아님. 잘못 실험한거같음 
+- stopandgo/lv4 에서도 hip_L의 범위가 다른 피험자에 비하여 다름 
+S010
+- incline_10deg/lv0/trial01 에서 treadmill 데이터가 없음(다 0으로 찍힘)
+- level_100mps/lv0/trial01 에서도 treadmill 데이터 이상(거의 다 0으로 찍힘)
+- stopandgo/lv0/trial_01 에서 mocap과 forceplate 데이터 없음
+S011
+- incline_10deg/lv0/trial01,02 에서 forceplate, mocap 데이터 없음
+- dynamicpose/lv0/trial_01 에서 forceplate, mocap 데이터 없음
+S013
+- incline_10deg 없음
+- decline_5deg/lv0 trial_01 없이 trial02만 있음
+S014
+- level_075mps/lv0/trial02에서 forceplate, mocap 데이터 없음
+- dynamicpose/lv0 trial01이 없음
+S016
+- decline_5deg 없음
+- level_075mps/lv0 trial02 없음
+- accel_sine/lv0 trial02 없음
+- incline_10deg/lv0 trial01 없음
+S017
+- incline_10deg 없음
+- dynamicpose 없음
+- stopandgo/lv0 trial02 없음
+- accel_sine/lv0 trial02 없음
+- 모든 trial에서 hip, knee까지도 범위가 이상함(static calibration에서 문제가 있는 것 같음)
+S019
+- dynamicpose/lv0/trial01이 없음
+- dynamicpose/lv0/trial02에서 mocap hip L 값 범위가 이상함(다른 애들에 비해서 20도 정도 offset)
+- accel_sine/lv0 trial02 없음
+- stand/lv0 trial01 없음
+- decline_5deg/lv0 trial01 없음
+S020
+- sub info 에서 age가 누락됨.
+- dynamicpose/lv0 trial02 없음
+- incline_10deg/lv0 trial01 없음
+S021
+- decline_5deg 없음
+- dynamicpose 없음
+- accel_sine/lv0/trial_01, 02에서 treadmill 데이터 없음 -> 물론 계산된 speed도 없음
+- incline_10deg/lv0/trial01 에서 forceplate, mocap, treadmill 데이터 없음
+- incline_10deg/lv0 trial02 없음
+모든 피험자
+- 전체적으로 joint angle 들의 starting offset이 너무 다름. 모든 피험자 (특히 S001/S004/S007/S017 네 명), 모든 condition에서. 무조건 수정 필요.

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scontrol show job 945)",
+      "Bash(ps -p 2342142 -o pid,user,cmd --no-headers)",
+      "Bash(ps -p 2342145 -o pid,user,cmd --no-headers)"
+    ]
+  }
+}
