@@ -1,0 +1,9 @@
+GPU-0 Total:   0%|          | 0/1 [00:00<?, ?it/s]/home/chanyoungko/IIT/SpeedEstimation/training/trainer.py:537: FutureWarning: `torch.cuda.amp.GradScaler(args...)` is deprecated. Please use `torch.amp.GradScaler('cuda', args...)` instead.
+  amp_scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
+/home/chanyoungko/IIT/SpeedEstimation/training/trainer.py:596: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=use_amp):
+/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/torch/nn/modules/loss.py:1100: UserWarning: Using a target size (torch.Size([256, 1, 1])) that is different to the input size (torch.Size([256, 1])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
+/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/torch/nn/modules/loss.py:1100: UserWarning: Using a target size (torch.Size([137, 1, 1])) that is different to the input size (torch.Size([137, 1])). This will likely lead to incorrect results due to broadcasting. Please ensure they have the same size.
+  return F.huber_loss(input, target, reduction=self.reduction, delta=self.delta)
+slurmstepd: error: *** JOB 2796 ON server1 CANCELLED AT 2026-03-17T16:06:14 ***

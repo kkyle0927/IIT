@@ -1,0 +1,2 @@
+group,mae,rmse,r2,lag_ms,mae_delta,mae_pct_change
+exp_S2A6_C2_fusion_imuint_nogrf_notorque,0.024552753,0.053637393,0.9789609,2.5,0.024552753,0.0

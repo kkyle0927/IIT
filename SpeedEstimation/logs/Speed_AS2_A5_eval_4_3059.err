@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1908, in analyze_automated
+    res = load_and_evaluate(exp_path, device, return_seqs=True, return_extras=True, eval_stride=eval_stride)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1007, in load_and_evaluate
+    model = build_model_from_cfg(model_cfg, input_dim=input_dim, output_dim=out_dim, horizon=horizon, use_input_norm=use_input_norm)
+NameError: name 'out_dim' is not defined

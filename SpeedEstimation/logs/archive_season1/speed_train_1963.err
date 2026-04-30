@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/SpeedEstimator_TCN_MLP_experiments.py", line 131, in <module>
+    with open(yf, 'r') as f:
+FileNotFoundError: [Errno 2] No such file or directory: 'configs/a5_exp_A3_com_chain_reduced.yaml'

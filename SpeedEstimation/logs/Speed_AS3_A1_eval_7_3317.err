@@ -1,0 +1,12 @@
+/home/chanyoungko/IIT/SpeedEstimation/compare_results.py:1015: FutureWarning: You are using `torch.load` with `weights_only=False` (the current default value), which uses the default pickle module implicitly. It is possible to construct malicious pickle data which will execute arbitrary code during unpickling (See https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models for more details). In a future release, the default value for `weights_only` will be flipped to `True`. This limits the functions that could be executed during unpickling. Arbitrary objects will no longer be allowed to be loaded via this mode unless they are explicitly allowlisted by the user via `torch.serialization.add_safe_globals`. We recommend you start setting `weights_only=True` for any use case where you don't have full control of the loaded file. Please open an issue on GitHub for any issues related to this experimental feature.
+  ckpt = torch.load(model_path, map_location=device)
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 2632, in <module>
+    main()
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1234, in main
+    analyze_detailed_single(selected[0], eval_stride=args.eval_stride)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 2079, in analyze_detailed_single
+    res = load_and_evaluate(exp_path, device, return_seqs=True, eval_stride=eval_stride)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1056, in load_and_evaluate
+    xb_raw = np.concatenate(x_batches, axis=0)
+numpy._core._exceptions._ArrayMemoryError: Unable to allocate 5.34 GiB for an array with shape (125835, 300, 38) and data type float32

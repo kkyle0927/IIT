@@ -1,0 +1,19 @@
+Traceback (most recent call last):
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 2630, in <module>
+    main()
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 1242, in main
+    res = load_and_evaluate(d, device)
+  File "/home/chanyoungko/IIT/SpeedEstimation/compare_results.py", line 865, in load_and_evaluate
+    X_list, Y_list = main_script.build_nn_dataset_multi(
+  File "/home/chanyoungko/IIT/SpeedEstimation/data/loader.py", line 1246, in build_nn_dataset_multi
+    X_cached, Y_cached, meta_cached = build_nn_dataset(
+  File "/home/chanyoungko/IIT/SpeedEstimation/data/loader.py", line 1109, in build_nn_dataset
+    with h5py.File(data_path, 'r') as f:
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/h5py/_hl/files.py", line 566, in __init__
+    fid = make_fid(name, mode, userblock_size, fapl, fcpl, swmr=swmr)
+  File "/home/chanyoungko/.conda/envs/IIT/lib/python3.10/site-packages/h5py/_hl/files.py", line 241, in make_fid
+    fid = h5f.open(name, flags, fapl=fapl)
+  File "h5py/_objects.pyx", line 54, in h5py._objects.with_phil.wrapper
+  File "h5py/_objects.pyx", line 55, in h5py._objects.with_phil.wrapper
+  File "h5py/h5f.pyx", line 104, in h5py.h5f.open
+FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = './combined_data_milestone1.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)
