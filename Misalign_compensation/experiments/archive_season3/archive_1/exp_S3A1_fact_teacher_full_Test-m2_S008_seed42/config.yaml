@@ -1,0 +1,297 @@
+02_train:
+  data:
+    calibrate_robot_thigh: true
+    est_tick_ranges: &id001
+    - 0
+    normalize: true
+    normalize_type: standard
+    residual_target: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_complementary_filter_euler: true
+    window_size: 200
+    y_delay: 0
+  loader:
+    batch_size: 128
+    val_batch_size: 256
+  model: &id003
+    branch_channels:
+    - 12
+    - 16
+    - 16
+    - 24
+    branch_feature_patterns:
+      compliance:
+      - derived/load_coupling/
+      geometry:
+      - derived/relative_kinematics/
+      - derived/trunk_consistency/
+      hysteresis:
+      - derived/interface_workloop/
+      - derived/interface_lag/
+      raw:
+      - derived/euler/
+      - robot/left/hip_angle
+      - robot/right/hip_angle
+      - robot/left/torque
+      - robot/right/torque
+      - robot/left/thigh_angle
+      - robot/right/thigh_angle
+      - robot/left/thigh_angle_dot
+      - robot/right/thigh_angle_dot
+      - robot/left/torque_dot
+      - robot/right/torque_dot
+      - robot/back_imu/quat_
+      - derived/mech_power/
+    channels:
+    - 16
+    - 24
+    - 24
+    - 48
+    dropout: 0.12
+    head_dropout: 0.1
+    head_hidden:
+    - 32
+    kernel_size: 5
+    model_norm: layer
+    type: FactorizedBranchTCN
+    use_norm: true
+  train:
+    amp: true
+    augment_noise_std: 0.01
+    cos_T0: 10
+    cos_Tmult: 1
+    device: cuda
+    early_stop_min_delta: 0.0001
+    early_stop_patience: 10
+    early_stop_warmup: 10
+    epochs: 30
+    eta_min: 1.0e-05
+    k_fold: 4
+    lr: 0.001
+    save_dir: ./runs_tcn
+    task_type: regression
+    wd: 0.01
+03_eval:
+  data: &id002
+    calibrate_robot_thigh: true
+    est_tick_ranges: *id001
+    normalize: true
+    residual_target: true
+    stride: 5
+    stride_inf: 1
+    time_window_output: 1
+    use_complementary_filter_euler: true
+    window_size: 200
+    y_delay: 0
+  scaler_path: ./runs_tcn/scaler.npz
+  split:
+    level: subject
+    loso_subjects:
+    - m2_S002
+    - m2_S005
+    - m2_S008
+    mode: loso
+    ratio:
+    - 0.7
+    - 0.15
+    - 0.15
+    save_to: null
+    seed: 42
+  train:
+    device: cuda
+_config_relpath: /home/chanyoungko/IIT/Misalign_compensation/configs/archive_season3/archive_1/exp_S3A1_fact_teacher_full.yaml
+conditions:
+- level_075mps
+- level_100mps
+- level_125mps
+- accel_sine
+- decline_5deg
+- incline_10deg
+- stopandgo
+cv_mode: loso
+data_path: /home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5
+est_tick_ranges:
+- 0
+exp_name: exp_S3A1_fact_teacher_full
+input_vars:
+- - derived/euler
+  - - roll
+    - pitch
+    - yaw
+- - robot/left
+  - - hip_angle
+    - torque
+    - thigh_angle
+    - thigh_angle_dot
+    - torque_dot
+- - robot/right
+  - - hip_angle
+    - torque
+    - thigh_angle
+    - thigh_angle_dot
+    - torque_dot
+- - robot/back_imu
+  - - quat_w
+    - quat_x
+    - quat_y
+    - quat_z
+- - derived/mech_power
+  - - left
+    - right
+- - derived/relative_kinematics
+  - - pitch_minus_hip_l
+    - pitch_minus_hip_r
+    - pitch_minus_thigh_l
+    - pitch_minus_thigh_r
+    - pitchrate_minus_thighdot_l
+    - pitchrate_minus_thighdot_r
+    - hip_minus_thigh_l
+    - hip_minus_thigh_r
+- - derived/load_coupling
+  - - norm_torque_pitch_gap_l
+    - norm_torque_pitch_gap_r
+    - norm_torque_rate_gap_l
+    - norm_torque_rate_gap_r
+    - norm_torque_hip_thigh_gap_l
+    - norm_torque_hip_thigh_gap_r
+    - rel_abs_pitch_gap_l
+    - rel_abs_pitch_gap_r
+    - rel_abs_rate_gap_l
+    - rel_abs_rate_gap_r
+- - derived/interface_workloop
+  - - left_work_balance_short
+    - right_work_balance_short
+    - left_net_work_ratio_short
+    - right_net_work_ratio_short
+    - left_abs_work_short
+    - right_abs_work_short
+- - derived/interface_lag
+  - - corr0_l
+    - corr50_l
+    - best_lag_ms_l
+    - corr0_r
+    - corr50_r
+    - best_lag_ms_r
+- - derived/trunk_consistency
+  - - gyro_forward_minus_thighdot_l
+    - gyro_forward_minus_thighdot_r
+    - gyro_forward_minus_pitchdot
+    - gyro_leak_ratio
+    - accel_leak_ratio
+output_vars:
+- - derived/human_thigh
+  - - left
+    - right
+seeds:
+- 42
+- 7
+shared:
+  conditions:
+  - level_075mps
+  - level_100mps
+  - level_125mps
+  - accel_sine
+  - decline_5deg
+  - incline_10deg
+  - stopandgo
+  data: *id002
+  data_sources:
+    milestone2:
+      exclude_subjects: []
+      path: /home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5
+      prefix: m2_
+  input_vars:
+  - - derived/euler
+    - - roll
+      - pitch
+      - yaw
+  - - robot/left
+    - - hip_angle
+      - torque
+      - thigh_angle
+      - thigh_angle_dot
+      - torque_dot
+  - - robot/right
+    - - hip_angle
+      - torque
+      - thigh_angle
+      - thigh_angle_dot
+      - torque_dot
+  - - robot/back_imu
+    - - quat_w
+      - quat_x
+      - quat_y
+      - quat_z
+  - - derived/mech_power
+    - - left
+      - right
+  - - derived/relative_kinematics
+    - - pitch_minus_hip_l
+      - pitch_minus_hip_r
+      - pitch_minus_thigh_l
+      - pitch_minus_thigh_r
+      - pitchrate_minus_thighdot_l
+      - pitchrate_minus_thighdot_r
+      - hip_minus_thigh_l
+      - hip_minus_thigh_r
+  - - derived/load_coupling
+    - - norm_torque_pitch_gap_l
+      - norm_torque_pitch_gap_r
+      - norm_torque_rate_gap_l
+      - norm_torque_rate_gap_r
+      - norm_torque_hip_thigh_gap_l
+      - norm_torque_hip_thigh_gap_r
+      - rel_abs_pitch_gap_l
+      - rel_abs_pitch_gap_r
+      - rel_abs_rate_gap_l
+      - rel_abs_rate_gap_r
+  - - derived/interface_workloop
+    - - left_work_balance_short
+      - right_work_balance_short
+      - left_net_work_ratio_short
+      - right_net_work_ratio_short
+      - left_abs_work_short
+      - right_abs_work_short
+  - - derived/interface_lag
+    - - corr0_l
+      - corr50_l
+      - best_lag_ms_l
+      - corr0_r
+      - corr50_r
+      - best_lag_ms_r
+  - - derived/trunk_consistency
+    - - gyro_forward_minus_thighdot_l
+      - gyro_forward_minus_thighdot_r
+      - gyro_forward_minus_pitchdot
+      - gyro_leak_ratio
+      - accel_leak_ratio
+  model: *id003
+  output_vars:
+  - - derived/human_thigh
+    - - left
+      - right
+  subjects:
+  - m2_S001
+  - m2_S002
+  - m2_S003
+  - m2_S004
+  - m2_S005
+  - m2_S006
+  - m2_S007
+  - m2_S008
+subjects:
+- m2_S001
+- m2_S002
+- m2_S003
+- m2_S004
+- m2_S005
+- m2_S006
+- m2_S007
+- m2_S008
+tcn_channels:
+- 16
+- 24
+- 24
+- 48

@@ -1,0 +1,336 @@
+{
+    "test_huber": 3.023299703629918,
+    "test_mae": 6.298154354095459,
+    "test_rmse": 8.182068824768066,
+    "n_params": 76,
+    "model_size_mb": 0.0003,
+    "host_latency_ms": 1.7965,
+    "host_max_freq_hz": 556.65,
+    "config": {
+        "shared": {
+            "data_sources": {
+                "milestone2": {
+                    "path": "/home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5",
+                    "prefix": "m2_",
+                    "exclude_subjects": []
+                }
+            },
+            "subjects": [
+                "m2_S001",
+                "m2_S002",
+                "m2_S003",
+                "m2_S004",
+                "m2_S005",
+                "m2_S006",
+                "m2_S007",
+                "m2_S008"
+            ],
+            "conditions": [
+                "level_075mps",
+                "level_100mps",
+                "level_125mps",
+                "accel_sine",
+                "decline_5deg",
+                "incline_10deg",
+                "stopandgo"
+            ],
+            "input_vars": [
+                [
+                    "derived/relative_kinematics",
+                    [
+                        "pitch_minus_hip_l",
+                        "pitch_minus_hip_r",
+                        "pitch_minus_thigh_l",
+                        "pitch_minus_thigh_r",
+                        "pitchrate_minus_thighdot_l",
+                        "pitchrate_minus_thighdot_r",
+                        "hip_minus_thigh_l",
+                        "hip_minus_thigh_r"
+                    ]
+                ],
+                [
+                    "derived/load_coupling",
+                    [
+                        "norm_torque_pitch_gap_l",
+                        "norm_torque_pitch_gap_r",
+                        "norm_torque_rate_gap_l",
+                        "norm_torque_rate_gap_r",
+                        "norm_torque_hip_thigh_gap_l",
+                        "norm_torque_hip_thigh_gap_r",
+                        "rel_abs_pitch_gap_l",
+                        "rel_abs_pitch_gap_r",
+                        "rel_abs_rate_gap_l",
+                        "rel_abs_rate_gap_r"
+                    ]
+                ],
+                [
+                    "derived/interface_workloop",
+                    [
+                        "left_work_balance_short",
+                        "right_work_balance_short",
+                        "left_net_work_ratio_short",
+                        "right_net_work_ratio_short",
+                        "left_abs_work_short",
+                        "right_abs_work_short"
+                    ]
+                ],
+                [
+                    "derived/interface_lag",
+                    [
+                        "corr0_l",
+                        "corr50_l",
+                        "best_lag_ms_l",
+                        "corr0_r",
+                        "corr50_r",
+                        "best_lag_ms_r"
+                    ]
+                ],
+                [
+                    "derived/trunk_consistency",
+                    [
+                        "gyro_forward_minus_thighdot_l",
+                        "gyro_forward_minus_thighdot_r",
+                        "gyro_forward_minus_pitchdot",
+                        "gyro_leak_ratio",
+                        "accel_leak_ratio"
+                    ]
+                ]
+            ],
+            "output_vars": [
+                [
+                    "derived/human_thigh",
+                    [
+                        "left",
+                        "right"
+                    ]
+                ]
+            ],
+            "data": {
+                "window_size": 100,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": true,
+                "calibrate_robot_thigh": true,
+                "residual_target": true
+            },
+            "model": {
+                "type": "GroupedAdditiveLinear",
+                "branch_feature_patterns": {
+                    "geometry": [
+                        "derived/relative_kinematics/",
+                        "derived/trunk_consistency/"
+                    ],
+                    "compliance": [
+                        "derived/load_coupling/"
+                    ],
+                    "hysteresis": [
+                        "derived/interface_workloop/",
+                        "derived/interface_lag/"
+                    ]
+                }
+            }
+        },
+        "seeds": [
+            42,
+            7
+        ],
+        "02_train": {
+            "data": {
+                "window_size": 100,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": true,
+                "calibrate_robot_thigh": true,
+                "normalize_type": "standard",
+                "residual_target": true
+            },
+            "model": {
+                "type": "GroupedAdditiveLinear",
+                "branch_feature_patterns": {
+                    "geometry": [
+                        "derived/relative_kinematics/",
+                        "derived/trunk_consistency/"
+                    ],
+                    "compliance": [
+                        "derived/load_coupling/"
+                    ],
+                    "hysteresis": [
+                        "derived/interface_workloop/",
+                        "derived/interface_lag/"
+                    ]
+                }
+            },
+            "loader": {
+                "batch_size": 128,
+                "val_batch_size": 256
+            },
+            "train": {
+                "task_type": "regression",
+                "epochs": 30,
+                "lr": 0.001,
+                "wd": 0.0,
+                "amp": true,
+                "device": "cuda",
+                "save_dir": "./runs_tcn",
+                "early_stop_patience": 10,
+                "early_stop_min_delta": 0.0001,
+                "early_stop_warmup": 10,
+                "k_fold": 4,
+                "cos_T0": 10,
+                "cos_Tmult": 1,
+                "eta_min": 1e-05,
+                "augment_noise_std": 0.0
+            }
+        },
+        "03_eval": {
+            "split": {
+                "mode": "loso",
+                "level": "subject",
+                "seed": 42,
+                "ratio": [
+                    0.7,
+                    0.15,
+                    0.15
+                ],
+                "save_to": null,
+                "loso_subjects": [
+                    "m2_S002",
+                    "m2_S005",
+                    "m2_S008"
+                ]
+            },
+            "data": {
+                "window_size": 100,
+                "stride": 5,
+                "stride_inf": 1,
+                "y_delay": 0,
+                "est_tick_ranges": [
+                    0
+                ],
+                "normalize": true,
+                "time_window_output": 1,
+                "use_complementary_filter_euler": true,
+                "calibrate_robot_thigh": true,
+                "residual_target": true
+            },
+            "train": {
+                "device": "cuda"
+            },
+            "scaler_path": "./runs_tcn/scaler.npz"
+        },
+        "exp_name": "exp_S3A1_lin_grouped_physics",
+        "cv_mode": "loso",
+        "subjects": [
+            "m2_S001",
+            "m2_S002",
+            "m2_S003",
+            "m2_S004",
+            "m2_S005",
+            "m2_S006",
+            "m2_S007",
+            "m2_S008"
+        ],
+        "conditions": [
+            "level_075mps",
+            "level_100mps",
+            "level_125mps",
+            "accel_sine",
+            "decline_5deg",
+            "incline_10deg",
+            "stopandgo"
+        ],
+        "input_vars": [
+            [
+                "derived/relative_kinematics",
+                [
+                    "pitch_minus_hip_l",
+                    "pitch_minus_hip_r",
+                    "pitch_minus_thigh_l",
+                    "pitch_minus_thigh_r",
+                    "pitchrate_minus_thighdot_l",
+                    "pitchrate_minus_thighdot_r",
+                    "hip_minus_thigh_l",
+                    "hip_minus_thigh_r"
+                ]
+            ],
+            [
+                "derived/load_coupling",
+                [
+                    "norm_torque_pitch_gap_l",
+                    "norm_torque_pitch_gap_r",
+                    "norm_torque_rate_gap_l",
+                    "norm_torque_rate_gap_r",
+                    "norm_torque_hip_thigh_gap_l",
+                    "norm_torque_hip_thigh_gap_r",
+                    "rel_abs_pitch_gap_l",
+                    "rel_abs_pitch_gap_r",
+                    "rel_abs_rate_gap_l",
+                    "rel_abs_rate_gap_r"
+                ]
+            ],
+            [
+                "derived/interface_workloop",
+                [
+                    "left_work_balance_short",
+                    "right_work_balance_short",
+                    "left_net_work_ratio_short",
+                    "right_net_work_ratio_short",
+                    "left_abs_work_short",
+                    "right_abs_work_short"
+                ]
+            ],
+            [
+                "derived/interface_lag",
+                [
+                    "corr0_l",
+                    "corr50_l",
+                    "best_lag_ms_l",
+                    "corr0_r",
+                    "corr50_r",
+                    "best_lag_ms_r"
+                ]
+            ],
+            [
+                "derived/trunk_consistency",
+                [
+                    "gyro_forward_minus_thighdot_l",
+                    "gyro_forward_minus_thighdot_r",
+                    "gyro_forward_minus_pitchdot",
+                    "gyro_leak_ratio",
+                    "accel_leak_ratio"
+                ]
+            ]
+        ],
+        "output_vars": [
+            [
+                "derived/human_thigh",
+                [
+                    "left",
+                    "right"
+                ]
+            ]
+        ],
+        "data_path": "/home/chanyoungko/IIT/SpeedEstimation/combined_data_S008.h5",
+        "est_tick_ranges": [
+            0
+        ],
+        "_config_relpath": "/home/chanyoungko/IIT/Misalign_compensation/configs/archive_season3/archive_1/exp_S3A1_lin_grouped_physics.yaml",
+        "tcn_channels": [
+            64,
+            64,
+            64
+        ]
+    }
+}
