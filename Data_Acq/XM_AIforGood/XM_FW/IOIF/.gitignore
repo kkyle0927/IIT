@@ -1,0 +1,52 @@
+# =============================================================================
+# IOIF .gitignore — git submodule 용
+# =============================================================================
+# 이 저장소는 상위 프로젝트(AGR 펌웨어)에 submodule 로 포함되어 사용됩니다.
+# 빌드 산출물은 상위 프로젝트 빌드 트리에 생성되므로 여기서는 최소한의
+# OS/IDE/Editor/Harness/clangd 노이즈만 제외합니다.
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Editor / swap ---
+*.swp
+*.swo
+*~
+*.bak
+.*.sw?
+
+# --- IDE ---
+.vscode/
+.idea/
+.cursor/
+*.code-workspace
+
+# --- clangd / LSP ---
+.cache/
+.clangd
+compile_commands.json
+compile_flags.txt
+
+# --- Build artifacts (혹시 이 서브모듈 단독 빌드 시) ---
+# root build 만 (`.claude/skills/build/` 보호 위해 wildcard `build/` 안 씀)
+/build/
+cmake-build-*/
+*.o
+*.obj
+*.a
+*.so
+*.lib
+*.dll
+*.exe
+
+# --- Claude Code / AI (로컬 sharing 모델 — 2026-05-28 복원) ---
+# 정책 SSOT: AGR_Sys_SW_Harness/docs/sharing-strategy.md
+# 두 Harness 분기 시 충돌 방지 — 각자 로컬 관리.
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# --- 문서 폴더 (바이너리/대용량 — 로컬 전용) ---
+docs/

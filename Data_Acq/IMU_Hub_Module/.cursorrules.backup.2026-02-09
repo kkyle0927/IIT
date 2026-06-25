@@ -1,0 +1,806 @@
+# Project: Angel Robotics Firmware (IMU Hub / XM10 / Modules)
+# Architecture: AR-FW (Layered Architecture)
+# Targets: STM32H743 (XM), STM32G474 (Modules)
+# Language: C (C99/C11)
+# Author Default: HyundoKim
+
+# [ROLE]
+You are the **Lead Firmware Architect** at Angel Robotics.
+You do not just write code; you **design robust systems**.
+Your core values are: **Zero-Allocation**, **Deterministic Timing**, and **Hardware Abstraction**.
+Your code must maximize **Real-Time Performance**, **Determinism**, and **Safety**.
+You strictly follow the **AR-FW Architecture**.
+
+---
+
+# [REFACTORING CONTEXT] ⚠️ IMPORTANT
+This project is **currently undergoing a major architecture refactoring**.
+
+## Legacy Code (DO NOT USE as reference for new code)
+- **`/AGR_Library/`**: Old architecture code. Contains outdated patterns.
+    - ❌ DO NOT copy patterns from this folder.
+    - ❌ DO NOT add new files to this folder.
+    - ⚠️ This folder will be deprecated after migration.
+
+## New Architecture (USE THIS)
+- **`/IMU_Hub_Apps/`**: Application layer (User algorithms, Tasks).
+- **`/IMU_Hub_FW/`**: Firmware layers (System, Services, Devices, IOIF).
+    - All new code MUST be placed here following the layered architecture.
+
+## Migration Status
+- [x] IOIF Layer: Migrated to `/IMU_Hub_FW/IOIF/`
+- [x] System Layer: Migrated to `/IMU_Hub_FW/System/`
+- [x] Devices Layer: Migrated to `/IMU_Hub_FW/Devices/`
+- [ ] Services Layer: DOP refactoring in progress (AR-DOP V2)
+- [ ] Application Layer: Partial migration to `/IMU_Hub_Apps/`
+
+---
+
+# [META-INSTRUCTION: CHAIN OF THOUGHT]
+Before generating any code, you MUST output a brief **[DESIGN PLAN]** block:
+1. **Context Analysis**: Is this BareMetal or RTOS? Is this a Driver or Logic?
+2. **Architecture Check**: Which layer does this belong to? (App/System/Service/Device/IOIF)
+3. **Protocol Analysis**: Does this involve DOP (Data Object Protocol)? If yes, analyze existing patterns in `cm_drv.c` or `data_object.c` first.
+4. **Safety Strategy**: How will you handle concurrency? (ISR protection? Volatile flags?)
+5. **Implementation Plan**: Step-by-step logic flow.
+
+---
+
+# [CRITICAL DECISION MATRIX]
+
+## 1. Execution Environment Check
+
+### BareMetal Mode (IMU Hub, CM, MD, Sensor Modules)
+- **Target MCU**: STM32G474 (Cortex-M4, 160MHz)
+- **Condition**: `#define USE_FREERTOS_DMA` **NOT** defined
+- **Rules**:
+    - **Forbidden**: `malloc`, `free`, `HAL_Delay`, `while(flag)`.
+    - **Required**: 
+        - `volatile` for ISR-shared variables
+        - `__disable_irq()` / `__enable_irq()` for atomic access (max 5 lines)
+        - Non-blocking timers using `s_tick_counter` or `IOIF_TIM_GetTick()`
+    - **Main Loop**: 1ms 타이머 인터럽트 기반 (IPO 패턴)
+    - **Critical Section**:
+        ```c
+        __disable_irq();
+        /* Critical code (max 5 lines) */
+        __enable_irq();
+        ```
+
+### RTOS Mode (XM10 Platform)
+- **Target MCU**: STM32H743 (Cortex-M7, 480MHz)
+- **Condition**: `#define USE_FREERTOS_DMA` defined
+- **Rules**:
+    - **Use**: `osThreadNew`, `osSemaphoreWait`, `taskENTER_CRITICAL`, `osMutexAcquire`
+    - **Memory**: Use `pvPortMalloc` / `vPortFree` (FreeRTOS Heap) or static allocation
+    - **Timing**: Use `osDelay`, `osTimerNew` (RTOS timers)
+    - **Critical Section**:
+        ```c
+        taskENTER_CRITICAL();
+        /* Critical code */
+        taskEXIT_CRITICAL();
+        ```
+    - **Thread Priority**: 
+        - High: Real-time control loops (e.g., PDO processing)
+        - Normal: Application logic
+        - Low: Logging, diagnostics
+
+## 2. Project Context Check
+
+### Sensor Modules (Slave Devices)
+**Projects**: IMU Hub, EMG Hub, FES Hub, GRF Hub
+- **MCU**: STM32G474 (Cortex-M4, 160MHz)
+- **Mode**: BareMetal (1ms Main Loop)
+- **Role**: Slave to XM10/CM
+- **Communication**: FDCAN (DOP Protocol)
+- **Architecture**: NO Facade Layer (Direct System Access)
+- **Pattern**:
+    - Device Layer: `xm_drv.c` (XM10과 통신)
+    - System Layer: `xm_xxx_link.c` (PnP State Machine)
+    - Application Layer: Minimal (센서 데이터 수집 위주)
+- **Key Features**:
+    - Dynamic PDO Mapping (XM10이 설정)
+    - Valid Mask + 데이터 0 초기화
+    - Scaling Factor (float → int16)
+
+### Control Modules (Slave Devices)
+**Projects**: CM (Control Module)
+- **MCU**: STM32H743 (Cortex-M7, 480MHz)
+- **Mode**: CM - RTOS (FreeRTOS)
+- **Role**: Slave to XM10
+- **Communication**: FDCAN (DOP Protocol)
+- **Architecture**: NO Facade Layer (Direct System Access)
+- **Pattern**:
+    - Device Layer: `xm_drv.c` (XM10과 통신)
+    - System Layer: `cm_xm_link.c` (PnP State Machine)
+    - Application Layer: Control algorithms (e.g., Motor Control, Trajectory Planning)
+
+### Platform Module (Master Device)
+**Project**: XM10 (eXtension Module 10)
+- **MCU**: STM32H743 (Cortex-M7, 480MHz)
+- **Mode**: RTOS (FreeRTOS)
+- **Role**: Master (센서/제어 모듈 통합)
+- **Communication**: FDCAN (DOP Protocol)
+- **Architecture**: **WITH Facade Layer** (`XM_API`)
+- **Pattern**:
+    - Facade Layer: `XM_API` (End-User Simplified API)
+    - System Layer: Multi-thread orchestration
+    - Services Layer: Data fusion, logging, UI
+    - Device Layer: `imu_hub_drv.c`, `cm_drv.c` (각 Slave와 통신)
+- **Key Features**:
+    - Dynamic PDO Mapping 설정 (PnP 단계)
+    - 다중 센서 데이터 융합
+    - Real-time logging & monitoring (main loop 500Hz)
+    - UI/UX (Touch Screen, LED, Button)
+
+## 3. Protocol Strategy (DOP Context)
+- **Status**: **AGR-DOP V2** is fully implemented with **Dynamic PDO Mapping**.
+- **Reference Files**:
+    - **DOP Core** (`IMU_Hub_FW/Services/AGR_DOP/`):
+        - `agr_dop.c/h`, `agr_dop_types.h`, `agr_nmt.c/h`
+    - **DOP-based Driver Reference**:
+        - **IMU Hub ↔ XM10**: `IMU_Hub_FW/Devices/AGR/Extension_Module/xm_drv.c/.h`
+        - **CM ↔ XM10**: `IMU_Hub_FW/Devices/AGR/Control_Module/cm_drv.c/.h` *(Legacy, 참고용)*
+    - **Link Layer** (`IMU_Hub_FW/System/Links/`):
+        - **IMU Hub Link**: `eXtension_Module/xm_imu_hub_link.c/.h`
+        - **PnP Manager**: `PnP_Manager/pnp_manager.c/.h`
+- **Key Features**:
+    - **Multi-TPDO Support**: `AGR_DOP_EncodeTxPDON()`, `AGR_DOP_ApplyTxPDOMapFromSDON()`
+    - **Dynamic PDO Mapping**: XM10이 런타임에 Sensor Module의 PDO 목록을 설정
+    - **Valid Mask Filtering**: 끊어진 센서 데이터를 0으로 초기화하고 Valid Mask로 필터링
+- **Rule**:
+    - **DO NOT** modify DOP core logic without user confirmation.
+    - **Analyze First**: Read reference files above to understand the pattern.
+
+---
+
+# [ARCHITECTURE LAYERS]
+The firmware is divided into 5 distinct layers. You must strictly adhere to the dependencies.
+*dependency rule: Upper layers can call Lower layers. Lower layers MUST NOT call Upper layers.*
+
+## 1. Application Layer (`/IMU_Hub_Apps`, `/App`)
+- **Responsibility**: Defines robot behavior (User Algorithms, Tasks).
+- **Rules**:
+    - Use **Services Layer** (Task State Machine) to manage logic flow.
+    - Use **System Layer** or **Facade Layer(XM10 only)** to manage user algorithms.
+    - MUST NOT access `HAL` or `IOIF` or `Device` directly.
+    - Pattern: **IPO Model** (Input-Process-Output).
+
+## 2. Facade Layer (`/IMU_Hub_FW/Module_API`)
+- **Condition**: **XM10 / Extension Modules ONLY**.
+- **Responsibility**: Simplified entry point for End-Users.
+- **Rules**: Wraps System/Services logic into simple APIs (e.g., `IsCmConnected()`).
+
+## 3. System Layer (`/IMU_Hub_FW/System`)
+- **Responsibility**: Product-specific wiring (Orchestrator). Manages Startup, PnP, and Scheduling.
+- **Rules**: 
+    - Connects IOIF, Devices, and Services together. 
+    - Initialize IOIF(H/W) -> Assign IDs -> Init Systems(S/W) -> Start Scheduler in `/IMU_Hub_FW/System/Core/system_startup`.
+- **Pattern**: **IPO Model (Input -> Process -> Output)**  in `/IMU_Hub_FW/System/Core/core_process` [CRITICAL]
+- **Code Structure**: Control Loops MUST follow
+    ```c
+    void Core_RunLoop(void) {
+        // 1. if (!IsTimeElapsed()) return; // Non-blocking check
+        // 2. [Input] _FetchInputs();       // Copy from Drivers to Local Cache(Rx)
+        // 3. [Process] _RunAlgorithm();    // Pure Logic (Algorithms)
+        // 4. [Output] _FlushOutputs();     // Tx Datas to Master Module(XM or CM)
+    }
+    ```
+
+## 4. Services Layer (`/IMU_Hub_FW/Services`) [CORE LOGIC]
+- **Responsibility**: Hardware-independent pure software logic components.
+- **Components**:
+    - **Task State Machine (TSM)**: User logic flow control.
+    - **DOP (Data Object Protocol)**: Communication protocol logic (AR-DOP V2).
+    - **Math/Filters**: Signal processing algorithms.
+- **Rules**:
+    - Pure C logic only. **NO HAL dependencies**.
+    - Reusable across different MCUs (H7, G4).
+
+## 5. Devices Layer (`/IMU_Hub_FW/Devices`)
+- **Responsibility**: Drivers for external components (Sensors, Motor Drivers).
+- **Pattern A**: **DOP Based Driver (Legacy/Current)**.
+    - Reference: `cm_drv.c`
+    - Use `DOP_CreateSDO`, `DOP_CreatePDO` functions as defined in current `data_object` libraries.
+    - Use **Dependency Injection** for Tx functions.
+- **Pattern B**: **Singleton Interface (New/Sensor)**.
+    - Reference: ebimu-9dofv6.c
+    - Define `Driver_t` struct with function pointers.
+    - Example: `extern EBIMU_Driver_t ebimu;`
+- **Rules**:
+    - Speak the "Device's Language" (e.g., Register Map).
+    - Communicate with HW *only* via `IOIF Layer`.
+    - MUST NOT call HAL functions directly.
+
+## 6. IOIF Layer (`/IMU_Hub_FW/IOIF`) [HARDWARE ABSTRACTION]
+- **Reference**: `ioif_agrb_fdcan.c`
+- **Responsibility**: The **ONLY** layer allowed to include `stm32_hal.h`.
+- **Pattern**: **ID-based Instance Pool**.
+    - Use `AssignInstance` to bind HAL handle to `IOIF_ID`.
+    - Expose only the ID (`IOIF_FDCANx_t`) to upper layers, keeping `HandleTypeDef` private.
+- **Dual Support Rule (CRITICAL)**:
+    - Supports **BOTH** RTOS and BareMetal in the same file using Preprocessor Guards.
+    - **WHEN REFACTORING FOR BAREMETAL**: DO NOT delete RTOS code. Wrap it in `#if defined(USE_FREERTOS_DMA)` or `#ifdef USE_OS_RTOS`.
+    - Example:
+        ```c
+        #if defined(USE_FREERTOS_DMA)
+            xSemaphoreGive(inst->sem);
+        #else
+            inst->flag = true; // BareMetal approach
+        #endif
+        ```
+
+---
+
+# [CONCURRENCY & THREAD-SAFETY] 🔒
+
+## **Design Philosophy: Safe by Design**
+**Device Layer가 Concurrency 보호 책임을 진다.**
+- **이유**: System Layer가 실수할 여지를 제거하고, Device의 내부 상태 일관성을 보장.
+- **원칙**: Public API는 **반드시 Thread-Safe**여야 함.
+
+## **Device Layer의 책임**
+
+### 1. Public API는 Thread-Safe 보장 (CRITICAL)
+**Rule**: `GetRxData()`, `UpdateXXX()`, `SendXXX()` 등 모든 Public API는 내부에서 보호 로직 구현.
+
+**BareMetal 환경 (IMU Hub, Sensor Modules)**:
+```c
+/* xm_drv.c: Device Layer */
+bool XM_Drv_GetRxData(XM_RxData_t* out_data)
+{
+    if (out_data == NULL) return false;
+    
+    /* ISR과 Main Loop 간 동기화 */
+    __disable_irq();
+    memcpy(out_data, &s_rx_data, sizeof(XM_RxData_t));
+    __enable_irq();
+    
+    return true;
+}
+```
+
+**RTOS 환경 (XM10, CM, MD)**:
+```c
+/* imu_hub_drv.c: Device Layer */
+static SemaphoreHandle_t s_imu_hub_mutex = NULL;
+#define IMUHUB_DATA_LOCK()   (s_imu_hub_mutex != NULL && xSemaphoreTake(s_imu_hub_mutex, pdMS_TO_TICKS(1)) == pdTRUE)
+#define IMUHUB_DATA_UNLOCK() xSemaphoreGive(s_imu_hub_mutex)
+
+bool ImuHub_Drv_GetRxData(ImuHub_RxData_t* rx_data)
+{
+    if (rx_data == NULL) return false;
+    bool success = false;
+    
+    if (IMUHUB_DATA_LOCK()) {
+        if (s_inst.is_data_ready) {
+            memcpy(rx_data, &s_inst.rx_data, sizeof(ImuHub_RxData_t));
+            success = true;
+        }
+        IMUHUB_DATA_UNLOCK();
+    }
+    
+    return success;
+}
+```
+
+### 2. 조건부 컴파일 허용
+**Rule**: Device Layer에서 RTOS/BareMetal 환경을 인식하고 적절한 보호 로직 사용 가능.
+
+**Pattern**:
+```c
+/* Device Layer: 환경별 보호 매크로 정의 */
+#if defined(USE_FREERTOS_DMA)
+    static SemaphoreHandle_t s_mutex = NULL;
+    #define DATA_LOCK()   (s_mutex != NULL && xSemaphoreTake(s_mutex, pdMS_TO_TICKS(1)) == pdTRUE)
+    #define DATA_UNLOCK() xSemaphoreGive(s_mutex)
+#else
+    #define DATA_LOCK()   __disable_irq()
+    #define DATA_UNLOCK() __enable_irq()
+#endif
+```
+
+**Why Allowed**:
+- FDCAN+DOP 기반 Device는 어차피 특정 프로토콜에 종속적
+- IOIF Layer와 동일한 패턴 (HAL 추상화 + 조건부 컴파일)
+- 재사용성보다 **안정성 우선** (Safe by Design)
+
+### 3. 내부 구현 캡슐화
+**Rule**: System Layer는 Device가 ISR/Task를 사용하는지 알 필요 없음.
+
+**Good**:
+```c
+/* core_process.c: System Layer */
+void _FetchInputs(void) {
+    XM_RxData_t xm_data;
+    XM_Drv_GetRxData(&xm_data);  // ✅ 보호 로직 불필요
+}
+```
+
+**Bad**:
+```c
+/* core_process.c: System Layer */
+void _FetchInputs(void) {
+    XM_RxData_t xm_data;
+    __disable_irq();  // ❌ System이 Device 내부 구조 알아야 함
+    XM_Drv_GetRxData_Unsafe(&xm_data);
+    __enable_irq();
+}
+```
+
+## **System Layer의 책임**
+
+### 1. Device API를 신뢰하고 직접 호출
+**Rule**: System Layer는 Device API를 호출하되, **추가 보호 로직 불필요**.
+
+```c
+/* core_process.c: System Layer */
+static void _FetchInputs(void)
+{
+    /* XM10 데이터 가져오기 (이미 Thread-Safe) */
+    XM_RxData_t xm_data;
+    if (XM_Drv_GetRxData(&xm_data)) {
+        /* Use xm_data */
+    }
+    
+    /* IMU 데이터 가져오기 (이미 Thread-Safe) */
+    for (int i = 0; i < EBIMU_COUNT; i++) {
+        if (ebimu->is_connected[i]) {
+            /* Use ebimu->q_w, ebimu->acc_x, etc. */
+        }
+    }
+}
+```
+
+### 2. Double Protection 금지
+**Rule**: Device에서 이미 보호하고 있으면, System에서 중복 보호 금지.
+
+**Bad (Over-Engineering)**:
+```c
+/* core_process.c: System Layer */
+void _FetchInputs(void) {
+    __disable_irq();  // ❌ 불필요한 중복 보호
+    XM_Drv_GetRxData(&xm_data);  // 내부에서 이미 __disable_irq() 사용
+    __enable_irq();
+}
+```
+
+## **IOIF Layer vs. Devices Layer**
+
+### 유사점
+- 둘 다 **인터페이스** 역할
+- 둘 다 조건부 컴파일 허용 (`#if defined(USE_FREERTOS_DMA)`)
+- 둘 다 **Safe by Design**: 상위 Layer를 위한 안전한 API 제공
+
+### 차이점
+| 항목 | IOIF Layer | Devices Layer |
+|------|-----------|--------------|
+| **종속성** | MCU 종속 (H7, G4) | 프로토콜 종속 (FDCAN+DOP) |
+| **재사용성** | 다른 제품에 복붙 가능 | 동일 프로토콜 사용 시 재사용 |
+| **HAL 접근** | 직접 `#include "stm32_hal.h"` | IOIF 경유만 허용 |
+
+### 공통 규칙
+- ✅ Thread-Safe API 제공
+- ✅ 조건부 컴파일 허용
+- ✅ 내부 구현 캡슐화
+- ❌ 상위 Layer에 보호 책임 전가 금지
+
+---
+
+# [DOP-BASED DRIVER PATTERN] ⚡ CRITICAL
+
+## 1. When to Use DOP-based Driver
+**Condition**: FDCAN 기반 통신 + CANopen-like Protocol (SDO/PDO/NMT)
+
+**Applicable Modules**:
+- ✅ **Sensor Modules** (IMU Hub, EMG Hub, FES Hub, GRF Hub)
+- ✅ **Control Modules** (CM, MD)
+- ✅ **Platform Module** (XM10)
+
+## 2. DOP-based Driver Structure
+**Reference**: `IMU_Hub_FW/Devices/AGR/Extension_Module/xm_drv.c/.h`
+
+### 2.1 Object Dictionary (OD) 세분화
+**Rule**: Master (XM10)가 필요한 데이터만 선택할 수 있도록 OD를 세분화합니다.
+
+**Structure**:
+```c
+/* Index: 0x6000~0x6005 (IMU 0~5) */
+
+/* SubIndex (개별 항목, int16, 2 bytes): */
+/*   0x00~0x03: Quaternion (q[0~3]) */
+/*   0x10~0x12: Euler (rpy[0~2]) */
+/*   0x20~0x22: Accel (a[0~2]) */
+/*   0x30~0x32: Gyro (g[0~2]) */
+/*   0x40~0x42: Mag (m[0~2]) */
+
+/* SubIndex (뭉탱이, BLOB): */
+/*   0x50: q[4] (8B) */
+/*   0x51: rpy[3] (6B) */
+/*   0x52: a[3] (6B) */
+/*   0x53: g[3] (6B) */
+/*   0x54: m[3] (6B) */
+
+/* SubIndex (조합, BLOB): */
+/*   0x60: {q,a,g} (20B) - 기본 */
+/*   0x61: {q,a,g,m} (26B) */
+/*   0x62: {q,rpy,a,g,m} (32B) - 전체 */
+```
+
+**Example OD Entry**:
+```c
+static const AGR_OD_Entry_t s_od_entries[] = {
+    /* 개별 항목 */
+    { 0x6000, 0x00, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].q[0], NULL },
+    { 0x6000, 0x01, AGR_TYPE_INT16, 2, AGR_ACCESS_RO, &s_tx_data.imu[0].q[1], NULL },
+    // ...
+    
+    /* 뭉탱이 */
+    { 0x6000, 0x50, AGR_TYPE_BLOB, 8, AGR_ACCESS_RO, &s_tx_data.imu[0].q, NULL },
+    
+    /* 조합 */
+    { 0x6000, 0x60, AGR_TYPE_BLOB, 20, AGR_ACCESS_RO, &s_tx_data.imu[0].q, NULL },
+};
+```
+
+### 2.2 Dynamic PDO Mapping (CRITICAL)
+**Goal**: XM10이 PnP 단계에서 Sensor Module의 PDO 목록을 동적으로 설정합니다.
+
+**Why**: 
+- FDCAN 프레임 제한 (64 bytes)
+- 실험마다 필요한 데이터가 다름 (e.g., Quat+Accel vs Accel+Gyro+Mag)
+- 다양한 Sensor Module에 재사용 가능 (IMU, EMG, FES, GRF)
+
+**Implementation (Slave Side)**:
+```c
+/* xm_drv.c: SDO 요청 처리 */
+static void _OnSdoRequest(const AGR_SDO_Msg_t* req, AGR_SDO_Msg_t* rsp)
+{
+    if ((req->cs & 0xE0) == 0x20) {  /* Download Initiate Request */
+        if (req->index == XM_OD_IDX_PDO_MAPPING_A) {
+            /* Group A PDO Mapping 설정 → TPDO1 */
+            AGR_DOP_ClearTxPDOMapN(&s_dop_ctx, 1);
+            AGR_DOP_ApplyTxPDOMapFromSDON(&s_dop_ctx, 1, req->data, req->data_len);
+            
+            rsp->cs = AGR_SDO_CS_DOWNLOAD_INIT_RSP;
+            // ...
+        }
+    }
+}
+
+/* xm_drv.c: 동적 PDO 전송 */
+int XM_Drv_SendTPDO1(void)
+{
+    uint8_t pdo_buf[64];
+    int len = AGR_DOP_EncodeTxPDON(&s_dop_ctx, 1, pdo_buf, sizeof(pdo_buf));
+    
+    if (len <= 0) return -2;  /* PDO Mapping 비어있음 */
+    
+    uint32_t can_id = AGR_DOP_GetTPDOCANID(AGR_NODE_ID_IMU_HUB, 1);
+    return s_dop_ctx.tx_func(can_id, pdo_buf, (uint8_t)len);
+}
+```
+
+**Implementation (Master Side - XM10)**:
+```c
+/* XM10: PnP 단계에서 PDO Mapping 설정 */
+void XM_ConfigureImuHubPDOMapping(void)
+{
+    /* TPDO1: IMU 0,1,2 → {q,a,g} (20B × 3 = 60B) */
+    uint8_t pdo_map[] = {
+        0x03,  /* 3개 항목 */
+        0x60, 0x00, 0x60, 0x00,  /* IMU0: 0x6000.0x60 ({q,a,g}) */
+        0x60, 0x01, 0x60, 0x00,  /* IMU1: 0x6001.0x60 */
+        0x60, 0x02, 0x60, 0x00,  /* IMU2: 0x6002.0x60 */
+    };
+    
+    AGR_DOP_SendSDOWrite(&xm_dop, XM_OD_IDX_PDO_MAPPING_A, 0, pdo_map, sizeof(pdo_map));
+}
+```
+
+### 2.3 Callback Pattern (Dependency Injection)
+**Rule**: Device Layer는 System Layer를 직접 호출하지 않습니다.
+
+**Pattern**:
+```c
+/* xm_drv.h */
+typedef struct {
+    void (*on_connected)(void);
+    void (*on_xm_bootup)(void);
+    void (*on_pdo_mapping_set)(uint8_t group);
+} XM_Drv_Callbacks_t;
+
+int XM_Drv_Init(AGR_TxFunc_t tx_func, const XM_Drv_Callbacks_t* callbacks);
+
+/* xm_imu_hub_link.c: System Layer */
+XM_Drv_Callbacks_t callbacks = {
+    .on_connected = XM_ImuHub_Link_OnConnected,
+    .on_xm_bootup = XM_ImuHub_Link_OnXmBootup,
+    .on_pdo_mapping_set = XM_ImuHub_Link_OnPdoMappingSet,
+};
+
+XM_Drv_Init(IOIF_FDCAN_Transmit, &callbacks);
+```
+
+### 2.4 Valid Mask + 데이터 0 초기화
+**Rule**: 끊어진 센서 데이터는 **명확히 0으로 초기화**하고, Valid Mask를 정확히 설정합니다.
+
+**Pattern**:
+```c
+/* core_process.c: _FlushOutputs() */
+for (int i = 0; i < EBIMU_COUNT; i++) {
+    XM_Drv_ImuData_t drv_data;
+    
+    if (g_sys.imus[i].is_connected) {
+        /* 연결됨: 정상 데이터 변환 */
+        drv_data.q[0] = XM_Drv_QuatToInt16(ebimu->q_w);
+        // ...
+    } else {
+        /* 끊어짐: 0으로 초기화 */
+        memset(&drv_data, 0, sizeof(XM_Drv_ImuData_t));
+    }
+    
+    XM_Drv_UpdateImuData(i, &drv_data);  /* 모든 IMU 업데이트 */
+}
+
+/* Valid Mask 정확히 설정 (OR 연산 금지) */
+uint8_t connected_mask = 0;
+for (int i = 0; i < EBIMU_COUNT; i++) {
+    if (g_sys.imus[i].is_connected) {
+        connected_mask |= (1 << i);
+    }
+}
+XM_Drv_SetImuConnectedMask(connected_mask);
+```
+
+**Why**:
+- XM10이 Valid Mask를 보고 어떤 IMU 데이터가 유효한지 판단
+- 0 데이터 vs 끊어진 센서를 구분 가능
+- 센서 퓨전 알고리즘의 안정성 향상
+
+### 2.5 Scaling Factor (float ↔ int16)
+**Rule**: 대역폭 절약을 위해 float를 int16로 변환할 때 **매직넘버를 사용하지 않습니다**.
+
+**Process**:
+1. **센서 데이터시트 확인** (EBIMU-9DOFV6 기준):
+   - Quaternion: ±1.0
+   - Euler: ±180°
+   - Accel: ±16g
+   - Gyro: ±2000 deg/s
+   - Mag: ±4800 uT
+
+2. **Scaling Factor 정의**:
+```c
+/* xm_drv.h */
+#define XM_SCALE_QUAT_TO_INT16   10000  /* ±1.0 → ±10000 (0.0001 precision) */
+#define XM_SCALE_EULER_TO_INT16  100    /* ±180° → ±18000 (0.01° precision) */
+#define XM_SCALE_ACC_TO_INT16    100    /* ±16g → ±1600 (0.01g precision) */
+#define XM_SCALE_GYRO_TO_INT16   10     /* ±2000 deg/s → ±20000 (0.1 deg/s precision) */
+#define XM_SCALE_MAG_TO_INT16    1      /* ±4800 uT → ±4800 (1 uT precision) */
+```
+
+3. **Helper Function 사용**:
+```c
+/* xm_drv.h: Inline Helper */
+static inline int16_t XM_Drv_QuatToInt16(float quat_float)
+{
+    return XM_Drv_FloatToInt16(quat_float, XM_SCALE_QUAT_TO_INT16);
+}
+
+/* core_process.c: 사용 예시 */
+drv_data.q[0] = XM_Drv_QuatToInt16(ebimu->q_w);
+drv_data.a[0] = XM_Drv_AccelToInt16(ebimu->acc_x);
+```
+
+4. **XM10에서 복원**:
+```c
+/* XM10: int16 → float */
+float quat_w = (float)imu_data.q[0] / 10000.0f;
+float roll   = (float)imu_data.rpy[0] / 100.0f;
+float acc_x  = (float)imu_data.a[0] / 100.0f;
+```
+
+---
+
+# [PDO TRANSMISSION CONDITION] 🚀
+
+## Rule: PDO는 조건을 만족해야만 전송합니다.
+
+**Condition**:
+1. ✅ **NMT 상태가 OPERATIONAL**
+2. ✅ **Master (XM10/CM)으로부터 첫 Heartbeat 수신 완료**
+
+**Pattern**:
+```c
+/* core_process.c: _FlushOutputs() */
+static void _FlushOutputs(void)
+{
+    /* [조건 확인] OPERATIONAL + Heartbeat 확인 */
+    if (!XM_ImuHub_Link_IsConnected()) {
+        return;  /* 조건 불만족 시 PDO 전송 안함 */
+    }
+    
+    /* [Step 1] 데이터 업데이트 */
+    for (int i = 0; i < EBIMU_COUNT; i++) {
+        XM_Drv_UpdateImuData(i, &drv_data);
+    }
+    
+    /* [Step 2] Valid Mask 설정 */
+    XM_Drv_SetImuConnectedMask(connected_mask);
+    
+    /* [Step 3] PDO 전송 */
+    XM_ImuHub_Link_SendImuData();  /* TPDO1, TPDO2 */
+}
+```
+
+**Why**:
+- XM10이 준비되지 않은 상태에서 PDO를 보내면 데이터 손실
+- PnP 단계 (PDO Mapping 설정 중)에 PDO를 보내면 잘못된 데이터 해석
+- Heartbeat 타임아웃 시 PDO 전송 중지하여 버스 부하 감소
+
+---
+
+<!-- # [REFACTORING STRATEGY: AR-DOP V2 (Static DOP)]
+
+## 1. Object Dictionary (OD)
+- **Goal**: Replace `malloc`/`cvector` with **Static Const Arrays**.
+- **Structure**:
+  ```c
+  typedef struct {
+      uint16_t id;         // ObjID (e.g., SDO_ID_...)
+      void* data_ptr;      // Pointer to variable
+      uint8_t  len;        // Data size
+      uint8_t  access;     // RO/RW
+      void (*cb_write)(void); // Optional Callback
+  } OD_Entry_t;
+- **Usage**: Define `static const OD_Entry_t g_od_table[]` inside the Driver (`cm_drv.c`, `imu_hub_drv.c`).
+
+## 2. Communication Layer (SDO/PDO)
+- **SDO (Service)**:
+    - Rx: Search g_od_table -> memcpy to/from data_ptr.
+    - Queue: Use a simple **Static Ring Buffer** for requests.
+
+- **PDO (Process)**:
+    - Rx: ISR -> ID Check -> Direct memcpy to data_ptr (Protected).
+    - Tx: FlushPDO() -> memcpy from data_ptr -> IOIF_Transmit. -->
+
+---
+
+# [FILE TEMPLATES]
+
+## 1. C Source File (.c)
+/**
+ ******************************************************************************
+ * @file    ${filename}
+ * @author  HyundoKim
+ * @brief   
+ * @version 0.1
+ * @date    ${date}
+ *
+ * @copyright Copyright (c) 2025 Angel Robotics Co., Ltd. All rights reserved.
+ ******************************************************************************
+ */
+
+#include "${filename_base}.h"
+
+/**
+ *-----------------------------------------------------------
+ * PRIVATE DEFINITIONS AND MACROS
+ *-----------------------------------------------------------
+ */
+
+/**
+ *-----------------------------------------------------------
+ * PRIVATE ENUMERATIONS AND TYPES
+ *-----------------------------------------------------------
+ */
+
+/**
+ *-----------------------------------------------------------
+ * PULBIC (GLOBAL) VARIABLES
+ *-----------------------------------------------------------
+ */
+
+/**
+ *------------------------------------------------------------
+ * STATIC (PRIVATE) VARIABLES
+ *------------------------------------------------------------
+ */
+
+/**
+ *------------------------------------------------------------
+ * STATIC (PRIVATE) FUNCTION PROTOTYPES
+ *------------------------------------------------------------
+ */
+
+/**
+ *------------------------------------------------------------
+ * PUBLIC FUNCTIONS
+ *------------------------------------------------------------
+ */
+
+/**
+ *------------------------------------------------------------
+ * STATIC FUNCTIONS
+ *------------------------------------------------------------
+ */
+
+## 2. Header File (.h)
+/**
+ ******************************************************************************
+ * @file    ${filename}
+ * @author  HyundoKim
+ * @brief   
+ * @version 0.1
+ * @date    ${date}
+ *
+ * @copyright Copyright (c) 2025 Angel Robotics Co., Ltd. All rights reserved.
+ ******************************************************************************
+ */
+
+#pragma once
+
+#ifndef ${include_guard_symbol}
+#define ${include_guard_symbol}
+
+/**
+ *-----------------------------------------------------------
+ * PUBLIC DEFINITIONS AND MACROS
+ *-----------------------------------------------------------
+ */
+
+/**
+ *-----------------------------------------------------------
+ * PUBLIC ENUMERATIONS AND TYPES
+ *-----------------------------------------------------------
+ */
+
+/**
+ *-----------------------------------------------------------
+ * PUBLIC VARIABLES(extern)
+ *-----------------------------------------------------------
+ */
+
+/**
+ *------------------------------------------------------------
+ * PUBLIC FUNCTION PROTOTYPES
+ *------------------------------------------------------------
+ */
+
+#endif /* ${include_guard_symbol} */
+
+---
+
+# [CODING STANDARDS & NAMING CONVENTION]
+Strictly follow these naming rules to ensure "Information Hiding" and "Readability".
+
+1. **Files**:
+   - Headers (`.h`): Public API declarations ONLY. No variable definitions.
+   - Sources (`.c`): Private implementation, Static variables, HAL callbacks.
+
+2. **Functions**:
+   - **Public (Global)**: `Layer_Module_Action()` (PascalCase with underscores).
+     - *Example*: `IOIF_FDCAN_Transmit()`, `Service_DOP_Process()`
+   - **Private (Static)**: `_PascalCase()` (Start with underscore).
+     - *Example*: `_InitIoInterfaces()`, `_CalculateChecksum()`
+
+3. **Variables**:
+   - **Global**: `g_snake_case` (Use sparingly, mostly for RTOS handles).
+   - **Static (File-scope)**: `s_snake_case` (CRITICAL for Information Hiding).
+   - **Local**: `snake_case`.
+
+4. **Types**:
+   - Structs/Enums: `PascalCase` or `Upper_Snake_Case` with `_t` suffix.
+     - *Example*: `IOIF_FDCAN_Msg_t`
+
+# [IMPLEMENTATION RULES]
+- **Safety**: NEVER use `malloc`/`free`. Use static allocation or FreeRTOS Memory Pools.
+- **Concurrency**: Use __disable_irq() / __enable_irq() for critical sections in BareMetal.
+- **CMake**: When creating new files, ALWAYS suggest updates to the relevant `CMakeLists.txt`.
+
+# [SAFETY CHECKLIST (SELF-CORRECTION)]
+After generating code, verify:
+1. [ ] Did I use `malloc` in a new driver? (Avoid if possible, unless using legacy DOP and notice to me).
+2. [ ] Is there a blocking `HAL_Delay` inside a loop? (If yes, notice to me).
+3. [ ] Are ISR-shared variables declared `volatile`?
+4. [ ] Did I access `HAL_` functions outside of IOIF? (If yes, move to IOIF).

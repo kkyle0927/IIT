@@ -1,0 +1,43 @@
+# Enforce LF line endings for all text files (협업자 core.autocrlf 무관)
+* text=auto eol=lf
+
+# Source code (explicit LF)
+*.c       text eol=lf
+*.h       text eol=lf
+*.cpp     text eol=lf
+*.hpp     text eol=lf
+*.s       text eol=lf
+*.S       text eol=lf
+*.ld      text eol=lf
+
+# Build / config
+*.cmake   text eol=lf
+CMakeLists.txt  text eol=lf
+Makefile  text eol=lf
+*.mk      text eol=lf
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.md      text eol=lf
+
+# Binaries (no conversion)
+*.bin     binary
+*.hex     binary
+*.elf     binary
+*.map     binary
+*.a       binary
+*.o       binary
+*.so      binary
+*.dll     binary
+*.exe     binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.pdf     binary
+*.xlsx    binary
+*.docx    binary
+*.pptx    binary
+*.zip     binary
+*.gz      binary
+*.7z      binary

@@ -1,0 +1,22 @@
+# Build Artifacts (가장 큼, AI에게 무의미)
+build/
+*.elf
+*.bin
+*.hex
+*.map
+*.o
+*.d
+*.a
+*.lst
+
+# Third-party Libraries (필요할 때만 명시적으로 참조)
+#Drivers/STM32G4xx_HAL_Driver/
+#Drivers/STM32H7xx_HAL_Driver/
+Middlewares/Third_Party/FreeRTOS/
+
+# Documentation & Assets
+*.pdf
+*.pptx
+*.png
+*.jpg
+.git/

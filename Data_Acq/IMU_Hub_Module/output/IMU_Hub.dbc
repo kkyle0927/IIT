@@ -1,0 +1,134 @@
+VERSION ""
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_SGTYPE_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: IMU_Hub XM10 CM
+
+BO_ 392 TPDO1_ImuData_GroupA: 64 IMU_Hub
+ SG_ Timestamp_ms : 0|24@1+ (1,0) [0|16777215] "ms" XM10
+ SG_ ValidMask : 24|8@1+ (1,0) [0|255] "" XM10
+ SG_ IMU0_Quat_W : 32|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU0_Quat_X : 48|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU0_Quat_Y : 64|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU0_Quat_Z : 80|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU0_AccX : 96|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU0_AccY : 112|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU0_AccZ : 128|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU0_GyroX : 144|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU0_GyroY : 160|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU0_GyroZ : 176|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU1_Quat_W : 192|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU1_Quat_X : 208|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU1_Quat_Y : 224|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU1_Quat_Z : 240|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU1_AccX : 256|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU1_AccY : 272|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU1_AccZ : 288|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU1_GyroX : 304|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU1_GyroY : 320|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU1_GyroZ : 336|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU2_Quat_W : 352|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU2_Quat_X : 368|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU2_Quat_Y : 384|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU2_Quat_Z : 400|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU2_AccX : 416|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU2_AccY : 432|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU2_AccZ : 448|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU2_GyroX : 464|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU2_GyroY : 480|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU2_GyroZ : 496|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+
+BO_ 648 TPDO2_ImuData_GroupB: 64 IMU_Hub
+ SG_ Timestamp_ms : 0|24@1+ (1,0) [0|16777215] "ms" XM10
+ SG_ ValidMask : 24|8@1+ (1,0) [0|255] "" XM10
+ SG_ IMU3_Quat_W : 32|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU3_Quat_X : 48|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU3_Quat_Y : 64|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU3_Quat_Z : 80|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU3_AccX : 96|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU3_AccY : 112|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU3_AccZ : 128|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU3_GyroX : 144|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU3_GyroY : 160|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU3_GyroZ : 176|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU4_Quat_W : 192|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU4_Quat_X : 208|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU4_Quat_Y : 224|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU4_Quat_Z : 240|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU4_AccX : 256|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU4_AccY : 272|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU4_AccZ : 288|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU4_GyroX : 304|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU4_GyroY : 320|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU4_GyroZ : 336|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU5_Quat_W : 352|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU5_Quat_X : 368|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU5_Quat_Y : 384|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU5_Quat_Z : 400|16@1- (0.001,0) [-32.768|32.767] "" XM10
+ SG_ IMU5_AccX : 416|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU5_AccY : 432|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU5_AccZ : 448|16@1- (0.001,0) [-32.768|32.767] "g" XM10
+ SG_ IMU5_GyroX : 464|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU5_GyroY : 480|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+ SG_ IMU5_GyroZ : 496|16@1- (0.01,0) [-327.68|327.67] "deg/s" XM10
+
+BO_ 1544 SDO_RX: 8 XM10
+ SG_ SDO_CS : 0|8@1+ (1,0) [0|255] "" IMU_Hub
+ SG_ SDO_Index : 8|16@1+ (1,0) [0|65535] "" IMU_Hub
+ SG_ SDO_Subindex : 24|8@1+ (1,0) [0|255] "" IMU_Hub
+ SG_ SDO_Data : 32|32@1+ (1,0) [0|4294967295] "" IMU_Hub
+
+BO_ 1416 SDO_TX: 8 IMU_Hub
+ SG_ SDO_CS : 0|8@1+ (1,0) [0|255] "" XM10
+ SG_ SDO_Index : 8|16@1+ (1,0) [0|65535] "" XM10
+ SG_ SDO_Subindex : 24|8@1+ (1,0) [0|255] "" XM10
+ SG_ SDO_Data : 32|32@1+ (1,0) [0|4294967295] "" XM10
+
+BO_ 1800 Heartbeat: 1 IMU_Hub
+ SG_ NMT_State : 0|8@1+ (1,0) [0|127] "" XM10
+
+CM_ SG_ 1800 NMT_State "0=Boot-up, 4=Stopped, 5=Operational, 127=Pre-Operational";
+
+BA_DEF_ "BusType" STRING;
+BA_ "BusType" "CAN FD";
+
+BA_DEF_ BO_ "GenMsgCycleTime" INT 0 100000;
+BA_DEF_ BO_ "GenMsgSendType" STRING;
+
+BA_ "GenMsgCycleTime" BO_ 392 1;
+BA_ "GenMsgSendType" BO_ 392 "cyclic";
+BA_ "GenMsgCycleTime" BO_ 648 1;
+BA_ "GenMsgSendType" BO_ 648 "cyclic";
+BA_ "GenMsgCycleTime" BO_ 1800 100;
+BA_ "GenMsgSendType" BO_ 1800 "cyclic";
+
+BA_DEF_DEF_ "BusType" "";
+BA_DEF_DEF_ "GenMsgCycleTime" 0;
+BA_DEF_DEF_ "GenMsgSendType" "";
