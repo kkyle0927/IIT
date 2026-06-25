@@ -202,7 +202,8 @@ set(SOURCES
     Middlewares/Third_Party/LwIP/src/netif/slipif.c
     Middlewares/Third_Party/LwIP/src/netif/zepif.c
     Middlewares/Third_Party/LwIP/system/OS/sys_arch.c
-    XM_Apps/Control_Task/control_task.c
+    XM_Apps/Control_Task/Basics.c
+    XM_Apps/Control_Task/Dataacq.c
     XM_FW/AGR_MW/BOOT/Src/agr_boot_core.c
     XM_FW/AGR_MW/DOP/Core/agr_od.c
     XM_FW/AGR_MW/DOP/Core/agr_pdo_engine.c
