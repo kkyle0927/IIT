@@ -1,0 +1,89 @@
+# Build output (로컬 빌드 시)
+Debug/
+Release/
+build/
+!**/tools/build/
+
+# 패키징 산출물 — GitHub Release 에 업로드 후 로컬 보관 불필요
+# (tools/package_release.ps1 가 레포 루트에 생성)
+/Rev*.zip
+/AGR_Bootloader.bin
+/SUIT_*.bin
+/SUIT_*.zip
+/ContentsFiles_*.zip
+
+# Claude Code — 개발자 개인 설정 ignore, 학생용 공개 skill 만 추적
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/student-onboard/
+!.claude/skills/example-helper/
+
+# clangd (LSP 인덱스 캐시 & 설정)
+.cache/
+.clangd
+
+# VS Code — 개인 환경 경로 ignore, 템플릿만 추적 (.template 는 추적됨)
+.vscode/settings.json
+
+# docs/ 신규 파일은 PR 단위로 명시적 화이트리스트 (이전 정책 유지)
+docs/*
+!docs/README.md
+!docs/troubleshooting.md
+!docs/student-walkthrough-simulations.md
+!docs/find-it.md
+!docs/release-notes/
+docs/release-notes/*
+!docs/release-notes/README.md
+!docs/release-notes/v2.1.1.md
+!docs/release-notes/v2.2.0.md
+!docs/release-notes/v2.2.1.md
+!docs/getting-started/
+docs/getting-started/*
+!docs/getting-started/00-claude-code-quickstart.md
+!docs/getting-started/01-hardware-setup.md
+!docs/getting-started/02-software-setup.md
+!docs/getting-started/03-first-build.md
+!docs/api-reference/
+docs/api-reference/*
+!docs/api-reference/01-task-state-machine.md
+!docs/api-reference/02-h10-control-n-data.md
+!docs/api-reference/03-led-btn-control.md
+!docs/api-reference/04-external-io.md
+!docs/api-reference/05-usb-connectivity.md
+!docs/api-reference/06-usb-data-logging.md
+!docs/api-reference/07-memory-management.md
+!docs/api-reference/08-rtc-clock.md
+!docs/api-reference/09-task-creation.md
+!docs/api-reference/README.md
+!docs/advanced/
+docs/advanced/*
+!docs/advanced/README.md
+!docs/advanced/ai-data-pipeline.md
+!docs/architecture/
+docs/architecture/*
+!docs/architecture/README.md
+!docs/tutorials/
+docs/tutorials/*
+!docs/tutorials/README.md
+!docs/kit-h10-firmware/
+docs/kit-h10-firmware/*
+!docs/kit-h10-firmware/README.md
+!docs/bootloader/
+docs/bootloader/*
+!docs/bootloader/README.md
+!docs/hardware/
+docs/hardware/*
+!docs/hardware/README.md
+!docs/hardware/external-gpio-rev1.1.md
+!docs/hardware/external-gpio-rev2.0.md
+
+# assets/img/ 는 사용자가 채울 자료. README + 등록된 보드 사진만 추적
+assets/*
+!assets/img/
+assets/img/*
+!assets/img/README.md
+!assets/img/board-photo.png
+!assets/img/rev1.1-photo.png
+!assets/img/rev2.0-photo.png
+build_check/
